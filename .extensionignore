@@ -2,5 +2,10 @@
 tests/
 spec-kit/
 .github/
+.git/
+.agents/
+.codex/
 .gitignore
 .extensionignore
+AGENTS.md
+CLAUDE.md

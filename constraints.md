@@ -1,9 +1,9 @@
 # Personal constraints example — ~/.gatespec/constraints.md
 #
 # Standing user-level constraints, loaded by gatespec.specify / gatespec.plan
-# alongside the project constitution (project constitution wins on conflict).
-# gatespec.plan offers a one-time merge of this file into the project
-# constitution so upstream phases (tasks/implement) also obey it.
+# below project constitution and <repo>/.gatespec/constraints.md. GateSpec
+# snapshots the effective merge in spec.md; it never copies this file into the
+# project constitution. Feature-specific exemptions require explicit approval.
 
 ## Engineering principles
 

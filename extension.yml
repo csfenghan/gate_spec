@@ -3,7 +3,7 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.1.0"
+  version: "0.2.0"
   description: "Human-gated specify/plan workflow: explicit clarification, per-decision design approval, and machine-checked gates before plan/tasks"
   category: "process"
   effect: "read-write"
@@ -12,12 +12,11 @@ extension:
   license: "MIT"
 
 requires:
-  speckit_version: ">=0.16.0"
+  speckit_version: ">=0.16.0,<0.17.0"
   commands:
     - "speckit.tasks"     # downstream convergence point (unchanged, upstream)
-    - "speckit.analyze"   # cross-artifact consistency check used by gatespec.plan
+    - "speckit.analyze"   # unchanged native handoff after speckit.tasks
   scripts:
-    - "check-prerequisites"  # feature dir resolution in gatespec.check
     - "setup-plan"           # reused by gatespec.plan
 
 provides:
@@ -37,18 +36,26 @@ provides:
       description: "Run gate checks (requirements/design) for the current feature"
       aliases: ["gatespec.check"]
 
+    - name: "speckit.gatespec.check-requirements"
+      file: "commands/speckit.gatespec.check-requirements.md"
+      description: "Internal fixed Requirements Gate hook entry"
+
+    - name: "speckit.gatespec.check-design"
+      file: "commands/speckit.gatespec.check-design.md"
+      description: "Internal fixed Design Gate hook entry"
+
 hooks:
   # Fires when the CORE speckit.plan runs on a gatespec-track spec (mixed path).
   # gatespec.plan itself runs the spec check inline at startup.
   before_plan:
-    command: "speckit.gatespec.check"
+    command: "speckit.gatespec.check-requirements"
     optional: false
     description: "Requirements Gate: spec must be Approved-Requirements before planning"
 
   # Fires when core speckit.tasks runs — the mandatory convergence point
   # for both gatespec.plan and core speckit.plan outputs.
   before_tasks:
-    command: "speckit.gatespec.check"
+    command: "speckit.gatespec.check-design"
     optional: false
     description: "Design Gate: plan must be Approved-Design before task generation"
 

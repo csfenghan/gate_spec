@@ -6,6 +6,8 @@
 
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
+**Requirements Content-SHA256**: `[approved spec content hash]`
+
 <!--
   GATESPEC GATE FIELDS (do not remove):
   - **Status** transitions: Draft → Approved-Design (YYYY-MM-DD).
@@ -43,10 +45,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file + user-level constraints
-(~/.gatespec/constraints.md). GATESPEC: every option presented in the
-Decision Log MUST be checked against these constraints; an option that
-violates one must be explicitly flagged as such — never silently dropped.]
+[Gates determined from the spec's frozen Constraint Basis: project
+constitution > project .gatespec/constraints.md > user
+~/.gatespec/constraints.md. Constitution MUST conflicts are not approvable;
+SHOULD deviations require reasons; GateSpec-rule exemptions require an
+explicit Decision Log approval.]
 
 ## Decision Log *(gatespec: mandatory)*
 
@@ -69,13 +72,17 @@ violates one must be explicitly flagged as such — never silently dropped.]
 - **Recommendation**: [A/B] — [reason, incl. constitution-constraint check result]
 - **Approved**: [choice] ([YYYY-MM-DD])
 
+<!-- If no non-trivial design decision exists, replace the D1 example with:
+- None — <specific reason no non-trivial design decision was required>
+-->
+
 ## Design Detailing *(gatespec: mandatory)*
 
 <!--
   GATESPEC: Every dimension MUST have substantive content OR an explicit
   "N/A — <one-line reason>". Silent omission fails the gate.
-  The default dimension list below may be extended/overridden via
-  ~/.gatespec/constraints.md.
+  Constraints may add dimensions, but cannot delete, rename, or replace the
+  six core dimensions below.
 -->
 
 1. **Thread / concurrency model**: [thread ownership, cross-thread data flow, synchronization primitives — or N/A + reason]
@@ -101,7 +108,7 @@ violates one must be explicitly flagged as such — never silently dropped.]
 
 ```text
 specs/[###-feature]/
-├── plan.md              # This file (__SPECKIT_COMMAND_PLAN__ command output)
+├── plan.md              # This file (GateSpec plan output)
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
 ├── quickstart.md        # Phase 1 output
@@ -135,13 +142,13 @@ directories captured above]
 |-----------|------------|-------------------------------------|
 | [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
 
-## Gate Approval *(gatespec: mandatory)*
-
 <!--
-  GATESPEC: Written ONLY on explicit user approval. `Content-SHA256` is the
-  hash of this file with the Gate Approval section blanked out — the design
-  gate fails if content drifts after approval.
+  GATESPEC: Written ONLY on explicit user approval. Gate Approval MUST be the
+  unique final H2 and contain only the two fields below. `Content-SHA256`
+  hashes everything before it.
 -->
+
+## Gate Approval *(gatespec: mandatory)*
 
 - **Approved by user**: [YYYY-MM-DD]
 - **Content-SHA256**: `[64 hex chars]`

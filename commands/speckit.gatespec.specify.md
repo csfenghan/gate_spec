@@ -1,5 +1,5 @@
 ---
-description: "GateSpec gated specify: clarify through one-at-a-time questioning with recommendations, zero auto-inference, explicit user approval before the spec is final."
+description: "GateSpec gated specify: one-at-a-time decisions, frozen constraint basis, safe resume, and explicit requirements approval."
 handoffs:
   - label: Gated Technical Plan
     agent: speckit.gatespec.plan
@@ -12,149 +12,155 @@ handoffs:
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+Recognized workflow flags are `--refresh-constraints`, `--revise`, and
+`--restart`; all remaining text is the feature description. Reject unknown
+flags and reject `--restart` combined with either revision flag.
+Consider non-empty user input before proceeding.
 
-## Core Philosophy (read first — everything below follows from it)
+## Non-negotiable rules
 
-1. **Never guess.** Anything the user has not confirmed stays an explicit
-   `[NEEDS CLARIFICATION: ...]` marker or a proposed default in the
-   Approved Defaults table. "Make an informed guess" is FORBIDDEN in this
-   command, no matter how obvious the answer seems.
-2. **Facts are looked up, not asked.** If a question can be answered by
-   reading the codebase, config, or environment — answer it yourself and
-   state what you found. Only *decisions* go to the user.
-3. **The user approves, you propose.** Every question carries your
-   recommendation with reasoning, so the user can answer with one word.
-4. **One decision at a time.** Never present multiple blocking questions at
-   once. Walk the decision tree branch by branch, resolving dependencies
-   in order.
-5. **No approval, no spec.** Do not write spec content into the file until
-   the user has confirmed shared understanding. Chat is not spec.
+1. Never infer an unapproved decision. Unknowns remain a blocking question
+   or a proposed default. Facts discoverable from the repository are looked
+   up, not asked.
+2. Ask exactly one blocking decision at a time, with 2–4 mutually exclusive
+   options, a recommendation, and the applicable constraint result.
+3. The user approves feature content in exactly three ways: individual
+   decision answers, one batch approval of proposed defaults, and final
+   approval of the compressed artifact summary/diff.
+4. A user saying “done”, “proceed”, or equivalent while any blocking item is
+   unresolved pauses the command. Preserve the Draft and explain the next
+   unresolved item; never seal it.
+5. Once all blocking items and defaults are resolved, write/update the Draft
+   automatically. Do not require a separate “write it” confirmation.
 
-## Setup
+## Step 0: run peer extension hooks
 
-1. **Generate a concise short name** (2-4 words, action-noun format) for the
-   feature from the feature description, e.g. "config-hotreload".
+Inspect `.specify/extensions.yml` and execute registered `before_specify`
+hooks in their declared order. Skip every hook whose command begins with
+`speckit.gatespec.` so GateSpec never calls itself. Respect each hook's
+`optional` behavior and stop on a required hook failure. After successful
+approval, do the same for `after_specify` hooks.
 
-2. **Create the feature directory** following the upstream resolution rules:
-   - Specs live under `specs/` unless the user explicitly provides
-     `SPECIFY_FEATURE_DIRECTORY`.
-   - Check `.specify/init-options.json` for `feature_numbering`:
-     `"timestamp"` → `YYYYMMDD-HHMMSS` prefix; `"sequential"` or absent →
-     next available 3-digit number after scanning `specs/`.
-   - Directory name: `<prefix>-<short-name>`; set
-     `SPECIFY_FEATURE_DIRECTORY=specs/<directory-name>`.
-   - `mkdir -p SPECIFY_FEATURE_DIRECTORY`
-   - Copy `.specify/extensions/gatespec/templates/gatespec-spec-template.md`
-     to `SPECIFY_FEATURE_DIRECTORY/spec.md` (use THIS template by explicit
-     path — never the resolution-stack `spec-template`, which belongs to the
-     upstream auto track).
-   - Persist to `.specify/feature.json`:
-     `{ "feature_directory": "<resolved feature dir>" }`
+## Step 1: resolve or create safely
 
-3. **Load constraints** (both, if present; project constitution wins on
-   conflict):
-   - `.specify/memory/constitution.md` (or `/memory/constitution.md`)
-   - `~/.gatespec/constraints.md` (user-level standing constraints)
+Resolve `.specify/feature.json` (`feature_directory`) first. If no current
+feature exists, create `<prefix>-<2-4-word-action-noun>` under `specs/`, using
+`.specify/init-options.json` numbering (`timestamp` or next three-digit
+`sequential`), copy
+`.specify/extensions/gatespec/templates/gatespec-spec-template.md` (never the
+upstream resolution-stack template), and persist pretty or compact valid JSON
+in feature.json.
 
-## Clarification Protocol (grilling-style)
+If a current GateSpec spec exists:
 
-Scan the feature description and the codebase context for unknowns. Split
-them into two classes:
+- Draft: continue in place. Never recopy the template or discard answers.
+- Valid Approved-Requirements and no workflow flag: keep it read-only, report
+  that it is approved (including any user-constraint drift warning and the
+  `--refresh-constraints` option), and hand off to
+  `__SPECKIT_COMMAND_GATESPEC_PLAN__`.
+- `--revise`: archive an existing `tasks.md` before editing, change Status to
+  Draft, clear Gate Approval, preserve the prior approved snapshot for a diff,
+  and use diff-only re-approval.
+- `--restart`: archive spec.md plus existing plan/design/downstream artifacts
+  (`plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`,
+  `tasks.md`) under the feature's `.gatespec/archive/<timestamp>-restart/`,
+  then rebuild spec.md from the template.
 
-- **Blocking** — the answer changes scope, data structures, interfaces,
-  technology choices, or user-visible behavior. Multiple reasonable
-  interpretations with different implications exist.
-- **Non-blocking** — wording, formatting, routine configuration, or details
-  with a safe conventional default.
+Archive before overwriting or moving any artifact. An invalid Approved
+artifact is not read-only: report the gate failure and require `--revise` or
+`--restart`; never repair approval fields automatically.
 
-### Blocking unknowns: one at a time
+## Step 2: derive and freeze the Constraint Basis
 
-For each blocking unknown, in decision-tree dependency order:
+Automatically read, when present, in this precedence order:
 
-1. State **context** (what you found, with file:line if from the codebase).
-2. Ask **exactly one** question, offering 2-4 mutually exclusive options.
-3. Give your **recommendation** with 1-2 sentences of reasoning, including
-   any constitution/constraints check result.
-4. **Wait** for the user's answer. "yes"/"recommended" accepts your
-   recommendation.
-5. Record the outcome; only then proceed to the next question.
+1. project constitution: `.specify/memory/constitution.md` (highest),
+2. project constraints: `.gatespec/constraints.md`,
+3. user constraints: `~/.gatespec/constraints.md` (lowest).
 
-Keep asking until the decision tree is exhausted or the user signals
-"done / 够了 / proceed". Never batch blocking questions.
+Compute a lowercase SHA-256 for each present source. Merge rules explicitly:
+record every conflict, the winning source, any allowed deviation, and the
+final effective wording in spec.md `## Constraint Basis`. Requirement-impacting
+conclusions must also land in an FR, Acceptance Scenario, Assumption, or scope
+boundary; Constraint Basis alone is not self-containment.
 
-### Non-blocking unknowns: batch defaults table
+- An option conflicting with a constitution `MUST` may be shown but cannot be
+  approved. Amend the constitution in a separate user-directed operation first.
+- A constitution `SHOULD` may be deviated from only with a recorded reason.
+- Project/user GateSpec constraints may be exempted only by an explicit user
+  decision recorded in Clarifications now and later in the plan Decision Log.
+- After Requirements approval the snapshot is frozen. A user-constraints hash
+  change is warning-only; use `--refresh-constraints` to reopen and replace the
+  snapshot. A project constitution change forces requirements re-approval.
+  Treat a changed project constraints file as project policy and likewise
+  reopen approval. Archive stale tasks before reopening.
 
-Present ONCE, after blocking questions (or when the user asks to move on):
+`--refresh-constraints` implies the `--revise` diff flow and recomputes all
+three sources. Never append personal constraints into the constitution.
+
+## Step 3: clarify one decision at a time
+
+Classify each unknown as blocking (changes scope, data, interface, technology,
+or visible behavior) or non-blocking (routine detail with a safe conventional
+default). The user can veto this classification cheaply by pulling any default
+into full discussion.
+
+For each blocking item, in dependency order:
+
+1. State repository facts and the consequence of deciding.
+2. Present 2–4 mutually exclusive options and the constraint result for each.
+3. Recommend one option in 1–2 sentences.
+4. Wait. “recommended” accepts the recommendation.
+5. Record `- Q: ... → A: ...` under a dated Clarifications session.
+
+Then present non-blocking items once as a numbered table. A single explicit
+batch approval accepts them; pulled-out rows become one-at-a-time decisions.
+Record approved rows with `✅ YYYY-MM-DD`.
+
+Use these exact empty states when applicable (a blank section never passes):
 
 ```markdown
-以下 N 项建议默认值，无异议回"过"；要展开讨论的说编号：
-| # | 项 | 建议默认 |
-|---|-----|---------|
-| 1 | ... | ... |
-任何一项都可以要求展开为完整决策讨论。
+- None — <specific reason no blocking clarification was required>
+- None — <specific reason no non-blocking default was required>
 ```
 
-Items the user pulls out become blocking questions (one at a time).
+## Step 4: write and self-check the Draft
 
-### Record everything
+After all blocking/default items are resolved, fill the existing Draft's
+upstream sections: User Scenarios & Testing, Requirements, Success Criteria,
+and Assumptions. Acceptance Scenario lines each carry `(covers FR-xxx)`;
+every unique FR is defined exactly once in Functional Requirements and has at
+least one scenario. Remove all template examples and residual markers.
 
-Every accepted answer — blocking or default — goes into working memory for
-the spec's `## Clarifications` (as `### Session YYYY-MM-DD` with
-`- Q: ... → A: ...` entries) and `## Approved Defaults` rows.
+Perform a fresh-eyes adversarial read for contradictions, terminology drift,
+and hidden guesses. Map every clarification, default, and effective constraint
+to the body. Resolve findings in the text or ask one decision. Run:
 
-## Writing the Spec
+```bash
+bash .specify/extensions/gatespec/scripts/bash/check-gate.sh spec <feature-dir>
+```
 
-Only after the user confirms shared understanding ("写吧 / 可以了 / approve"):
+The command is expected to fail on Draft approval fields; every other failure
+must be resolved before summary approval.
 
-1. Fill the template's upstream sections (User Scenarios & Testing,
-   Requirements, Success Criteria, Assumptions) with the confirmed content.
-   - User stories: prioritized, independently testable, acceptance scenarios
-     tagged `(covers FR-xxx)` so every FR is referenced by ≥1 scenario.
-   - Requirements: testable, unambiguous, technology-agnostic.
-   - Success criteria: measurable, user-focused.
-2. **Self-containment mapping** (mandatory): walk every entry in
-   `## Clarifications` and every `## Approved Defaults` row, and point to
-   where its conclusion lands in the body (FR, scenario, assumption). Any
-   conclusion with no landing spot MUST be written into the body now. A
-   reader who never saw this conversation must be able to implement from
-   spec.md alone.
-3. **Fresh-eyes adversarial read** (mandatory): re-read the whole spec as
-   an implementer who never participated in this conversation. Hunt for:
-   internal contradictions, terminology drift (same thing, two names),
-   places where you would have to guess. Resolve every finding in the text,
-   or present it to the user for explicit acceptance. Log findings as a
-   final `### Session` entry in `## Clarifications`.
-4. **Vague-word lint** (warning): flag occurrences of unquantified wording
-   ("fast", "friendly", "reasonable", "尽量", "合理", ...) to the user.
+## Step 5: Requirements approval
 
-## Approval (the Requirements Gate)
+Present at most 20 lines: goal (≤3 lines), P1 stories, key decisions, approved
+defaults, scope boundaries, and the mandatory line “what I am least confident
+about”. Wait for unambiguous approval. On requested changes, update the Draft
+and show only the diff since the previously shown version.
 
-1. Present a summary of **at most 20 lines**: the goal (≤3 lines), P1 user
-   stories, the key decisions made, explicit scope boundaries, and —
-   mandatory — **"what I am least confident about"** (the one spot most
-   worth the user's scrutiny).
-2. Wait for explicit approval. Silence, "looks good"-adjacent ambiguity, or
-   a change request is NOT approval. If the user requests changes: apply
-   them, and present ONLY the diff since the last shown version.
-3. On explicit approval:
-   - Set `**Status**: Approved-Requirements (YYYY-MM-DD)`
-   - Fill `## Gate Approval`:
-     - `**Approved by user**: YYYY-MM-DD`
-     - `**Content-SHA256**`: compute exactly:
-       `sed '/^## Gate Approval/,$d' spec.md | sha256sum | cut -d' ' -f1`
-       (fallback `shasum -a 256`)
-4. **Post-approval edits**: any later change to spec.md (by anyone) MUST
-   first revert Status to Draft, present the diff, and re-approve. The hash
-   makes drift machine-detectable — never bypass it.
+On explicit approval only:
 
-## Done When
+1. Set `**Status**: Approved-Requirements (YYYY-MM-DD)`.
+2. Ensure `## Gate Approval` is the unique final H2 and contains only:
+   `- **Approved by user**: YYYY-MM-DD` and
+   `- **Content-SHA256**: \`<lowercase 64-hex>\``.
+3. Hash exactly everything before that H2 with
+   `sed '/^## Gate Approval/,$d' spec.md | sha256sum` (macOS fallback:
+   `shasum -a 256`).
+4. Run the requirements checker and do not report completion unless it passes.
 
-- [ ] All blocking decisions answered by the user, one at a time, recorded
-- [ ] Non-blocking defaults batch-approved (or pulled out and discussed)
-- [ ] spec.md complete: upstream sections intact, Clarifications conclusions
-      all landed in body, fresh-eyes read findings resolved
-- [ ] User explicitly approved the ≤20-line summary
-- [ ] Status set, Content-SHA256 recorded
-- [ ] Completion reported: feature dir, spec path, open risks; suggest
-      `__SPECKIT_COMMAND_GATESPEC_PLAN__` as the next step
+Post-approval edits always use Draft + diff re-approval. Report the feature
+path and risks, run peer `after_specify` hooks, then hand off to
+`__SPECKIT_COMMAND_GATESPEC_PLAN__`.

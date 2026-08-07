@@ -1,9 +1,9 @@
 ---
-description: "GateSpec gated plan: every key decision presented with concrete options + trade-offs + recommendation, approved one-by-one by the user before the plan is fixed."
+description: "GateSpec gated plan: concrete per-decision approval, requirements-basis chaining, safe resume, and explicit design approval."
 handoffs:
   - label: Create Tasks
     agent: speckit.tasks
-    prompt: Break the approved plan into tasks
+    prompt: Break the approved plan into tasks, then run analyze before implement.
     send: true
 scripts:
   sh: ../../scripts/bash/setup-plan.sh --json
@@ -16,115 +16,119 @@ scripts:
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+Recognized workflow flags are `--revise` and `--restart`. Reject unknown flags,
+reject using both together, and consider remaining non-empty input.
 
-## Step 0: Requirements Gate (mandatory, blocking)
+## Step 0: Requirements Gate and peer hooks
 
-Run the gate script before doing anything else:
+Run before any planning write:
 
 ```bash
 bash .specify/extensions/gatespec/scripts/bash/check-gate.sh spec
-# fallback path if installed flat: bash .specify/scripts/bash/check-gate.sh spec
 ```
 
-- **Exit 0** → continue. (A spec without the gatespec marker exits 0 with a
-  "skipped" note — that means the user is on the auto track; ask whether they
-  intended the gated plan before proceeding.)
-- **Exit 1** → STOP. Print the failures verbatim, help the user resolve them
-  (usually: return to `__SPECKIT_COMMAND_GATESPEC_SPECIFY__`), and do not
-  proceed with planning.
+Failure blocks planning. A truly unmarked auto-track spec exits silently; in
+that case explain that gated plan requires a GateSpec spec and stop unless the
+user explicitly starts the gated requirements flow.
 
-## Step 1: Load context and constraints
+Inspect `.specify/extensions.yml` and run other extensions' `before_plan`
+hooks in declared order, skipping every `speckit.gatespec.*` hook (the inline
+gate above already covers GateSpec). Respect required/optional failures. Run
+peer `after_plan` hooks only after successful Design approval.
 
-1. Run `{SCRIPT}` from repo root and parse JSON for FEATURE_SPEC, IMPL_PLAN,
-   SPECS_DIR, BRANCH.
-2. Read FEATURE_SPEC fully.
-3. Load constraints (project constitution wins on conflict):
-   - `.specify/memory/constitution.md` (or `/memory/constitution.md`)
-   - `~/.gatespec/constraints.md` (user-level standing constraints)
-4. **Constraint sync offer** (once per project): if
-   `~/.gatespec/constraints.md` exists and the project constitution does not
-   yet contain its content, offer: "检测到个人约束文件，本项目
-   constitution 尚未包含。合并后上游 tasks/implement 也会自动遵守。要合并吗？"
-   On yes, merge it into the project constitution (append under a
-   `## Personal Constraints (via ~/.gatespec)` section). If it was merged
-   before but the files have since diverged, offer a re-sync.
-5. Replace IMPL_PLAN's starting content with the gatespec plan template:
-   copy `.specify/extensions/gatespec/templates/gatespec-plan-template.md`
-   over the plan path given by the script (keep the resolved path).
+## Step 1: load context, constraints, and resume state
 
-## Step 2: Decision protocol (the heart of this command)
+Verify `.specify/scripts/bash/setup-plan.sh` exists, then run `{SCRIPT}` from
+repository root and parse FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, and BRANCH. If
+the required script or fields are missing, stop before writing. Read the approved spec fully. Re-read the current
+constitution, project `.gatespec/constraints.md`, and user constraints, but
+use the spec's frozen `## Constraint Basis` as the requirements contract.
+If the current constitution/project-policy hashes invalidate that contract,
+stop and return to `__SPECKIT_COMMAND_GATESPEC_SPECIFY__`. A changed personal
+constraints file is warning-only until requirements is run with
+`--refresh-constraints`.
 
-Extract every non-trivial decision the design requires (tech stack, module
-structure, concurrency model, interface shapes, error handling strategy,
-testing approach, ...). Then, **one decision at a time**:
+Compute the approved spec content hash using the same scoped formula and write
+it once as `**Requirements Content-SHA256**` in plan.md. This is a load-bearing
+chain: never copy the Gate Approval hash field as a substitute.
 
-1. **Context** — what forces this decision (cite spec FRs / codebase facts).
-2. **≥2 options**, each presented CONCRETELY:
-   - a concrete scenario: a command session, a file tree, a request/flow
-     trace, or a failure-in-the-field picture;
-   - trade-offs as observable behavior ("adding an X requires editing 3
-     files" / "failure mode is silent" — never bare abstractions like
-     "decoupled" or "scalable" without a concrete grounding).
-3. **Constitution check per option**: an option violating any
-   constitution/constraint rule MUST be flagged as such in the presentation
-   (never silently dropped — the user may still choose it with eyes open).
-4. **Recommendation** with 1-2 sentences of reasoning.
-5. **Wait for the user's explicit choice.** Record it in the plan's
-   `## Decision Log` as `### D<n>` with `**Approved**: <choice> (date)`.
+Resume behavior:
 
-An abstract one-line summary MAY follow the concrete presentation, never
-replace it.
+- No plan or an untouched setup output: initialize once from the GateSpec plan
+  template at
+  `.specify/extensions/gatespec/templates/gatespec-plan-template.md`.
+- Draft: continue in place without recopying the template.
+- Valid Approved-Design and no flag: keep every design artifact read-only and
+  hand off to native tasks.
+- `--revise`: archive existing `tasks.md`, change plan Status to Draft, clear
+  Gate Approval, retain a baseline, and use diff-only re-approval.
+- `--restart`: archive plan.md, research.md, data-model.md, contracts/,
+  quickstart.md, and tasks.md under `.gatespec/archive/<timestamp>-restart/`,
+  then initialize a fresh GateSpec plan. Do not alter the approved spec.
 
-## Step 3: Fill the plan artifacts
+Any spec re-approval makes a plan with the old Requirements hash stale. Archive
+tasks and re-plan; never continue executing stale tasks.
 
-Following the upstream Phase 0/1 workflow (research.md, data-model.md,
-contracts/, quickstart.md as applicable), with these gatespec additions:
+## Step 2: approve design decisions one at a time
 
-1. **Design Detailing — six dimensions** (each: substantive content or an
-   explicit `N/A — <reason>`; silent omission is a gate failure):
-   thread/concurrency model · object lifetimes & ownership · key modules &
-   classes · key internal APIs & interactions · external interface behavior
-   contracts · setup/runtime/teardown phase interactions.
-   (The user may extend/override this list via `~/.gatespec/constraints.md`.)
-2. **Bidirectional traceability**: every spec FR must have a technical home
-   in the design; every design element must trace back to an FR or an
-   approved decision — flag and remove gold-plating the user never asked for.
-3. **Implementer's walkthrough** (mandatory): play an implementer who has
-   only spec.md + these artifacts and never joined the discussion. Simulate
-   starting the work — "where does the first file go, what library do I
-   import, what happens on this error path?" Every non-trivial fork without
-   a signpost is a HOLE. Close each hole: a new Decision Log entry (user
-   approves) or an explicit entry in `## Implementation Freedoms` with
-   constraints. Log the walkthrough findings at the end of the Decision Log.
-4. **Cross-artifact consistency**: run `__SPECKIT_COMMAND_ANALYZE__` (if
-   available) and resolve or explicitly get user acceptance for its findings.
-5. quickstart.md must give a runnable end-to-end validation path per P1
-   user story.
+Extract every non-trivial design decision. For each, present and wait before
+the next:
 
-## Step 4: Approval (the Design Gate)
+1. Context citing FRs, constraint sources, and repository facts.
+2. At least two options, each grounded in a concrete command session, file
+   tree, request/flow trace, or field failure; state trade-offs as observable
+   behavior.
+3. Constraint result per option. A constitution `MUST` conflict is not
+   approvable without a separate constitution amendment; a `SHOULD` deviation
+   needs a recorded reason; a GateSpec constraint exemption needs an explicit
+   approval in this Decision Log.
+4. A 1–2 sentence recommendation.
+5. The user's explicit choice, recorded under exact heading
+   `### D<n>: <topic>` with one `**Approved**: <choice> (YYYY-MM-DD)`.
 
-1. Present a summary of **at most 20 lines**: chosen technical approach, the
-   approved decisions list, explicit implementation freedoms, validation
-   approach — and, mandatory, **"what I am least confident about"**.
-2. Wait for explicit approval. Change requests → apply, then present ONLY
-   the diff since the last shown version.
-3. On explicit approval:
-   - Set `**Status**: Approved-Design (YYYY-MM-DD)` in plan.md
-   - Fill plan.md's `## Gate Approval` (date + Content-SHA256), computing:
-     `sed '/^## Gate Approval/,$d' plan.md | sha256sum | cut -d' ' -f1`
-4. Post-approval edits to plan.md follow the same revert-to-Draft +
-   diff re-approval rule as the spec.
+Use unique numeric IDs. If no non-trivial decision exists, write exactly one:
 
-## Done When
+```markdown
+- None — <specific reason no non-trivial design decision was required>
+```
 
-- [ ] Requirements Gate passed (script exit 0)
-- [ ] Every key decision user-approved in the Decision Log (concrete
-      presentation, constitution-checked options, recommendation given)
-- [ ] Six Design Detailing dimensions addressed or explicitly N/A
-- [ ] Implementer's walkthrough done; holes closed via decisions or
-      explicit Implementation Freedoms
-- [ ] FR traceability verified both directions; analyze findings resolved
-- [ ] User explicitly approved the summary; Status + Content-SHA256 recorded
-- [ ] Completion reported; suggest `__SPECKIT_COMMAND_TASKS__` (the gates
-      wired into core tasks will re-verify before task generation)
+## Step 3: fill plan and design attachments
+
+Follow upstream Phase 0/1 artifact formats. The six core Design Detailing
+dimensions are mandatory, exact, and unique: thread/concurrency; object
+lifetime/ownership; modules/classes; internal APIs/interactions; external
+behavior contracts; setup/runtime/teardown. Constraints may add dimensions
+but cannot remove, rename, or replace these six. Each needs substantive text
+or `N/A — <reason>` / `无额外约束 — <原因>`.
+
+Ensure every FR has a technical home and every design element traces to an FR
+or approved decision. Remove unapproved gold-plating. Conduct an implementer's
+walkthrough using only spec + design artifacts; close every non-trivial fork
+with a Decision Log approval or bounded Implementation Freedom. quickstart.md
+must provide a runnable end-to-end validation path for each P1 story.
+
+Immediately before the final summary, internally compare spec.md, plan.md,
+research.md, data-model.md, contracts/, and quickstart.md for terminology,
+interfaces, constraints, traceability, and contradictions. Resolve findings
+or obtain the appropriate decision approval. Do **not** call upstream analyze
+during plan: native analyze belongs after tasks, when tasks.md exists.
+
+## Step 4: Design approval
+
+Present at most 20 lines: technical approach, approved decisions, explicit
+implementation freedoms, validation approach, and mandatory “what I am least
+confident about”. Wait for unambiguous approval. Changes produce a diff-only
+re-approval round.
+
+On explicit approval only:
+
+1. Set `**Status**: Approved-Design (YYYY-MM-DD)`.
+2. Ensure `## Gate Approval` is the unique final H2 and contains only the user
+   approval date and lowercase Content-SHA256 fields.
+3. Hash exactly the content before Gate Approval using sha256sum, with macOS
+   `shasum -a 256` fallback.
+4. Run `check-gate.sh design <feature-dir>` and resolve every structural error.
+
+Run peer `after_plan` hooks, report completion, then follow the unchanged native
+sequence: `__SPECKIT_COMMAND_TASKS__` → `__SPECKIT_COMMAND_ANALYZE__` →
+`__SPECKIT_COMMAND_IMPLEMENT__`. GateSpec adds no tasks or implement command.

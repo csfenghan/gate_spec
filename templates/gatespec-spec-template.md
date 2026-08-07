@@ -31,6 +31,10 @@
 
 - Q: [question asked] → A: [user's final answer]
 
+<!-- If no clarification was needed, replace the session and example with:
+- None — <specific reason no blocking decision was required>
+-->
+
 ## Approved Defaults *(gatespec: mandatory)*
 
 <!--
@@ -43,6 +47,26 @@
 | # | Item | Approved Default | Approved |
 |---|------|------------------|----------|
 | 1 | [item] | [default value] | ✅ [YYYY-MM-DD] |
+
+<!-- If no default was proposed, replace the table with:
+- None — <specific reason no non-blocking default was required>
+-->
+
+## Constraint Basis *(gatespec: mandatory)*
+
+<!--
+  Freeze the inputs used to derive this specification. Merge priority is:
+  constitution > project GateSpec constraints > user GateSpec constraints.
+  Use `absent` for a missing source; otherwise record its lowercase SHA-256.
+  Conclusions that affect requirements must also land in an FR, scenario,
+  Assumption, or explicit scope boundary.
+-->
+
+- **Project constitution**: [source path or absent] — SHA-256: `[hash or absent]`
+- **Project GateSpec constraints**: [source path or absent] — SHA-256: `[hash or absent]`
+- **User GateSpec constraints**: [source path or absent] — SHA-256: `[hash or absent]`
+- **Effective constraints**: [ordered effective rules, including approved exemptions]
+- **Conflicts and resolutions**: [each conflict and winning rule, or None — reason]
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -123,14 +147,13 @@ while any marker remains.*
 - [Assumption about target users, e.g., "Users have stable internet connectivity"]
 - [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
 
-## Gate Approval *(gatespec: mandatory)*
-
 <!--
   GATESPEC: Written ONLY on explicit user approval of the ≤20-line summary
-  (or of a diff round). `Content-SHA256` is the hash of this file with the
-  Gate Approval section blanked out — the gate fails if content drifts after
-  approval. Format:
+  (or of a diff round). Gate Approval MUST be the unique final H2 and contain
+  only the two fields below. `Content-SHA256` hashes everything before it.
 -->
+
+## Gate Approval *(gatespec: mandatory)*
 
 - **Approved by user**: [YYYY-MM-DD]
 - **Content-SHA256**: `[64 hex chars]`

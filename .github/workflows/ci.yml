@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  bash-and-smoke:
+    name: ${{ matrix.os }} Bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install ShellCheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+
+      - name: Syntax, ShellCheck, fixtures, renderer, and install smoke
+        run: bash tests/run-all.sh
+
+      - name: Tests leave the worktree clean
+        run: test -z "$(git status --porcelain)"

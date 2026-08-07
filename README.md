@@ -1,106 +1,129 @@
 # GateSpec
 
-Human-gated Spec-Driven Development for coding agents — a lightweight
-[spec-kit](https://github.com/github/spec-kit) **extension** (not a fork)
-that puts explicit human approval gates on the requirements and design
-phases, while leaving tasks/implementation untouched.
+GateSpec 0.2.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+extension that puts explicit human approval gates on requirements and design.
+It does not fork or modify upstream commands.
 
-Philosophy: **human-led constraints · low auto-inference · discuss before
-execute · bounded presentation**.
+Its operating principles are human-led constraints, low auto-inference,
+discussion before execution, bounded review artifacts, and concrete design
+options.
 
-## Dual tracks
+## Two paths, one downstream workflow
 
-| Track | Flow | Use for |
-|-------|------|---------|
-| Auto (upstream, untouched) | `/speckit.specify → /speckit.plan → /speckit.tasks → /speckit.implement` | exploratory, mechanical changes |
-| Gated (GateSpec) | `/gatespec.specify → /gatespec.plan → /speckit.tasks → /speckit.implement` | anything that matters |
+| Path | Workflow |
+|---|---|
+| Upstream auto path | `speckit.specify → speckit.plan → speckit.tasks → speckit.analyze → speckit.implement` |
+| GateSpec path | `gatespec.specify → gatespec.plan → speckit.tasks → speckit.analyze → speckit.implement` |
 
-Both tracks share artifact formats and converge at upstream `speckit.tasks`.
-When in doubt, go gated.
+The paths converge at native `speckit.tasks`; GateSpec adds no gated tasks or
+implement command. A gated spec is identified only by
+`<!-- path: gatespec -->` on line 1. Completely unmarked specs make the gate
+checker exit successfully with no output, so upstream behavior stays untouched.
+A displaced marker is treated as a damaged gated artifact and fails.
 
-## What the gates enforce
+## What is approved
 
-**Requirements Gate** (`gatespec.specify`):
-grilling-style clarification (facts looked up, decisions asked one at a
-time with recommendations; no informed guesses), batch-approved defaults,
-fresh-eyes self-review, explicit approval of a ≤20-line summary that
-includes "what I'm least confident about".
+Feature content has exactly three human approval mechanisms:
 
-**Design Gate** (`gatespec.plan`):
-every key decision presented with ≥2 concrete options + trade-offs +
-recommendation and approved individually; six design detailing dimensions
-(thread model, object lifetimes, key classes, key APIs, external contracts,
-setup/runtime/teardown); implementer's walkthrough to eliminate silent
-gaps; explicit approval.
+1. an answer to each blocking requirements/design decision;
+2. one batch approval for proposed non-blocking defaults;
+3. final approval of a ≤20-line Requirements or Design summary (or a diff on
+   revision), including “what I am least confident about”.
 
-**Approval-as-snapshot**: approvals record a content hash; any post-approval
-edit fails the gate until re-approved via diff.
+“Done” cannot seal a Draft while blocking items remain. When blocking items and
+defaults are complete, the agent writes the Draft automatically. Empty
+Clarifications, Defaults, and Decision Log sections use explicit
+`None — <reason>` records; blank sections never pass.
 
-Machine checks (`check-gate.sh`) are wired through official extension hooks
-(`before_plan`, `before_tasks`) and also block the mixed path
-(gated spec + core plan, or gated plan + core tasks). Specs without the
-`<!-- path: gatespec -->` marker are skipped silently — the auto track is
-never disturbed.
+Requirements approval records a content SHA-256. Design records both its own
+approval hash and the exact approved Requirements content hash. A changed spec
+therefore invalidates an old plan, and revision/restart archives stale tasks.
 
-## Install (personal use)
+## Constraints
 
-The repo provides its own installer; the repo is the single source of truth
-(keep it in place — skills reference it by absolute path).
+Both gated phases load and explicitly merge:
+
+1. project constitution (`.specify/memory/constitution.md`),
+2. project GateSpec constraints (`.gatespec/constraints.md`),
+3. user GateSpec constraints (`~/.gatespec/constraints.md`).
+
+Higher entries win. The spec's `Constraint Basis` records source hashes,
+effective rules, conflicts, and resolutions. Constitution `MUST` conflicts
+cannot be approved inside a feature; `SHOULD` deviations require a reason.
+Project/user GateSpec rules can be exempted only by an explicit decision.
+
+The approved Requirements snapshot freezes its basis. A changed user file is a
+warning until `--refresh-constraints`; a changed constitution or project
+policy forces Requirements re-approval. GateSpec never silently copies user
+constraints into the constitution.
+
+## Safe resume controls
+
+- default: continue a Draft in place; keep a valid approved artifact read-only;
+- `--revise`: reopen as Draft, archive tasks, and use diff re-approval;
+- `--restart`: archive current phase/downstream artifacts, then rebuild from
+  the GateSpec template;
+- `--refresh-constraints` (specify): recompute the frozen basis and enter the
+  revision flow.
+
+Design always covers six core dimensions (concurrency, lifetime/ownership,
+modules/classes, internal APIs, external behavior, lifecycle). Constraints may
+add dimensions but cannot remove or replace them. Before Design summary the
+agent performs an internal spec/design-attachment consistency check. Native
+`speckit.analyze` runs after tasks.md exists.
+
+## Install
+
+Supported shells are Linux and macOS Bash. On Windows, use WSL or Git Bash.
 
 ```bash
-# Global install (default): skills → ~/.claude/skills/ + ~/.agents/skills/,
-# personal constraints → ~/.gatespec/constraints.md
+# Global Claude + Codex skills and user constraints
 ./install.sh
 
-# Global install + project wiring (auto-gate hooks for core speckit commands):
-./install.sh /path/to/a/spec-kit/project
+# Also register the extension and fixed hooks in an initialized project
+./install.sh /path/to/spec-kit-project
 
-# Options: --agent claude|codex|all   --force (overwrite local constraints edits)
+# Options
+./install.sh --agent claude|codex|all [--force] [project-dir]
 ```
 
-After the global install, the skills are available in **every** project with
-zero per-project setup. The project wiring (second form) only adds the
-`before_plan` / `before_tasks` auto-gates for the mixed path (core
-`speckit.plan` / `speckit.tasks` acting on gated artifacts) — the gated
-commands enforce the gates inline regardless.
+Arguments are validated before writes. Skills are rendered atomically with
+agent-specific command references and absolute paths back to this repository.
+Keep the repository in place. Global skills are available everywhere, but the
+complete plan/tasks workflow requires a project initialized by spec-kit.
 
-Uninstall: remove `~/.claude/skills/speckit-gatespec-*`,
-`~/.agents/skills/speckit-gatespec-*`, and (optionally) `~/.gatespec/`;
-in wired projects run `specify extension remove gatespec`.
+`--force` replaces a locally changed `~/.gatespec/constraints.md` only after
+keeping a timestamped backup. Without it, the installed personal copy is left
+untouched.
 
-## Commands
+Skill-mode invocation is `/speckit-gatespec-specify` for Claude and
+`$speckit-gatespec-specify` for Codex. Command-mode aliases such as
+`/gatespec.specify` remain available where upstream renders aliases.
 
-| Command | Purpose |
-|---------|---------|
-| `speckit.gatespec.specify` | gated requirements |
-| `speckit.gatespec.plan` | gated design |
-| `speckit.gatespec.check` | run gate checks manually |
+## Machine gates and hooks
 
-Invocation names depend on the agent's registration mode: on skills-mode
-agents (e.g. Claude Code) commands render as skills — invoke
-`/speckit-gatespec-specify` etc. On commands-mode agents the declared
-aliases also work: `/gatespec.specify`, `/gatespec.plan`, `/gatespec.check`.
-(Skills-mode aliases are a known upstream limitation.)
+The public manual entry remains `speckit.gatespec.check [spec|design]`.
+Hooks never infer mode:
 
-## Personal constraints
+- `before_plan` → `speckit.gatespec.check-requirements`;
+- `before_tasks` → `speckit.gatespec.check-design`.
 
-Standing personal constraints (coding standards, design principles) live in
-**`constraints.md` at this repo's root** — edit it here; `install.sh` syncs
-it to `~/.gatespec/constraints.md` (local edits are preserved unless
-`--force`, with a timestamped backup). Both gated commands load it next to
-the project constitution, and `gatespec.plan` offers a one-time merge into
-the project constitution so upstream phases obey it too.
-
-## Docs
-
-- [Gate protocol (full spec)](docs/gate-protocol.md)
-- [Upstream sync policy](docs/upstream-sync.md)
+Gated specify/plan also run other extensions' same-phase before/after hooks,
+skipping GateSpec's own entries to avoid recursion.
 
 ## Development
 
 ```bash
-bash tests/run-tests.sh   # fixture tests for the gate script
+bash tests/run-all.sh
 ```
+
+This runs Bash syntax checks, ShellCheck, deterministic checker fixtures,
+Claude/Codex renderer checks, manifest checks, and an extension-install smoke
+test when the `specify` CLI is available. Ubuntu and macOS CI run the same
+suite and assert that it leaves the worktree clean.
+
+See [the full gate protocol](docs/gate-protocol.md) and
+[the upstream compatibility ritual](docs/upstream-sync.md).
 
 ## License
 
