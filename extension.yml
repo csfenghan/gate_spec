@@ -1,0 +1,60 @@
+schema_version: "1.0"
+
+extension:
+  id: "gatespec"
+  name: "GateSpec"
+  version: "0.1.0"
+  description: "Human-gated specify/plan workflow: explicit clarification, per-decision design approval, and machine-checked gates before plan/tasks"
+  category: "process"
+  effect: "read-write"
+  author: "harry.feng"
+  repository: "https://github.com/harryfeng/gatespec"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=0.16.0"
+  commands:
+    - "speckit.tasks"     # downstream convergence point (unchanged, upstream)
+    - "speckit.analyze"   # cross-artifact consistency check used by gatespec.plan
+  scripts:
+    - "check-prerequisites"  # feature dir resolution in gatespec.check
+    - "setup-plan"           # reused by gatespec.plan
+
+provides:
+  commands:
+    - name: "speckit.gatespec.specify"
+      file: "commands/speckit.gatespec.specify.md"
+      description: "Gated specify: grilling-style clarification, no auto-inference, explicit user approval"
+      aliases: ["gatespec.specify"]
+
+    - name: "speckit.gatespec.plan"
+      file: "commands/speckit.gatespec.plan.md"
+      description: "Gated plan: per-decision options with concrete scenarios, user-approved Decision Log"
+      aliases: ["gatespec.plan"]
+
+    - name: "speckit.gatespec.check"
+      file: "commands/speckit.gatespec.check.md"
+      description: "Run gate checks (requirements/design) for the current feature"
+      aliases: ["gatespec.check"]
+
+hooks:
+  # Fires when the CORE speckit.plan runs on a gatespec-track spec (mixed path).
+  # gatespec.plan itself runs the spec check inline at startup.
+  before_plan:
+    command: "speckit.gatespec.check"
+    optional: false
+    description: "Requirements Gate: spec must be Approved-Requirements before planning"
+
+  # Fires when core speckit.tasks runs — the mandatory convergence point
+  # for both gatespec.plan and core speckit.plan outputs.
+  before_tasks:
+    command: "speckit.gatespec.check"
+    optional: false
+    description: "Design Gate: plan must be Approved-Design before task generation"
+
+tags:
+  - "sdd"
+  - "human-gate"
+  - "requirements"
+  - "design-review"
+  - "workflow"

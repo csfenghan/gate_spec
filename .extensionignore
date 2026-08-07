@@ -1,0 +1,6 @@
+# Development-only files excluded from `specify extension add` installs
+tests/
+spec-kit/
+.github/
+.gitignore
+.extensionignore
