@@ -1,32 +1,27 @@
-# Personal constraints example — ~/.gatespec/constraints.md
+# 个人约束示例 — ~/.gatespec/constraints.md
 #
-# Standing user-level constraints, loaded by gatespec.specify / gatespec.plan
-# below project constitution and <repo>/.gatespec/constraints.md. GateSpec
-# snapshots the effective merge in spec.md; it never copies this file into the
-# project constitution. Feature-specific exemptions require explicit approval.
+# 由 gatespec.specify / gatespec.plan 自动加载，优先级低于项目宪法和
+# <repo>/.gatespec/constraints.md。有效结果只快照到 spec.md，不写入项目宪法；
+# 特性级豁免必须获得用户明确批准。
 
-## Engineering principles
+## 文档语言
 
-1. **No over-design for unreachable error paths.** Error cases that are
-   theoretically near-impossible and whose trigger would itself indicate a
-   design error are acceptable as-is — do not build complex fallback
-   mechanisms for them.
+1. **Constraint Basis 正文使用中文。** 固定英文标题与字段名，以及路径、哈希、
+   API 和代码标识符保持原样；更高优先级约束要求其他语言时，按优先级执行并记录冲突。
 
-2. **Tests must not pollute production APIs.** Tests may drive improvements
-   to module boundaries, dependency graphs, and observability — but do NOT
-   add production APIs, states, branches, or behaviors that have no real
-   business use just for testing. Test control needs should be met through
-   existing public contracts, dependency injection, or test-side doubles.
+## 工程原则
 
-## C++ coding standards
+2. **不为不可达错误路径过度设计。** 理论上几乎不可能、且触发即表示设计错误的场景，
+   无需增加复杂兜底机制。
+3. **测试不得污染生产 API。** 不为测试新增无业务价值的 API、状态、分支或行为；优先使用
+   现有契约、依赖注入或测试替身。
 
-3. **One class per file pair.** Every class gets its own `.h` and `.cpp`;
-   never host multiple class implementations in one source file.
+## C++ 规范
 
-4. **Google C++ Style.** Follow the Google C++ Style Guide.
+4. **每个类独占一组文件。** 每个类分别使用自己的 `.h` 和 `.cpp`，不在同一源文件中实现多个类。
+5. **遵循 Google C++ Style Guide。**
 
-## Design detailing expectations (extends the gatespec six dimensions)
+## 设计细化
 
-Designs should spell out: thread model, memory/object lifetimes, key module
-classes, key APIs and their interactions, external interface behavior, and
-setup/runtime/teardown phase interactions.
+6. **补充六项核心维度。** 设计须明确线程模型、内存/对象生命周期、关键模块与类、关键 API
+   及其交互、外部接口行为，以及初始化/运行/销毁阶段的交互。

@@ -145,6 +145,12 @@ seal "$TEST_TMP/good/plan.md"
 expect pass spec "$TEST_TMP/good" "approved requirements pass"
 expect pass design "$TEST_TMP/good" "approved requirements and design pass"
 
+clone_good chinese-constraint-basis
+rewrite "$TEST_TMP/chinese-constraint-basis/spec.md" 's/portable watcher; connections remain active\./必须使用可移植的监视机制，并保持现有连接。/'
+rewrite "$TEST_TMP/chinese-constraint-basis/spec.md" 's/None — sources do not conflict\./无 — 约束源之间不存在冲突。/'
+seal "$TEST_TMP/chinese-constraint-basis/spec.md"
+expect pass spec "$TEST_TMP/chinese-constraint-basis" "Chinese Constraint Basis values pass"
+
 # Track marker and feature resolution ---------------------------------------
 mkdir -p "$TEST_TMP/auto"
 printf '# Upstream spec\n**Status**: Draft\n' > "$TEST_TMP/auto/spec.md"
@@ -236,6 +242,11 @@ seal "$TEST_TMP/date-mismatch/spec.md"
 expect fail spec "$TEST_TMP/date-mismatch" "status and user approval dates must agree" "does not match Approved by user"
 
 # Requirements section scoping and empty states -----------------------------
+clone_good chinese-constraint-placeholder
+rewrite "$TEST_TMP/chinese-constraint-placeholder/spec.md" 's/portable watcher; connections remain active\./[按优先级排列的中文有效约束，包含已批准的豁免]/'
+seal "$TEST_TMP/chinese-constraint-placeholder/spec.md"
+expect fail spec "$TEST_TMP/chinese-constraint-placeholder" "Chinese Constraint Basis placeholder fails" "still contains placeholders"
+
 clone_good placeholder-clarification
 rewrite "$TEST_TMP/placeholder-clarification/spec.md" 's/Replace values without dropping connections./[NEEDS CLARIFICATION: reload scope]/'
 seal "$TEST_TMP/placeholder-clarification/spec.md"

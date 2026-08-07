@@ -29,6 +29,14 @@ descending priority. `Constraint Basis` freezes each source hash, all effective
 rules, and every conflict resolution. A constraint conclusion that changes the
 feature must also appear in an FR, scenario, Assumption, or scope boundary.
 
+The heading and five field labels are fixed English protocol tokens. Unless a
+higher-priority effective constraint requires another language, every
+human-readable field value is written in Simplified Chinese while `absent`,
+paths, hashes, API names, and code identifiers remain verbatim. A winning
+higher-priority language rule is recorded as a conflict resolution. This is a
+prompt rule rather than a language gate, so existing approved English snapshots
+remain valid and read-only.
+
 - A constitution `MUST` conflict may be shown as an option but cannot be
   approved. Constitution amendment is an independent operation.
 - A constitution `SHOULD` deviation needs a recorded reason.

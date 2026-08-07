@@ -84,6 +84,13 @@ final effective wording in spec.md `## Constraint Basis`. Requirement-impacting
 conclusions must also land in an FR, Acceptance Scenario, Assumption, or scope
 boundary; Constraint Basis alone is not self-containment.
 
+Keep the `## Constraint Basis` heading and its five template field labels
+exactly in English. Unless a higher-priority effective constraint requires a
+different language, write every human-readable field value in Simplified
+Chinese. Preserve `absent`, paths, SHA-256 values, API names, and code
+identifiers verbatim. If a higher-priority language rule wins, record that
+conflict and its resolution explicitly.
+
 - An option conflicting with a constitution `MUST` may be shown but cannot be
   approved. Amend the constitution in a separate user-directed operation first.
 - A constitution `SHOULD` may be deviated from only with a recorded reason.

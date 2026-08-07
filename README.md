@@ -52,6 +52,12 @@ effective rules, conflicts, and resolutions. Constitution `MUST` conflicts
 cannot be approved inside a feature; `SHOULD` deviations require a reason.
 Project/user GateSpec rules can be exempted only by an explicit decision.
 
+The `Constraint Basis` heading and its five field labels remain fixed English
+protocol tokens. Human-readable values use Simplified Chinese unless a
+higher-priority effective constraint requires another language; paths, hashes,
+and technical identifiers remain verbatim, and any override is recorded as a
+conflict resolution.
+
 The approved Requirements snapshot freezes its basis. A changed user file is a
 warning until `--refresh-constraints`; a changed constitution or project
 policy forces Requirements re-approval. GateSpec never silently copies user

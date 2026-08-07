@@ -232,7 +232,7 @@ check_constraint_basis() {
       missing=1
     fi
   done
-  if grep -E '\[(source|hash|effective|conflict|constraint)' "$body" >/dev/null 2>&1; then
+  if grep -E '\[(source|hash|effective|conflict|constraint|源路径|哈希|按优先级|用中文)' "$body" >/dev/null 2>&1; then
     fail "spec.md: Constraint Basis still contains placeholders"
     missing=1
   fi

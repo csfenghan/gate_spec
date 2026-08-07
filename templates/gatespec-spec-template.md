@@ -55,18 +55,19 @@
 ## Constraint Basis *(gatespec: mandatory)*
 
 <!--
-  Freeze the inputs used to derive this specification. Merge priority is:
-  constitution > project GateSpec constraints > user GateSpec constraints.
-  Use `absent` for a missing source; otherwise record its lowercase SHA-256.
-  Conclusions that affect requirements must also land in an FR, scenario,
-  Assumption, or explicit scope boundary.
+  固化生成本规格时使用的约束源，合并优先级为：
+  constitution > project GateSpec constraints > user GateSpec constraints。
+  缺失的约束源写 `absent`，否则记录其小写 SHA-256。
+  标题与五个字段名是固定英文协议标记；除非更高优先级约束要求其他语言，
+  其余可读字段值统一使用简体中文。路径、哈希和技术标识符保持原样。
+  影响需求的结论还必须写入 FR、场景、Assumption 或明确的范围边界。
 -->
 
-- **Project constitution**: [source path or absent] — SHA-256: `[hash or absent]`
-- **Project GateSpec constraints**: [source path or absent] — SHA-256: `[hash or absent]`
-- **User GateSpec constraints**: [source path or absent] — SHA-256: `[hash or absent]`
-- **Effective constraints**: [ordered effective rules, including approved exemptions]
-- **Conflicts and resolutions**: [each conflict and winning rule, or None — reason]
+- **Project constitution**: [源路径或 absent] — SHA-256: `[哈希或 absent]`
+- **Project GateSpec constraints**: [源路径或 absent] — SHA-256: `[哈希或 absent]`
+- **User GateSpec constraints**: [源路径或 absent] — SHA-256: `[哈希或 absent]`
+- **Effective constraints**: [按优先级排列的中文有效约束，包含已批准的豁免]
+- **Conflicts and resolutions**: [用中文逐项记录冲突、胜出规则与原因，或 无 — 原因]
 
 ## User Scenarios & Testing *(mandatory)*
 

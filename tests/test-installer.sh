@@ -70,6 +70,20 @@ codex_plan="$RENDER_HOME/.agents/skills/speckit-gatespec-plan/SKILL.md"
 claude_spec="$RENDER_HOME/.claude/skills/speckit-gatespec-specify/SKILL.md"
 codex_spec="$RENDER_HOME/.agents/skills/speckit-gatespec-specify/SKILL.md"
 dollar='$'
+if cmp -s "$REPO/constraints.md" "$RENDER_HOME/.gatespec/constraints.md" &&
+   grep -F '**Constraint Basis 正文使用中文。**' "$RENDER_HOME/.gatespec/constraints.md" >/dev/null; then
+  ok "installed personal constraints exactly match the Chinese repository source"
+else
+  not_ok "installed personal constraints content"
+fi
+
+if grep -F 'write every human-readable field value in Simplified' "$claude_spec" >/dev/null &&
+   grep -F 'write every human-readable field value in Simplified' "$codex_spec" >/dev/null; then
+  ok "rendered specify skills require Chinese Constraint Basis values"
+else
+  not_ok "rendered Constraint Basis language rule"
+fi
+
 if grep -F '/speckit-tasks' "$claude_plan" >/dev/null &&
    grep -F '/speckit-gatespec-plan' "$claude_spec" >/dev/null &&
    grep -F "${dollar}speckit-tasks" "$codex_plan" >/dev/null &&
