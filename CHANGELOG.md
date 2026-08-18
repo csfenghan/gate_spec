@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 (2026-08-18)
+
+- Added an approved `Implementation Review Contract` with exact checkpoint,
+  isolation, parallelism, local-Git, test-mapping, final-validation, and
+  two-remediation-round limits.
+- Kept the native `speckit.tasks → speckit.analyze → speckit.implement`
+  sequence while adding required `after_tasks`, `after_analyze`,
+  `before_implement`, and `after_implement` structure/receipt hooks.
+- Added explicit non-parallel `REV-FOUNDATION`, per-story, and REV-FINAL task
+  checkpoints plus the independent REV-TASKS pre-implementation review.
+- Added request → verdict → PASS-only seal artifacts under feature-local review
+  roots, with deterministic upstream/subject hashes and stale-review blocking.
+- Split implementation PASS enforcement into a dirty precommit candidate check
+  and a clean, tracked postcommit final check.
+- Required fresh reviewer context, prohibited same-context fallback, retained a
+  manual new-session fallback for integrations without isolation support, and
+  documented that session identity is procedural rather than cryptographic.
+- Required clean feature branches and local checkpoint commits while forbidding
+  review commands from pushing.
+- Made old Approved-Design plans without the review contract enter archived
+  diff-revision instead of silently continuing downstream.
+
 ## 0.2.0 (2026-08-07)
 
 - Rebuilt the checker around section-scoped, portable parsing: strict line-1

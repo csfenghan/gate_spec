@@ -102,6 +102,41 @@ explicit Decision Log approval.]
 
 - [choice left open] — constraints: [boundaries the implementer must respect]
 
+## Implementation Review Contract *(gatespec: mandatory)*
+
+<!--
+  GATESPEC: This contract is approved as Design content and is consumed by
+  native speckit.tasks / speckit.implement plus GateSpec hook checks.
+  - Replace REV-US<n> with one checkpoint per actual user-story phase.
+  - Each Required Checkpoint has exactly one mapping row.
+  - Native tasks must end the corresponding phase with one non-[P] task whose
+    description contains all three literal elements, preferably as:
+      GateSpec review checkpoint <REV-ID>: run
+      speckit.gatespec.review-implementation --scope <REV-ID>; require
+      .gatespec/reviews/<REV-ID>/seal.md before continuing.
+  - REV-FINAL reviews the complete feature diff and is never satisfied by
+    aggregating earlier stage receipts.
+-->
+
+- **Protocol Version**: `1`
+- **Required Checkpoints**: `[REV-FOUNDATION, REV-US<n>..., REV-FINAL — replace with actual IDs]`
+- **Review Root**: `.gatespec/reviews`
+- **Task Review**: `REV-TASKS after speckit.analyze; PASS required before speckit.implement`
+- **Reviewer Isolation**: `fresh-context-required; manual-new-session-on-unavailable; same-context-forbidden`
+- **Parallel Policy**: `same-phase-disjoint-only; join-before-review; cross-checkpoint-forbidden`
+- **Git Policy**: `clean-feature-branch; local-checkpoint-commits; no-push`
+- **Remediation Limit**: `2`
+
+### Checkpoint Test Mapping
+
+| Checkpoint | Required test command(s) |
+|------------|--------------------------|
+| REV-FOUNDATION | [exact command(s) that validate the foundation checkpoint] |
+| REV-US<n> | [exact command(s) for this user-story checkpoint] |
+| REV-FINAL | [exact command(s) for the complete feature] |
+
+- **Final Validation**: `[non-empty end-to-end validation that covers the complete approved feature]`
+
 ## Project Structure
 
 ### Documentation (this feature)
@@ -113,7 +148,9 @@ specs/[###-feature]/
 ├── data-model.md        # Phase 1 output
 ├── quickstart.md        # Phase 1 output
 ├── contracts/           # Phase 1 output
-└── tasks.md             # Phase 2 output (speckit.tasks - NOT created by plan)
+├── tasks.md             # Phase 2 output (speckit.tasks - NOT created by plan)
+└── .gatespec/
+    └── reviews/          # REV-TASKS and implementation request/verdict/seal snapshots
 ```
 
 ### Source Code (repository root)

@@ -58,16 +58,25 @@ Resume behavior:
   template at
   `.specify/extensions/gatespec/templates/gatespec-plan-template.md`.
 - Draft: continue in place without recopying the template.
-- Valid Approved-Design and no flag: keep every design artifact read-only and
-  hand off to native tasks.
-- `--revise`: archive existing `tasks.md`, change plan Status to Draft, clear
-  Gate Approval, retain a baseline, and use diff-only re-approval.
+- Valid Approved-Design with a valid Implementation Review Contract and no
+  flag: keep every design artifact read-only and hand off to native tasks.
+- Approved-Design created before this contract existed must not hand off. There
+  is no legacy bypass: automatically archive tasks and non-archive review
+  contents, apply the existing `--revise` semantics (Draft status, cleared Gate
+  Approval, preserved baseline), add the contract, and require diff-only Design
+  re-approval before regenerating native tasks.
+- `--revise`: archive existing `tasks.md` and `.gatespec/reviews/`, change plan
+  Status to Draft, clear Gate Approval, retain a baseline, and use diff-only
+  re-approval.
 - `--restart`: archive plan.md, research.md, data-model.md, contracts/,
-  quickstart.md, and tasks.md under `.gatespec/archive/<timestamp>-restart/`,
-  then initialize a fresh GateSpec plan. Do not alter the approved spec.
+  quickstart.md, tasks.md, and the non-archive contents of `.gatespec/reviews/`
+  under `.gatespec/archive/<timestamp>-restart/`, then initialize a fresh
+  GateSpec plan. Do not alter the approved spec or recursively archive an
+  existing archive.
 
 Any spec re-approval makes a plan with the old Requirements hash stale. Archive
-tasks and re-plan; never continue executing stale tasks.
+tasks and current reviews, then re-plan; never continue executing stale tasks
+or trust their receipts.
 
 ## Step 2: approve design decisions one at a time
 
@@ -107,6 +116,23 @@ walkthrough using only spec + design artifacts; close every non-trivial fork
 with a Decision Log approval or bounded Implementation Freedom. quickstart.md
 must provide a runnable end-to-end validation path for each P1 story.
 
+Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
+version `1` and the fixed Review Root, task-review, isolation, parallel, Git,
+and remediation values from the template. Select actual Required Checkpoints:
+`REV-FOUNDATION`, one `REV-US<n>` per implemented user-story phase, and exactly
+one final `REV-FINAL`. Give every ID exactly one non-empty Checkpoint Test
+Mapping row and provide non-empty Final Validation. The contract requires
+native tasks to end each corresponding phase with a non-`[P]` row containing:
+
+```text
+GateSpec review checkpoint <REV-ID>: run speckit.gatespec.review-implementation --scope <REV-ID>; require .gatespec/reviews/<REV-ID>/seal.md before continuing.
+```
+
+The executor must join same-phase disjoint work before such a row and cannot
+cross it without the matching PASS seal. Checkpoint commits stay local and are
+never pushed. REV-FINAL covers the complete feature, not an aggregation of
+stage verdicts.
+
 Immediately before the final summary, internally compare spec.md, plan.md,
 research.md, data-model.md, contracts/, and quickstart.md for terminology,
 interfaces, constraints, traceability, and contradictions. Resolve findings
@@ -131,4 +157,7 @@ On explicit approval only:
 
 Run peer `after_plan` hooks, report completion, then follow the unchanged native
 sequence: `__SPECKIT_COMMAND_TASKS__` → `__SPECKIT_COMMAND_ANALYZE__` →
-`__SPECKIT_COMMAND_IMPLEMENT__`. GateSpec adds no tasks or implement command.
+`__SPECKIT_COMMAND_IMPLEMENT__`. Required GateSpec hooks structurally check the
+native tasks, obtain a fresh-context task-review receipt after analyze, verify
+that receipt before implement, and require the explicit REV-FINAL receipt after
+implement. GateSpec adds no tasks or implement replacement.

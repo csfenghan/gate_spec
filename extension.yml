@@ -3,8 +3,8 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.2.0"
-  description: "Human-gated specify/plan workflow: explicit clarification, per-decision design approval, and machine-checked gates before plan/tasks"
+  version: "0.3.0"
+  description: "Human-gated requirements/design plus fresh-context task and implementation review receipts around the native tasks/analyze/implement workflow"
   category: "process"
   effect: "read-write"
   author: "harry.feng"
@@ -16,6 +16,7 @@ requires:
   commands:
     - "speckit.tasks"     # downstream convergence point (unchanged, upstream)
     - "speckit.analyze"   # unchanged native handoff after speckit.tasks
+    - "speckit.implement" # unchanged native executor, surrounded by review gates
   scripts:
     - "setup-plan"           # reused by gatespec.plan
 
@@ -33,7 +34,7 @@ provides:
 
     - name: "speckit.gatespec.check"
       file: "commands/speckit.gatespec.check.md"
-      description: "Run gate checks (requirements/design) for the current feature"
+      description: "Run requirements, design, task, or implementation receipt checks for the current feature"
       aliases: ["gatespec.check"]
 
     - name: "speckit.gatespec.check-requirements"
@@ -43,6 +44,26 @@ provides:
     - name: "speckit.gatespec.check-design"
       file: "commands/speckit.gatespec.check-design.md"
       description: "Internal fixed Design Gate hook entry"
+
+    - name: "speckit.gatespec.check-tasks"
+      file: "commands/speckit.gatespec.check-tasks.md"
+      description: "Internal fixed post-tasks structure hook entry"
+
+    - name: "speckit.gatespec.review-tasks"
+      file: "commands/speckit.gatespec.review-tasks.md"
+      description: "Fresh-context semantic review of native tasks after analyze"
+
+    - name: "speckit.gatespec.check-task-review"
+      file: "commands/speckit.gatespec.check-task-review.md"
+      description: "Internal fixed task-review receipt hook entry"
+
+    - name: "speckit.gatespec.review-implementation"
+      file: "commands/speckit.gatespec.review-implementation.md"
+      description: "Create or independently review an implementation checkpoint request"
+
+    - name: "speckit.gatespec.check-implementation-review"
+      file: "commands/speckit.gatespec.check-implementation-review.md"
+      description: "Internal fixed implementation-review receipt hook entry"
 
 hooks:
   # Fires when the CORE speckit.plan runs on a gatespec-track spec (mixed path).
@@ -59,9 +80,34 @@ hooks:
     optional: false
     description: "Design Gate: plan must be Approved-Design before task generation"
 
+  # Native tasks.md remains upstream-owned. This validates only the approved
+  # review contract and the explicit non-parallel checkpoint task rows.
+  after_tasks:
+    command: "speckit.gatespec.check-tasks"
+    optional: false
+    description: "Task Structure Gate: native tasks must encode every approved review checkpoint"
+
+  # Native analyze remains the cross-artifact analysis step. Its completion is
+  # followed by a separate fresh-context GateSpec task verdict.
+  after_analyze:
+    command: "speckit.gatespec.review-tasks"
+    optional: false
+    description: "Task Review: obtain a fresh-context PASS receipt after native analysis"
+
+  before_implement:
+    command: "speckit.gatespec.check-task-review"
+    optional: false
+    description: "Task Review Gate: a current REV-TASKS PASS seal is required before native implementation"
+
+  after_implement:
+    command: "speckit.gatespec.check-implementation-review"
+    optional: false
+    description: "Implementation Review Gate: a current REV-FINAL PASS seal is required before completion"
+
 tags:
   - "sdd"
   - "human-gate"
   - "requirements"
   - "design-review"
+  - "implementation-review"
   - "workflow"
