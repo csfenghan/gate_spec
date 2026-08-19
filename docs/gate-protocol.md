@@ -128,7 +128,9 @@ Revision rounds show only the diff.
 
 The Requirements Gate passes before planning. plan.md records the approved spec
 content hash computed before its Gate Approval H2. Spec re-approval therefore
-invalidates an old plan.
+invalidates an old plan. Current plans also contain exactly one
+`**Design Evidence Schema**: 1`; another declared version fails closed rather
+than being downgraded.
 
 Every design choice requiring individual human approval uses an exact
 `### D<n>: <topic>` block with one shared scenario, fixed boundary, why human
@@ -143,8 +145,25 @@ with no such decision uses:
 
 The six exact Design Detailing dimensions are concurrency, object
 lifetime/ownership, modules/classes, internal API interactions, external
-behavior contracts, and setup/runtime/teardown. Each has substantive content
-or `N/A — <reason>`; constraints may add dimensions but never replace them.
+behavior contracts, and setup/runtime/teardown. Each is either one reasoned N/A
+or its Schema 1 child fields:
+
+| Dimension | Structured evidence |
+|---|---|
+| concurrency | execution contexts, directed cross-context flow, synchronization/safety contract, Technical basis |
+| lifetime/ownership | owned resources, lifetime flow, memory/resource contract, Technical basis |
+| modules/classes | inspected repository anchors, existing/modified/new change map, dependency contract, Technical basis |
+| internal APIs/interactions | existing entry points, language-native contract skeleton, primary success/failure interaction, semantic contract, Technical basis |
+| external behavior | affected surfaces, behavior and compatibility contracts, Technical basis |
+| setup/runtime/teardown | states/owner, phase flow, failure/recovery contract, Technical basis |
+
+Contract skeletons contain declarations rather than production bodies; bounded
+pseudocode appears only when required to express a core state, concurrency, or
+algorithm invariant. A skeleton may be a reasoned N/A when no executable
+contract changes. Relationships remain directional and include material
+execution context, ownership, data, and failure results, so a later tool can
+derive component and sequence views. Mermaid and all other diagrams are
+optional. Constraints may add dimensions but never replace the six core ones.
 
 An implementer's walkthrough closes each fork as an approved human decision, a
 reasoned engineering determination in Design Detailing/research, or bounded
@@ -152,9 +171,13 @@ Implementation Freedom. It also audits classification so a human-relevant
 consequence cannot hide in a technical bucket. Bidirectional traceability
 prevents orphan FRs and unapproved design. quickstart supplies a runnable path
 per P1 story. Immediately before summary, the agent checks spec, plan, research,
-data model, contracts, and quickstart. The ≤20-line Design summary exposes
-material engineering determinations so the user can promote one before final
-approval. Native analyze still occurs only after native tasks.
+data model, contracts, and quickstart, then verifies that a fresh reader can
+reconstruct the design boundary, component integration, core interactions,
+thread/resource/lifecycle contracts, and rationale without choosing an
+architecture. The ≤20-line Design summary exposes the change boundary, primary
+flow, material engineering determinations, and implementation freedoms so the
+user can promote one before final approval. Native analyze still occurs only
+after native tasks.
 
 ### Implementation Review Contract
 
@@ -299,9 +322,10 @@ and withholds the native completion report until its current final check passes.
 
 | State/flag | Required behavior |
 |---|---|
-| Draft, no flag | Continue in place; never recopy the template. |
-| Valid Approved artifact and current review contract | Read-only; hand off. |
-| Approved plan missing review contract | Archive downstream work, reopen via revise, diff re-approve. |
+| Draft, no flag | Continue in place; enrich missing Schema 1 fields without recopying or renumbering decisions. |
+| Valid Approved artifact, Schema 1, and current review contract | Read-only; hand off. |
+| Approved plan missing review contract or Schema 1 | Archive downstream work once, reopen via revise, enrich, diff re-approve. |
+| Plan declares an unknown design-evidence schema | Stop; never downgrade or guess a rewrite. |
 | `--revise` | Archive tasks/current reviews, reopen Draft, preserve baseline, diff re-approve. |
 | `--restart` | Archive phase/downstream artifacts and current reviews, rebuild template. |
 | `--refresh-constraints` | Recompute spec basis and enter revision flow. |
@@ -370,8 +394,11 @@ clarification/default formats, residual markers, FR/scenario scoping, approval
 structure/date/hash, constraint drift, and warning-only vague wording.
 
 Design includes Requirements and then checks the Requirements hash chain,
-Decision Log, six Design Detailing dimensions, mandatory upstream sections,
-Implementation Review Contract, template remnants, and approval snapshot.
+Decision Log, the exact Design Evidence Schema 1 field and structured child
+fields for all six Design Detailing dimensions, mandatory upstream sections,
+Implementation Review Contract, template remnants, and approval snapshot. The
+checker validates syntax, reasoned N/A, and code-fence presence; it never claims
+to prove architectural sufficiency.
 
 Tasks-structure checks cover exact contract fields, checkpoint/test-set
 equality, checkpoint row uniqueness/order/non-parallel form, and every

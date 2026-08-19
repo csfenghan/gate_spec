@@ -52,19 +52,29 @@ Compute the approved spec content hash using the same scoped formula and write
 it once as `**Requirements Content-SHA256**` in plan.md. This is a load-bearing
 chain: never copy the Gate Approval hash field as a substitute.
 
+The current structured design-evidence contract is identified by the exact
+field `**Design Evidence Schema**: 1`. If a plan declares another non-empty
+schema version, stop rather than downgrade or guess how to rewrite it.
+
 Resume behavior:
 
 - No plan or an untouched setup output: initialize once from the GateSpec plan
   template at
   `.specify/extensions/gatespec/templates/gatespec-plan-template.md`.
-- Draft: continue in place without recopying the template.
+- Draft: continue in place without recopying the template. If it predates
+  Design Evidence Schema 1, add the field and restructure Design Detailing in
+  place from repository facts and existing attachments; preserve every D ID,
+  answer, and unaffected design statement.
 - Valid Approved-Design with a valid Implementation Review Contract and no
-  flag: keep every design artifact read-only and hand off to native tasks.
-- Approved-Design created before this contract existed must not hand off. There
-  is no legacy bypass: automatically archive tasks and non-archive review
-  contents, apply the existing `--revise` semantics (Draft status, cleared Gate
-  Approval, preserved baseline), add the contract, and require diff-only Design
-  re-approval before regenerating native tasks.
+  flag, plus Design Evidence Schema 1: keep every design artifact read-only and
+  hand off to native tasks.
+- Approved-Design created before the Implementation Review Contract or Design
+  Evidence Schema 1 existed must not hand off. There is no legacy bypass:
+  automatically archive tasks and non-archive review contents, apply the
+  existing `--revise` semantics (Draft status, cleared Gate Approval, preserved
+  baseline), add the missing contract/evidence without rewriting unaffected
+  decisions, and require one diff-only Design re-approval before regenerating
+  native tasks.
 - `--revise`: archive existing `tasks.md` and `.gatespec/reviews/`, change plan
   Status to Draft, clear Gate Approval, retain a baseline, and use diff-only
   re-approval.
@@ -82,6 +92,11 @@ or trust their receipts.
 
 Before asking, make one complete discovery pass over the approved Requirements,
 constraints, existing Draft design artifacts, and relevant repository facts.
+Inspect the actual integration surface: existing entry points, modules/types,
+call and dependency directions, execution contexts, object/resource ownership,
+and setup/runtime/teardown conventions. Distinguish inspected current facts
+from proposed names and mechanisms; never present an invented current symbol as
+repository evidence.
 Run independent read-only searches in parallel when supported. Classify every
 known design fork into exactly one conversational bucket:
 
@@ -207,8 +222,46 @@ Follow upstream Phase 0/1 artifact formats. The six core Design Detailing
 dimensions are mandatory, exact, and unique: thread/concurrency; object
 lifetime/ownership; modules/classes; internal APIs/interactions; external
 behavior contracts; setup/runtime/teardown. Constraints may add dimensions
-but cannot remove, rename, or replace these six. Each needs substantive text
-or `N/A — <reason>` / `无额外约束 — <原因>`.
+but cannot remove, rename, or replace these six. Write exact
+`**Design Evidence Schema**: 1` once near the Requirements content hash.
+
+Each core dimension is either one inline `N/A — <specific reason>` /
+`无额外约束 — <具体原因>` or the exact structured child fields in the template:
+
+1. Thread/concurrency records execution contexts and affinity, directed
+   cross-context control/data flow, synchronization or serialization,
+   ordering, cancellation/backpressure, and race/deadlock/shutdown guarantees.
+2. Lifetime/ownership records key objects, buffers, handles, or other
+   resources; creation and owner; sharing/borrowing/copy/move rules; failure
+   cleanup, reclamation order, and material memory/resource bounds. Do not
+   invent low-level allocation detail that has no design consequence.
+3. Modules/classes records inspected repository anchors and entry points, then
+   labels every key target element `existing`, `modified`, or `new`, with its
+   responsibility, unchanged boundary, and allowed/prohibited dependency
+   directions.
+4. Internal APIs/interactions records actual existing entry points, a
+   language-native skeleton of key types/interfaces/functions without
+   implementation bodies, the primary success flow and principal failure flow
+   in call order, and input/output/error/thread-affinity/ownership semantics.
+   Use the smallest labeled pseudocode needed only when declarations and flow
+   cannot express a core state, concurrency, or algorithm invariant. If no
+   executable contract changes, use `N/A — <reason>` for the skeleton field.
+5. External contracts records affected API/CLI/config/event/schema surfaces,
+   externally observable success and error behavior, and compatibility,
+   migration, fallback, timing, retry, or idempotency rules when applicable.
+6. Lifecycle records states and their owner, setup/runtime/teardown ordering,
+   plus partial-startup, recovery, rollback, cancellation, and cleanup behavior
+   when applicable.
+
+Every populated dimension ends with `Technical basis` that cites the relevant
+FRs, approved D IDs, constraints, inspected repository anchors, and exact
+research/data-model/contracts references. References supplement rather than
+replace the core fact: do not write only “see research.md”. Keep relationships
+directional and explicit enough that a later documentation tool can derive a
+component or sequence view without choosing an architecture. An ordered text
+flow or `A -> B`/`A → B` edges are sufficient; Mermaid and other diagrams are
+optional. This is design evidence, not a per-file edit list or production-ready
+implementation draft.
 
 Ensure every FR has a technical home and every design element traces to an FR
 or approved decision. Remove unapproved gold-plating. Conduct an implementer's
@@ -219,6 +272,16 @@ discovers a new fork or a human-relevant consequence hidden in another bucket,
 reclassify it and present any resulting decision in the next legal batch.
 quickstart.md
 must provide a runnable end-to-end validation path for each P1 story.
+
+Then conduct a review-source completeness walkthrough. A fresh reader using
+only the approved Requirements, plan, and design attachments must be able to
+reconstruct the design intent and change boundary; current-to-target component
+integration; core contracts and primary success/failure interactions; thread,
+ownership/resource, external behavior, and lifecycle rules; and the rationale
+and trace for each. If doing so would require a new design choice or material
+inference, close that gap as a human decision, engineering determination, or
+bounded Implementation Freedom before approval. Never render an Implementation
+Freedom as if the contract skeleton had already fixed it.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
 version `1` and the fixed Review Root, task-review, isolation, parallel, Git,
@@ -249,11 +312,13 @@ after tasks, when tasks.md exists.
 
 ## Step 4: Design approval
 
-Present at most 20 lines: technical approach, approved human decisions,
-material engineering determinations, explicit implementation freedoms,
-validation approach, and mandatory “what I am least confident about”. Remind
-the user that any determination/freedom may still be promoted before approval.
-Wait for unambiguous approval. Changes produce a diff-only re-approval round.
+Present at most 20 lines: technical approach and current-to-target change
+boundary, primary runtime flow, material concurrency/ownership rules, approved
+human decisions, material engineering determinations, explicit implementation
+freedoms, validation approach, and mandatory “what I am least confident
+about”. Remind the user that any determination/freedom may still be promoted
+before approval. Wait for unambiguous approval. Changes produce a diff-only
+re-approval round.
 
 On explicit approval only:
 

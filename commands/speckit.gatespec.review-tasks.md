@@ -103,11 +103,14 @@ commit in manual reviewer mode.
 
 Review the approved Requirements/Design and native tasks from the request
 without editing them. Check at least: every FR/story and mapped validation has
-executable task coverage; exact file scopes and dependencies are sufficient;
-parallel labels cannot race; phases remain independently testable; every
-Implementation Review Contract checkpoint is phase-final and its tests are
-executable; and tasks introduce no unapproved requirement, design choice, or
-gold-plating. A material uncertainty is a BLOCKER, not an inferred default.
+executable task coverage; Design Evidence Schema 1 repository integration,
+component/dependency changes, core contract skeleton and interaction flow,
+thread/resource ownership, external behavior, and lifecycle contracts are all
+preserved; exact file scopes and dependencies are sufficient; parallel labels
+cannot race; phases remain independently testable; every Implementation Review
+Contract checkpoint is phase-final and its tests are executable; and tasks
+introduce no unapproved requirement, design choice, or gold-plating. A material
+uncertainty is a BLOCKER, not an inferred default.
 
 The adapter, or a manual fresh session whose returned text is supplied back to
 this no-input coordinator, returns exactly:

@@ -8,6 +8,8 @@
 
 **Requirements Content-SHA256**: `[approved spec content hash]`
 
+**Design Evidence Schema**: 1
+
 <!--
   GATESPEC GATE FIELDS (do not remove):
   - **Status** transitions: Draft → Approved-Design (YYYY-MM-DD).
@@ -19,7 +21,7 @@
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+[Extract from feature spec: primary requirement, design intent, current-to-target change boundary, and technical approach from research]
 
 ## Technical Context
 
@@ -90,18 +92,49 @@ explicit Decision Log approval.]
 <!--
   GATESPEC: Every dimension MUST have substantive content OR an explicit
   "N/A — <one-line reason>". Silent omission fails the gate.
+  A populated dimension MUST use all exact child fields shown for that
+  dimension. Core facts stay in plan.md; attachment references add evidence
+  rather than replacing them. Diagrams are optional.
   Record reasoned engineering determinations under their applicable dimensions;
   they do not receive D<n> IDs or individual approval fields.
   Constraints may add dimensions, but cannot delete, rename, or replace the
   six core dimensions below.
 -->
 
-1. **Thread / concurrency model**: [thread ownership, cross-thread data flow, synchronization primitives — or N/A + reason]
-2. **Object lifetimes & ownership**: [creation/destruction, ownership semantics (unique/shared/borrowed), destruction ordering — or N/A + reason]
-3. **Key modules & classes**: [responsibilities, boundaries, dependency directions]
-4. **Key internal APIs & interactions**: [signature-level, call sequencing]
-5. **External interface behavior contracts**: [externally visible behavior, error semantics, compatibility]
-6. **Setup / runtime / teardown phase interactions**: [state transitions and interactions per phase]
+1. **Thread / concurrency model**:
+   - **Execution contexts**: [existing and planned threads/processes/event loops, owners, and affinity]
+   - **Cross-context flow**: [directed control/data handoffs, queues, cancellation, and backpressure]
+   - **Synchronization contract**: [primitives or serialization plus ordering, race/deadlock, and shutdown guarantees]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+2. **Object lifetimes & ownership**:
+   - **Owned resources**: [key objects/buffers/handles and their current/planned owners]
+   - **Lifetime flow**: [creation, share/borrow/copy/move rules, destruction order, and failure cleanup]
+   - **Resource contract**: [material allocation, reclamation, memory/buffer bounds, or explicit no-extra-constraint reason]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+3. **Key modules & classes**:
+   - **Repository anchors**: [inspected existing modules, entry points, and types forming the integration surface]
+   - **Change map**: [each key existing/modified/new element, responsibility, boundary, and deliberately unchanged neighbor]
+   - **Dependency contract**: [directed callers/callees and allowed or prohibited dependency directions]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+4. **Key internal APIs & interactions**:
+   - **Existing entry points**: [actual symbols or protocols consumed by the design]
+   - **Core contract skeleton**:
+     ```[language]
+     [key type/interface/function declarations only; no implementation bodies]
+     ```
+   - **Primary interaction**: [ordered main success and principal failure flows with execution context on material hops]
+   - **Semantic contract**: [inputs, outputs, errors, pre/postconditions, thread affinity, and ownership]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+5. **External interface behavior contracts**:
+   - **Affected surfaces**: [new/changed/unchanged API, CLI, configuration, event, or schema surfaces]
+   - **Behavior contract**: [externally observable success, error, timing, retry, or idempotency behavior]
+   - **Compatibility contract**: [versioning, migration, fallback, and explicitly preserved behavior]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+6. **Setup / runtime / teardown phase interactions**:
+   - **States & owner**: [states, transition authority, and owning component]
+   - **Phase flow**: [ordered setup, runtime, and teardown interactions]
+   - **Failure / recovery contract**: [partial startup, rollback, retry, cancellation, and cleanup behavior]
+   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
 
 ## Implementation Freedoms *(gatespec: include if any)*
 

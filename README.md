@@ -89,6 +89,24 @@ creating a stored mode. They may also ask to explain or discuss an engineering
 determination or Implementation Freedom; this likewise creates no stored mode
 or fourth approval mechanism.
 
+## Review-ready design evidence
+
+Every current plan declares `**Design Evidence Schema**: 1`. The existing six
+Design Detailing dimensions use structured fields that preserve enough source
+information for a later documentation tool to render an architecture review:
+current repository anchors and current-to-target component changes, dependency
+directions, core type/API skeletons and success/failure interactions, thread
+and resource-ownership contracts, external behavior, lifecycle, and exact
+technical basis.
+
+This is evidence capture, not architecture-document generation. Plan does not
+create `architecture.md`, require Mermaid, or prescribe per-file edits and
+production-ready method bodies. Directional text and ordered interactions are
+sufficient; a diagram or Unicode view is optional. A populated dimension uses
+its fixed child fields, while a genuinely irrelevant dimension uses one
+reasoned N/A. The portable checker validates that structure; the plan
+walkthrough and fresh reviewer remain responsible for semantic sufficiency.
+
 ## Task and implementation review
 
 The approved plan contains one exact `Implementation Review Contract`. It lists
@@ -158,8 +176,9 @@ constraints into the constitution.
 ## Safe resume controls
 
 - default: continue a Draft in place; keep a valid approved artifact read-only;
-- an old Approved-Design plan without Implementation Review Contract is
-  archived downstream, reopened as Draft, and diff re-approved before tasks;
+- an old Approved-Design plan without Implementation Review Contract or Design
+  Evidence Schema 1 is archived downstream, reopened as Draft, enriched, and
+  diff re-approved before tasks;
 - `--revise`: reopen as Draft, archive tasks and current review receipts, and
   use diff re-approval;
 - `--restart`: archive current phase/downstream artifacts, then rebuild from
@@ -168,10 +187,12 @@ constraints into the constitution.
   revision flow.
 
 Design always covers six core dimensions (concurrency, lifetime/ownership,
-modules/classes, internal APIs, external behavior, lifecycle). Constraints may
+modules/classes, internal APIs, external behavior, lifecycle) using structured
+current facts, target contracts, and traceable technical basis. Constraints may
 add dimensions but cannot remove or replace them. Before Design summary the
-agent performs an internal spec/design-attachment consistency check. Native
-`speckit.analyze` runs after tasks.md exists.
+agent performs an internal review-source completeness and
+spec/design-attachment consistency check. Native `speckit.analyze` runs after
+tasks.md exists.
 
 ## Install
 

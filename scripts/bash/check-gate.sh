@@ -272,6 +272,17 @@ check_template_remnants() {
     '[domain-specific' '[Gates determined' '[what forces this decision]' \
     '[thread ownership' '[creation/destruction' '[responsibilities' \
     '[signature-level' '[externally visible' '[state transitions' \
+    '[existing and planned' '[directed control/data' \
+    '[primitives or serialization' '[FR/D/constraint' \
+    '[key objects/buffers/handles' '[creation, share/borrow/copy/move' \
+    '[material allocation' '[inspected existing modules' \
+    '[each key existing/modified/new' '[directed callers/callees' \
+    '[actual symbols or protocols' '[language]' \
+    '[key type/interface/function' '[ordered main success' \
+    '[inputs, outputs, errors' '[new/changed/unchanged API' \
+    '[externally observable success' '[versioning, migration' \
+    '[states, transition authority' '[ordered setup, runtime' \
+    '[partial startup, rollback' \
     '[Document the selected' '[current need]' '[why 3 projects' \
     '[REMOVE IF UNUSED]'; do
     if grep -Fn "$token" "$file" >/dev/null 2>&1; then
@@ -660,8 +671,109 @@ check_decisions() {
   [[ "$duplicate" -eq 0 && "$missing" -eq 0 ]] && pass "Decision Log: all $count exact D<n> blocks have approvals"
 }
 
+check_design_evidence_schema() {
+  local exact all
+  exact=$(grep -cFx '**Design Evidence Schema**: 1' "$PLAN" || true)
+  all=$(grep -cF '**Design Evidence Schema**:' "$PLAN" || true)
+  if [[ "$exact" -eq 1 && "$all" -eq 1 ]]; then
+    pass "plan.md: Design Evidence Schema 1 is declared exactly once"
+  else
+    fail "plan.md: expected exactly one '**Design Evidence Schema**: 1' field"
+  fi
+}
+
+reasoned_na() {
+  printf '%s\n' "$1" | grep -Eq '^(N/A|无额外约束)[[:space:]]*—[[:space:]]*[^[:space:]].*$'
+}
+
+bare_na() {
+  printf '%s\n' "$1" | grep -Eq '^(N/A|无额外约束)([[:space:]]*—[[:space:]]*)?$'
+}
+
+extract_detail_field() {
+  local source="$1" field="$2" destination="$3"
+  awk -v target="- **${field}**:" '
+    {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+    }
+    index(line, target) == 1 {
+      inside=1
+      rest=substr(line, length(target) + 1)
+      sub(/^[[:space:]]*/, "", rest)
+      if (length(rest)) print rest
+      next
+    }
+    inside && line ~ /^- \*\*[^*]+\*\*:/ { exit }
+    inside { print }
+  ' "$source" > "$destination"
+}
+
+check_detail_field() {
+  local block="$1" field="$2" dimension="$3" index="$4"
+  local count content_file first opening closing
+  content_file="$TMP_DIR/design-field-${index}"
+  count=$(awk -v target="- **${field}**:" '
+    {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      if (index(line, target) == 1) count++
+    }
+    END { print count+0 }
+  ' "$block")
+  if [[ "$count" -ne 1 ]]; then
+    fail "Design Detailing '${dimension}' requires exactly one '${field}' field"
+    return 1
+  fi
+
+  extract_detail_field "$block" "$field" "$content_file"
+  first=$(awk 'NF { sub(/^[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit }' "$content_file")
+  if [[ -z "$first" || "$first" == \[* ]]; then
+    fail "Design Detailing '${dimension}' field '${field}' is empty or still a placeholder"
+    return 1
+  fi
+  if bare_na "$first"; then
+    fail "Design Detailing '${dimension}' field '${field}' uses N/A without a reason"
+    return 1
+  fi
+  if reasoned_na "$first"; then
+    if [[ "$field" == 'Technical basis' ]]; then
+      fail "Design Detailing '${dimension}' field 'Technical basis' cannot be N/A"
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ "$field" == 'Core contract skeleton' ]]; then
+    # Literal Markdown fences in the regex must remain single quoted.
+    # shellcheck disable=SC2016
+    opening=$(grep -cE '^[[:space:]]*```[^[:space:]`]+[[:space:]]*$' "$content_file" || true)
+    closing=$(grep -cE '^[[:space:]]*```[[:space:]]*$' "$content_file" || true)
+    if [[ "$opening" -lt 1 || "$closing" -lt 1 ]]; then
+      fail "Design Detailing '${dimension}' field 'Core contract skeleton' requires a language-tagged code fence or reasoned N/A"
+      return 1
+    fi
+    if ! awk '
+      {
+        line=$0
+        sub(/^[[:space:]]*/, "", line)
+        sub(/[[:space:]]*$/, "", line)
+      }
+      !inside && line ~ /^```[^[:space:]`]+$/ { inside=1; next }
+      inside && line == "```" { exit }
+      inside && length(line) { content=1 }
+      END { exit !content }
+    ' "$content_file"; then
+      fail "Design Detailing '${dimension}' field 'Core contract skeleton' has no declaration content"
+      return 1
+    fi
+  fi
+  return 0
+}
+
 check_design_detailing() {
   local body="$TMP_DIR/design-detailing" label line value expected count bad=0
+  local block required field field_index=0
   section_body "$PLAN" 'Design Detailing' > "$body"
   expected=1
   while IFS= read -r label; do
@@ -673,17 +785,47 @@ check_design_detailing() {
       continue
     fi
     line=$(grep -E "^${expected}\\. \\*\\*${label}\\*\\*:" "$body")
-    value=${line#*: }
-    if [[ -z "$value" || "$value" == \[* ]]; then
-      fail "Design Detailing '${label}' is empty or still a placeholder"
+    block="$TMP_DIR/design-dimension-${expected}"
+    awk -v target="${expected}. **${label}**:" '
+      index($0, target) == 1 { inside=1; next }
+      inside && /^[1-9][0-9]*\. \*\*/ { exit }
+      inside { print }
+    ' "$body" > "$block"
+    value=${line#*:}
+    value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    if [[ -n "$value" ]]; then
+      if reasoned_na "$value"; then
+        if awk 'NF { found=1 } END { exit !found }' "$block"; then
+          fail "Design Detailing '${label}' cannot mix inline N/A with structured fields"
+          bad=1
+        fi
+        expected=$((expected + 1))
+        continue
+      fi
+      if bare_na "$value"; then
+        fail "Design Detailing '${label}' uses N/A without a reason"
+      else
+        fail "Design Detailing '${label}' must use its structured fields or a reasoned N/A"
+      fi
       bad=1
-    elif printf '%s\n' "$value" | grep -Eq '^(N/A|无额外约束)([[:space:]]*)$'; then
-      fail "Design Detailing '${label}' uses N/A without an '— <reason>'"
-      bad=1
-    elif printf '%s\n' "$value" | grep -Eq '^(N/A|无额外约束)[[:space:]]*—[[:space:]]*$'; then
-      fail "Design Detailing '${label}' uses N/A without a reason"
-      bad=1
+      expected=$((expected + 1))
+      continue
     fi
+
+    case "$expected" in
+      1) required=$'Execution contexts\nCross-context flow\nSynchronization contract\nTechnical basis' ;;
+      2) required=$'Owned resources\nLifetime flow\nResource contract\nTechnical basis' ;;
+      3) required=$'Repository anchors\nChange map\nDependency contract\nTechnical basis' ;;
+      4) required=$'Existing entry points\nCore contract skeleton\nPrimary interaction\nSemantic contract\nTechnical basis' ;;
+      5) required=$'Affected surfaces\nBehavior contract\nCompatibility contract\nTechnical basis' ;;
+      6) required=$'States & owner\nPhase flow\nFailure / recovery contract\nTechnical basis' ;;
+    esac
+    while IFS= read -r field; do
+      field_index=$((field_index + 1))
+      if ! check_detail_field "$block" "$field" "$label" "$field_index"; then
+        bad=1
+      fi
+    done <<< "$required"
     expected=$((expected + 1))
   done <<'EOF'
 Thread / concurrency model
@@ -693,7 +835,7 @@ Key internal APIs & interactions
 External interface behavior contracts
 Setup / runtime / teardown phase interactions
 EOF
-  [[ "$bad" -eq 0 ]] && pass "Design Detailing: all six core dimensions are exact, unique, and substantive"
+  [[ "$bad" -eq 0 ]] && pass "Design Detailing: Schema 1 fields are exact, unique, and substantive"
 }
 
 check_requirements_basis() {
@@ -2041,6 +2183,7 @@ check_design_gate() {
     check_h2_once "$PLAN" "$section"
   done
   check_requirements_basis
+  check_design_evidence_schema
   check_decisions
   check_design_detailing
   check_implementation_review_contract

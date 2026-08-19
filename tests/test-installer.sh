@@ -203,6 +203,34 @@ else
   not_ok "rendered scenario-first decision triage contract"
 fi
 
+design_evidence_ok=1
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    '**Design Evidence Schema**: 1' \
+    'review-source completeness walkthrough' \
+    'language-native skeleton of key' \
+    'Mermaid and other diagrams are' \
+    'Approved-Design created before the Implementation Review Contract or Design'; do
+    grep -F "$rule" "$skill" >/dev/null || design_evidence_ok=0
+  done
+  grep -F '## Architecture Blueprint' "$skill" >/dev/null && design_evidence_ok=0
+done
+for rule in \
+  '**Design Evidence Schema**: 1' \
+  '**Repository anchors**' \
+  '**Core contract skeleton**' \
+  '**Failure / recovery contract**'; do
+  grep -F "$rule" "$REPO/templates/gatespec-plan-template.md" >/dev/null || design_evidence_ok=0
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  grep -F 'Design Evidence Schema 1' "$reviewer" >/dev/null || design_evidence_ok=0
+done
+if [[ "$design_evidence_ok" -eq 1 ]]; then
+  ok "plan/template/reviewer preserve the structured design-evidence contract"
+else
+  not_ok "structured design-evidence contract"
+fi
+
 if grep -F 'Only approval-eligible human decisions belong here' "$REPO/templates/gatespec-spec-template.md" >/dev/null &&
    grep -F -- '- **Scenario**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
    grep -F -- '- **Fixed boundary**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&

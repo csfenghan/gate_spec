@@ -139,25 +139,29 @@ never infer closure from a new subject hash alone.
 
 For REV-TASKS, require all approved requirements, stories, acceptance and
 failure scenarios, approved human decisions, recorded engineering
-determinations, bounded Implementation Freedoms, design attachments, and mapped
-validations to have executable tasks. Require unambiguous actions and file
-paths, correct dependencies/order, race-free `[P]` scopes, independently
-testable phases, and no unclassified human choice or gold-plating. Require every
-plan checkpoint exactly once, non-parallel, phase-final, in declared order,
-mapped to executable tests, with no work crossing it. Missing coverage, an
-unbounded or human-relevant implementation-time decision, or material
-uncertainty is a blocker.
+determinations, bounded Implementation Freedoms, Design Evidence Schema 1
+contracts, design attachments, and mapped validations to have executable tasks.
+The tasks must preserve the recorded repository integration/change/dependency
+map, core contract skeleton and success/failure interaction, concurrency and
+resource ownership rules, external behavior, and lifecycle contract. Require
+unambiguous actions and file paths, correct dependencies/order, race-free `[P]`
+scopes, independently testable phases, and no unclassified human choice or
+gold-plating. Require every plan checkpoint exactly once, non-parallel,
+phase-final, in declared order, mapped to executable tests, with no work
+crossing it. Missing coverage, an unbounded or human-relevant
+implementation-time decision, or material uncertainty is a blocker.
 
 For implementation, inspect code rather than trusting test results. Check the
 bound Task-IDs and diff for functional correctness; approved Requirements and
-Design; input validation and security boundaries; secrets/data exposure;
-public API, schema, persistence, and compatibility contracts; error, retry,
-rollback, cleanup, concurrency, and partial-failure behavior; regressions;
-test adequacy; and unrelated or out-of-scope changes. A material defect,
-contract breach, security risk, regression, missing required evidence, or
-scope deviation is a blocker. Put a preference about naming, formatting, or
-style only in Observations unless it has a concrete correctness/contract
-impact.
+Design, including the structured component, core API/interaction, thread,
+ownership/resource, external behavior, and lifecycle contracts;
+input validation and security boundaries; secrets/data exposure; public API, schema,
+persistence, and compatibility contracts; error, retry, rollback, cleanup,
+concurrency, and partial-failure behavior; regressions; test adequacy; and
+unrelated or out-of-scope changes. A material defect, contract breach, security
+risk, regression, missing required evidence, or scope deviation is a blocker.
+Put a preference about naming, formatting, or style only in Observations unless
+it has a concrete correctness/contract impact.
 
 For TASKS, Tests Run is exactly `- Not run — task-plan review`. For
 implementation, execute every Required Tests bullet separately in the isolated

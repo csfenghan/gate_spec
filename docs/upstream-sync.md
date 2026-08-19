@@ -56,35 +56,43 @@ In a scratch initialized project:
    reasoned Design Detailing/research engineering determination, and no D card
    is created. Then request `discuss <topic>` and confirm promotion creates a
    self-contained shared-scenario card only when two viable options exist.
-8. For every R/D card, remove Technical basis identifiers mentally and confirm
+8. Generate Design Evidence Schema 1 without a diagram. Confirm all six
+   dimensions contain the required structured fields, current repository
+   evidence, target contracts, and Technical basis; the internal API dimension
+   contains a language-tagged core contract skeleton plus ordered success and
+   failure flow; and directional text is accepted without Mermaid. Confirm a
+   shallow legacy one-line dimension fails.
+9. For every R/D card, remove Technical basis identifiers mentally and confirm
    the actor, trigger, options, and consequences remain understandable. Confirm
    fixed boundary and why-human-input fields precede options, while FRs,
    constraints, paths, and flows appear last.
-9. Confirm a co-presented defaults card needs its own explicit approval,
+10. Confirm a co-presented defaults card needs its own explicit approval,
    partial answers retain IDs and refill the next batch, conflicting answers
    preserve unaffected approvals, and a legacy Draft resumes without rewriting
    unnumbered Clarifications or accepted D IDs; a retired unanswered ID is not
    reused.
-10. Re-approve a spec and confirm the old plan fails Requirements basis match.
-11. Generate native tasks with one non-parallel checkpoint row per approved
+11. Re-approve a spec and confirm the old plan fails Requirements basis match.
+12. Generate native tasks with one non-parallel checkpoint row per approved
    REV-ID and confirm `after_tasks` rejects a missing, duplicate, extra, or
    parallel checkpoint.
-12. Run native analyze. Confirm the same author/analyzer context may coordinate
+13. Run native analyze. Confirm the same author/analyzer context may coordinate
    REV-TASKS receipts but is forbidden from judging or authoring the verdict;
    obtain judgment from a fresh Claude/Codex context or the manual new-session
    fallback, and confirm `before_implement` rejects missing, BLOCKED, and stale
    task-review seals.
-13. Run native implement through a stage checkpoint. Confirm parallel work joins,
+14. Run native implement through a stage checkpoint. Confirm parallel work joins,
    the context creates only a local commit/request and never pushes, a fresh
    reviewer alone returns verdict text, the coordinator validates/persists it
    and creates a PASS-only candidate seal, candidate validation precedes the
    receipt/checkmark commit, the clean tracked final check follows it, and
    rounds 03+ fail.
-14. Confirm `after_implement` rejects missing/stale REV-FINAL and accepts a
+15. Confirm `after_implement` rejects missing/stale REV-FINAL and accepts a
     current full-feature PASS seal without replacing native implement.
-15. Resume an old Approved-Design plan without Implementation Review Contract;
-    confirm tasks/reviews archive, the plan reopens Draft, and diff re-approval
-    is required before task regeneration.
+16. Resume an old Approved-Design plan without Implementation Review Contract
+    or Design Evidence Schema 1; confirm one migration archives tasks/reviews,
+    reopens the plan as Draft, enriches structured evidence without rewriting
+    unaffected decisions, and requires diff re-approval before task
+    regeneration.
 
 Run `bash tests/run-all.sh` on Linux and macOS and verify `git status` remains
 clean. If a hook or artifact contract changed, retain the old upper version

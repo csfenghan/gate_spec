@@ -144,7 +144,9 @@ complete in manual mode.
 
 Validate the request and its bound commits before reviewing. Inspect only the
 approved artifacts and base-to-subject diff it binds. Check correctness,
-Requirements/Design compliance, task completion, error/failure behavior,
+Requirements/Design compliance—including the approved component boundaries,
+core API/interaction skeleton, thread and ownership/resource contracts,
+external behavior, and lifecycle—task completion, error/failure behavior,
 regressions, scope, and material test gaps. Run the Required Tests in the
 adapter's isolated temporary checkout when safe. A changed primary worktree,
 unsafe/unavailable mandatory test, stale hash, unclosed prior blocker, or

@@ -337,6 +337,7 @@ cat > "$TEST_TMP/good/plan.md" <<EOF
 # Implementation Plan: Config hot reload
 **Status**: Approved-Design (2026-08-07)
 **Requirements Content-SHA256**: \`$SPEC_HASH\`
+**Design Evidence Schema**: 1
 ## Summary
 Add portable polling and atomic snapshot replacement.
 ## Technical Context
@@ -350,12 +351,41 @@ All effective constraints are satisfied.
 - **Recommendation**: A — it behaves the same on supported systems.
 - **Approved**: A (2026-08-07)
 ## Design Detailing
-1. **Thread / concurrency model**: A watcher thread polls; the main thread atomically swaps snapshots.
-2. **Object lifetimes & ownership**: Readers hold shared immutable snapshots; teardown joins the watcher before release.
-3. **Key modules & classes**: ConfigWatcher detects changes and ConfigStore validates and publishes snapshots.
-4. **Key internal APIs & interactions**: ConfigWatcher calls ConfigStore::Reload, which validates before publishing.
-5. **External interface behavior contracts**: Invalid updates retain the prior configuration and emit one diagnostic.
-6. **Setup / runtime / teardown phase interactions**: Setup loads once, runtime polls, and teardown stops then joins.
+1. **Thread / concurrency model**:
+   - **Execution contexts**: The existing main request thread reads snapshots; a new ConfigWatcher worker owns polling.
+   - **Cross-context flow**: ConfigWatcher -> ConfigStore publishes one immutable snapshot; readers only acquire the published handle.
+   - **Synchronization contract**: One atomic shared-pointer exchange publishes a fully validated snapshot; teardown cancels and joins the watcher before store destruction.
+   - **Technical basis**: FR-001, FR-002, the existing request loop, and research.md#portable-watching.
+2. **Object lifetimes & ownership**:
+   - **Owned resources**: ConfigService uniquely owns ConfigWatcher and ConfigStore; readers temporarily share immutable ConfigSnapshot values.
+   - **Lifetime flow**: Setup constructs the store then watcher; publishing moves a validated snapshot into shared ownership; teardown joins before releasing either owner.
+   - **Resource contract**: At most the current and reader-retained prior snapshots remain live; failed parses release their unpublished candidate immediately.
+   - **Technical basis**: FR-002 and data-model.md#config-snapshot.
+3. **Key modules & classes**:
+   - **Repository anchors**: Existing ConfigService is the startup entry point and existing request handlers read ConfigStore.
+   - **Change map**: modified ConfigService wires dependencies; new ConfigWatcher detects changes; modified ConfigStore validates and publishes; request handlers remain behaviorally unchanged.
+   - **Dependency contract**: ConfigService -> ConfigWatcher -> ConfigStore; handlers -> ConfigStore; ConfigStore never depends on handlers or the watcher.
+   - **Technical basis**: FR-001, FR-002, D1, and the inspected src/config integration surface.
+4. **Key internal APIs & interactions**:
+   - **Existing entry points**: ConfigService::Start and ConfigStore::Current remain the integration entry points.
+   - **Core contract skeleton**:
+     \`\`\`cpp
+     class ConfigWatcher { public: Result Start(); void Stop(); };
+     class ConfigStore { public: Result Reload(); std::shared_ptr<const ConfigSnapshot> Current() const; };
+     \`\`\`
+   - **Primary interaction**: Success: watcher thread -> ConfigStore::Reload -> validate -> atomic publish -> readers observe next snapshot. Failure: validation returns an error, retains the prior snapshot, and emits one diagnostic.
+   - **Semantic contract**: Reload never exposes a partial snapshot; Current is thread-safe and non-blocking; Stop is idempotent and joins the worker.
+   - **Technical basis**: FR-001, FR-002, D1, and contracts/config-store.md.
+5. **External interface behavior contracts**:
+   - **Affected surfaces**: Existing configuration files gain hot-reload behavior; network and CLI surfaces remain unchanged.
+   - **Behavior contract**: A valid save becomes visible within one second; an invalid save preserves active connections and the prior values while emitting one diagnostic.
+   - **Compatibility contract**: Existing configuration syntax and startup validation remain unchanged; no migration or fallback mode is introduced.
+   - **Technical basis**: FR-001, FR-002, SC-001, and contracts/config-reload.md.
+6. **Setup / runtime / teardown phase interactions**:
+   - **States & owner**: ConfigService owns Stopped, Starting, Running, and Stopping transitions; ConfigWatcher cannot transition service state.
+   - **Phase flow**: Setup loads once then starts polling; runtime validates and publishes candidates; teardown requests stop, joins, then destroys store state.
+   - **Failure / recovery contract**: Initial-load failure aborts startup; runtime reload failure retains Running state; repeated Stop calls perform no extra work.
+   - **Technical basis**: FR-001, FR-002, quickstart.md, and the existing service lifecycle.
 ## Implementation Freedoms
 - Poll interval representation — constraints: preserve the one-second acceptance bound.
 ## Implementation Review Contract
@@ -624,6 +654,23 @@ awk '
 seal "$TEST_TMP/zero-decision/plan.md"
 expect pass design "$TEST_TMP/zero-decision" "fixed zero-decision state passes"
 
+clone_good missing-design-evidence-schema
+rewrite "$TEST_TMP/missing-design-evidence-schema/plan.md" '/^\*\*Design Evidence Schema\*\*:/d'
+seal "$TEST_TMP/missing-design-evidence-schema/plan.md"
+expect fail design "$TEST_TMP/missing-design-evidence-schema" "design evidence schema is mandatory" "Design Evidence Schema"
+
+clone_good unsupported-design-evidence-schema
+rewrite "$TEST_TMP/unsupported-design-evidence-schema/plan.md" 's/^\*\*Design Evidence Schema\*\*: 1/**Design Evidence Schema**: 2/'
+seal "$TEST_TMP/unsupported-design-evidence-schema/plan.md"
+expect fail design "$TEST_TMP/unsupported-design-evidence-schema" "unknown design evidence schema fails closed" "Design Evidence Schema"
+
+clone_good duplicate-design-evidence-schema
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/duplicate-design-evidence-schema/plan.md" '/^\*\*Design Evidence Schema\*\*: 1/a\
+**Design Evidence Schema**: 1'
+seal "$TEST_TMP/duplicate-design-evidence-schema/plan.md"
+expect fail design "$TEST_TMP/duplicate-design-evidence-schema" "design evidence schema must be unique" "Design Evidence Schema"
+
 clone_good missing-dimension
 rewrite "$TEST_TMP/missing-dimension/plan.md" '/^6\. \*\*Setup \/ runtime \/ teardown/d'
 seal "$TEST_TMP/missing-dimension/plan.md"
@@ -642,14 +689,87 @@ seal "$TEST_TMP/wrong-dimension/plan.md"
 expect fail design "$TEST_TMP/wrong-dimension" "wrong core dimension number fails" "requires exactly one '6. **Setup / runtime / teardown"
 
 clone_good no-reason-na
-rewrite "$TEST_TMP/no-reason-na/plan.md" 's/A watcher thread polls; the main thread atomically swaps snapshots./N\/A/'
+awk '
+  /^1\. \*\*Thread \/ concurrency model\*\*:/ {print "1. **Thread / concurrency model**: N/A"; skip=1; next}
+  skip && /^2\. \*\*Object lifetimes/ {skip=0}
+  !skip {print}
+' "$TEST_TMP/no-reason-na/plan.md" > "$TEST_TMP/no-reason-na/plan.md.tmp" && mv "$TEST_TMP/no-reason-na/plan.md.tmp" "$TEST_TMP/no-reason-na/plan.md"
 seal "$TEST_TMP/no-reason-na/plan.md"
 expect fail design "$TEST_TMP/no-reason-na" "N/A without reason fails" "uses N/A without"
 
 clone_good reasoned-na
-rewrite "$TEST_TMP/reasoned-na/plan.md" 's/A watcher thread polls; the main thread atomically swaps snapshots./N\/A — execution is single-threaded in this variant./'
+awk '
+  /^1\. \*\*Thread \/ concurrency model\*\*:/ {print "1. **Thread / concurrency model**: N/A — execution is single-threaded and changes no cross-context contract."; skip=1; next}
+  skip && /^2\. \*\*Object lifetimes/ {skip=0}
+  !skip {print}
+' "$TEST_TMP/reasoned-na/plan.md" > "$TEST_TMP/reasoned-na/plan.md.tmp" && mv "$TEST_TMP/reasoned-na/plan.md.tmp" "$TEST_TMP/reasoned-na/plan.md"
 seal "$TEST_TMP/reasoned-na/plan.md"
 expect pass design "$TEST_TMP/reasoned-na" "N/A with a reason passes"
+
+clone_good mixed-na-structure
+rewrite "$TEST_TMP/mixed-na-structure/plan.md" 's/^1\. \*\*Thread \/ concurrency model\*\*:/1. **Thread \/ concurrency model**: N\/A — no concurrency change./'
+seal "$TEST_TMP/mixed-na-structure/plan.md"
+expect fail design "$TEST_TMP/mixed-na-structure" "inline N/A cannot retain structured evidence" "cannot mix inline N/A"
+
+clone_good shallow-design-detail
+awk '
+  /^3\. \*\*Key modules & classes\*\*:/ {print "3. **Key modules & classes**: Add ConfigWatcher."; skip=1; next}
+  skip && /^4\. \*\*Key internal APIs/ {skip=0}
+  !skip {print}
+' "$TEST_TMP/shallow-design-detail/plan.md" > "$TEST_TMP/shallow-design-detail/plan.md.tmp" && mv "$TEST_TMP/shallow-design-detail/plan.md.tmp" "$TEST_TMP/shallow-design-detail/plan.md"
+seal "$TEST_TMP/shallow-design-detail/plan.md"
+expect fail design "$TEST_TMP/shallow-design-detail" "legacy shallow detail cannot satisfy schema 1" "must use its structured fields"
+
+clone_good missing-design-detail-field
+rewrite "$TEST_TMP/missing-design-detail-field/plan.md" '/^[[:space:]]*- \*\*Cross-context flow\*\*:/d'
+seal "$TEST_TMP/missing-design-detail-field/plan.md"
+expect fail design "$TEST_TMP/missing-design-detail-field" "missing structured design field fails" "requires exactly one 'Cross-context flow'"
+
+clone_good duplicate-design-detail-field
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/duplicate-design-detail-field/plan.md" '/^[[:space:]]*- \*\*Cross-context flow\*\*:/a\
+   - **Cross-context flow**: duplicate.'
+seal "$TEST_TMP/duplicate-design-detail-field/plan.md"
+expect fail design "$TEST_TMP/duplicate-design-detail-field" "duplicate structured design field fails" "requires exactly one 'Cross-context flow'"
+
+clone_good empty-design-detail-field
+rewrite "$TEST_TMP/empty-design-detail-field/plan.md" 's/^[[:space:]]*- \*\*Cross-context flow\*\*:.*/   - **Cross-context flow**:/'
+seal "$TEST_TMP/empty-design-detail-field/plan.md"
+expect fail design "$TEST_TMP/empty-design-detail-field" "empty structured design field fails" "is empty or still a placeholder"
+
+clone_good placeholder-design-detail-field
+rewrite "$TEST_TMP/placeholder-design-detail-field/plan.md" 's/^[[:space:]]*- \*\*Execution contexts\*\*:.*/   - **Execution contexts**: [existing and planned threads]/'
+seal "$TEST_TMP/placeholder-design-detail-field/plan.md"
+expect fail design "$TEST_TMP/placeholder-design-detail-field" "structured design placeholder fails" "is empty or still a placeholder"
+
+clone_good na-technical-basis
+awk '
+  !done && /^[[:space:]]*- \*\*Technical basis\*\*:/ {print "   - **Technical basis**: N/A — no trace recorded."; done=1; next}
+  {print}
+' "$TEST_TMP/na-technical-basis/plan.md" > "$TEST_TMP/na-technical-basis/plan.md.tmp" && mv "$TEST_TMP/na-technical-basis/plan.md.tmp" "$TEST_TMP/na-technical-basis/plan.md"
+seal "$TEST_TMP/na-technical-basis/plan.md"
+expect fail design "$TEST_TMP/na-technical-basis" "populated dimension requires technical basis" "Technical basis' cannot be N/A"
+
+clone_good prose-core-contract
+# Literal Markdown fences in the sed program must remain single quoted.
+# shellcheck disable=SC2016
+rewrite "$TEST_TMP/prose-core-contract/plan.md" '/^[[:space:]]*```cpp$/d; /^[[:space:]]*```$/d'
+seal "$TEST_TMP/prose-core-contract/plan.md"
+expect fail design "$TEST_TMP/prose-core-contract" "core contract requires code or reasoned N/A" "requires a language-tagged code fence"
+
+clone_good empty-core-contract
+rewrite "$TEST_TMP/empty-core-contract/plan.md" '/class ConfigWatcher/d; /class ConfigStore/d'
+seal "$TEST_TMP/empty-core-contract/plan.md"
+expect fail design "$TEST_TMP/empty-core-contract" "core contract code fence requires declarations" "has no declaration content"
+
+clone_good no-core-contract
+awk '
+  /^   - \*\*Core contract skeleton\*\*:/ {print "   - **Core contract skeleton**: N/A — this configuration-only variant changes no executable interface."; skip=1; next}
+  skip && /^   - \*\*Primary interaction\*\*:/ {skip=0}
+  !skip {print}
+' "$TEST_TMP/no-core-contract/plan.md" > "$TEST_TMP/no-core-contract/plan.md.tmp" && mv "$TEST_TMP/no-core-contract/plan.md.tmp" "$TEST_TMP/no-core-contract/plan.md"
+seal "$TEST_TMP/no-core-contract/plan.md"
+expect pass design "$TEST_TMP/no-core-contract" "reasoned no-code contract remains valid"
 
 clone_good stale-basis
 rewrite "$TEST_TMP/stale-basis/spec.md" 's/within one second/within 900 milliseconds/g'
