@@ -1,6 +1,6 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.5.0 is a personal spec-kit extension that adds human approval gates
+GateSpec 0.5.1 is a personal spec-kit extension that adds human approval gates
 to Requirements and Design plus independent-context review checkpoints around
 native task generation and implementation. Read this file before changing the
 repository.
@@ -22,9 +22,13 @@ repository.
    human decisions. Final summaries stay ≤20 lines, include “what I am least
    confident about”, and revisions use diff-only re-approval.
 5. **Scenario-first design**: every human decision starts with one shared,
-   self-contained actor/trigger/outcome or failure scenario. Options compare
-   observable consequences in that same scenario; abstractions, FRs, paths,
-   and flow evidence follow as Technical basis.
+   self-contained engineering scenario and compares observable consequences in
+   that scenario. Conversation uses domain-native prose, preserves relevant
+   technical vocabulary, and presents direct option bullets plus a natural
+   recommendation rather than schema-like labels; it never invents UI actions
+   for a non-UI feature. Supporting constraints and evidence are integrated
+   only where material or expanded on request. The Design artifact retains its
+   structured evidence fields.
 
 Feature content has exactly three approval mechanisms: a decision answer, the
 defaults batch, and final summary/diff approval. “Proceed” cannot seal unresolved
@@ -84,7 +88,7 @@ after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.5.0 manifest, fixed hooks, verified version range |
+| `extension.yml` | 0.5.1 manifest, fixed hooks, verified version range |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/gatespec-{spec,plan}-template.md` | upstream-compatible artifacts |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |

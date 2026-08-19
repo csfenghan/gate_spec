@@ -176,13 +176,17 @@ for skill in "$claude_spec" "$codex_spec"; do
     '**Blocking human decision**' \
     '**Technical matter deferred to Design**' \
     'Technology choice alone never makes an item blocking.' \
-    '**Scenario**' \
-    '**Fixed boundary**' \
-    '**Why this needs you**' \
-    '**Technical basis**' \
-    'deleting Technical basis identifiers'; do
+    'not as a labeled questionnaire' \
+    'Use domain-native roles and actions.' \
+    'Keep relevant technical vocabulary intact' \
+    'invent a click, button' \
+    'Do not render standalone' \
+    'explain R<n>' \
+    'hash-only refresh is not progress'; do
     grep -F "$rule" "$skill" >/dev/null || triage_contract_ok=0
   done
+  grep -F 'in this exact cognitive order' "$skill" >/dev/null && triage_contract_ok=0
+  grep -F 'deleting Technical basis identifiers' "$skill" >/dev/null && triage_contract_ok=0
 done
 for skill in "$claude_plan" "$codex_plan"; do
   for rule in \
@@ -192,15 +196,22 @@ for skill in "$claude_plan" "$codex_plan"; do
     'It gets no' \
     'dominated or forbidden foil' \
     'complex or high-risk card consumes the full' \
-    '**Why this needs you**' \
-    'deleting Technical basis identifiers'; do
+    'not as a labeled questionnaire' \
+    'Use domain-native roles and actions.' \
+    'Keep relevant technical vocabulary intact' \
+    'invent a click, button' \
+    'Do not render standalone' \
+    'explain D<n>' \
+    'does not change the artifact schema'; do
     grep -F "$rule" "$skill" >/dev/null || triage_contract_ok=0
   done
+  grep -F 'in this exact cognitive order' "$skill" >/dev/null && triage_contract_ok=0
+  grep -F 'deleting Technical basis identifiers' "$skill" >/dev/null && triage_contract_ok=0
 done
 if [[ "$triage_contract_ok" -eq 1 ]]; then
-  ok "rendered Claude/Codex skills preserve scenario-first decision triage"
+  ok "rendered Claude/Codex skills preserve engineering-scenario decision triage"
 else
-  not_ok "rendered scenario-first decision triage contract"
+  not_ok "rendered engineering-scenario decision triage contract"
 fi
 
 design_evidence_ok=1
@@ -364,7 +375,7 @@ else
   ok "atomic renderer and reviewer installer leave zero temporary files"
 fi
 
-if ! grep -F 'version: "0.5.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.5.1"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -375,9 +386,9 @@ if ! grep -F 'version: "0.5.0"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null; then
-  not_ok "0.5.0 manifest requirements and fixed hook entries"
+  not_ok "0.5.1 manifest requirements and fixed hook entries"
 else
-  ok "0.5.0 manifest requires the native sequence and registers all six fixed hooks"
+  ok "0.5.1 manifest requires the native sequence and registers all six fixed hooks"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

@@ -643,7 +643,7 @@ awk '
   !skip {print}
 ' "$TEST_TMP/good/plan.md" > "$TEST_TMP/scenario-first-decision/plan.md.tmp" && mv "$TEST_TMP/scenario-first-decision/plan.md.tmp" "$TEST_TMP/scenario-first-decision/plan.md"
 seal "$TEST_TMP/scenario-first-decision/plan.md"
-expect pass design "$TEST_TMP/scenario-first-decision" "scenario-first decision blocks remain checker-compatible"
+expect pass design "$TEST_TMP/scenario-first-decision" "structured decision blocks remain checker-compatible after presentation change"
 
 clone_good zero-decision
 awk '

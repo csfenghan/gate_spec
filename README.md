@@ -1,6 +1,6 @@
 # GateSpec
 
-GateSpec 0.5.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.5.1 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension that puts explicit human approval gates on requirements and design,
 then requires task and implementation review receipts around the unchanged
 native execution path. It does not fork or modify upstream commands.
@@ -62,18 +62,31 @@ defer stay in Implementation Freedoms with explicit bounds. A user can request
 an explanation or promote either classification into full discussion before
 final approval.
 
-Human decisions retain a transient dependency graph and stable IDs. Each card
-starts with one shared actor/trigger/outcome or failure scenario, states what is
-already fixed and why human input matters, compares every option in that same
-scenario, and puts FRs, constraints, paths, and flow evidence last. A reader
-must be able to understand the choice without opening those references.
+Human decisions retain a transient dependency graph and stable IDs. In
+conversation, each card uses a plain question, one short domain-native
+engineering scenario, direct A/B/C option bullets, and a natural recommendation.
+It preserves relevant API, thread, lifecycle, protocol, state, and error terms
+instead of replacing them with consumer analogies. It does not expose
+`Scenario`, `Fixed boundary`, `Why this needs you`, `Options`, `Recommendation`,
+or `Technical basis` as questionnaire fields, and it does not invent UI actions
+for a non-UI feature. Boundaries and evidence are integrated where they affect
+the choice or expanded through `explain R<n>` / `explain D<n>`. A reader must
+still understand the choice without opening references.
+
+The conversational form is distinct from artifact evidence. Accepted
+Requirements choices remain compact Clarification Q/A entries; accepted Design
+choices are normalized into the existing structured Decision Log fields. This
+keeps approved artifacts and old Drafts compatible while making the approval
+conversation easier to follow.
 
 Each round contains at most four simple, pairwise-independent cards under a
 four-unit cognitive budget. A complex or high-risk card consumes the full
-budget and is presented alone. Progress counts only approval-eligible human
-decisions; a separate compact digest reports other buckets without turning
-them into a decision backlog. Dependent decisions remain serial and cycles
-become one coherent bundled decision.
+budget and is presented alone. Progress is one compact line with current IDs
+and topics; unchanged hashes, successful or absent hooks, resume recaps, and
+raw dependency telemetry stay out unless they require action or affect the
+choice. Other buckets are summarized only on first inventory or material
+reclassification. Dependent decisions remain serial and cycles become one
+coherent bundled decision.
 
 Requirements IDs are stored inside the existing Clarification form as
 `- Q: [R<n>] ... → A: ...`; Design keeps `D<n>` blocks only for individually

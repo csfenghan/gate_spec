@@ -168,37 +168,57 @@ contains at most four normal cards and total load at most four.
 Choose cards only from the unresolved dependency frontier. Prefer cards sharing
 one actor or user journey; present fewer rather than mix unrelated mental
 contexts. Within a coherent set, prefer items that unlock the most downstream
-decisions, then P1/external behavior, then discovery order. Before the cards,
-show one compact progress line containing resolved/currently-known **human
-decision** counts, this batch's IDs, and dependency-blocked human topics. Do not
-count defaults or technical matters as decisions. On the first inventory and
-when classification changes, add one compact digest of the other bucket counts
-and state that the user may ask to expand or discuss any topic.
+decisions, then P1/external behavior, then discovery order.
 
-Each platform-neutral Markdown decision card contains, in this exact cognitive
-order:
+Before the cards, show one compact progress line containing the Requirements
+status when useful, resolved/currently-known **human decision** counts, and this
+batch's IDs and topics. Mention a dependency-blocked topic only when it helps
+explain why it comes later; do not report a raw dependency count. Do not count
+defaults or technical matters as decisions. Report the other bucket counts only
+on the first inventory or after a material reclassification, in one compact
+sentence that preserves the user's ability to request discussion.
+A hash-only refresh is not progress. A resumed answer recap, unchanged
+constraint hash, or successful or absent hook stays out of the decision
+introduction unless it requires user action or changes the available choices.
 
-1. `R<n>` plus a plain-language question that does not require identifiers to
-   understand.
-2. **Scenario** — the affected actor, initial state, trigger, and observable
-   outcome or failure.
-3. **Fixed boundary** — what approved input or higher-priority constraints have
-   already decided and this card cannot reopen.
-4. **Why this needs you** — the concrete consequence on which reasonable humans
-   could prefer different answers.
-5. **Options** — 2–4 viable mutually exclusive options applied to the same
-   scenario. State the observable result and trade-off first, then any technical
-   mechanism and constraint result. Never include a dominated or forbidden foil.
-6. **Recommendation** — 1–2 sentences, after all options.
-7. **Technical basis** — repository facts, constraint sources, and any existing
-   identifiers last rather than as the comprehension entry point.
-8. When applicable, `⚠ High risk — explicit R<n>=<choice> authorization
-   required; batch recommendation shortcuts do not cover this decision`, plus
-   the concrete reason.
+Present each platform-neutral Markdown decision as an engineering scenario,
+not as a labeled questionnaire. Use this conversational shape:
 
-The card must be self-contained: deleting Technical basis identifiers must not
-prevent a reader from explaining the situation, alternatives, and consequences.
-If this test fails, rewrite or split the card before presenting it.
+1. A `### R<n>: <plain-language question>` heading understandable without
+   artifact identifiers.
+2. One to three short prose paragraphs describing the concrete current state,
+   trigger, affected caller/operator/system, observable outcome or failure, and
+   the decision boundaries. Use domain-native roles and actions.
+   Keep relevant technical vocabulary intact: APIs, threads, lifecycle,
+   protocol, state, and error terms must not become consumer analogies. Do not
+   invent a click, button, page, or other UI proxy unless the feature itself has
+   that UI.
+3. When useful, one natural bridge sentence such as “This needs to determine
+   whether ...”; it is prose, not a required field.
+4. Two to four direct `- **A**: ...` option bullets applied to the same scenario.
+   Mark the recommended bullet `- **A (Recommended)**: ...`. State observable
+   behavior and trade-offs first, then only the mechanism needed to distinguish
+   the options. Exclude dominated or forbidden foils.
+5. One final natural recommendation sentence after the options, including any
+   material caveat the user must understand.
+
+Do not render standalone `Scenario`, `Fixed boundary`, `Why this needs you`,
+`Options`, `Recommendation`, or `Technical basis` labels in the conversation.
+Integrate fixed boundaries and decision-relevant evidence into the scenario,
+options, or recommendation instead. If every option has the same constraint
+result, state it once only when material rather than repeating it per option.
+Put a citation next to a claim only when that source materially affects the
+choice; provide full repository, constraint, and identifier detail on
+`explain R<n>` or `explain <topic>`. This expansion is evidence, not another
+approval mechanism.
+
+The card remains self-contained: without opening cited artifacts, a reader can
+restate the situation, decision boundary, alternatives, and human consequences.
+Rewrite or split a card that fails this test. When applicable, append the
+explicit warning
+`⚠ High risk — explicit R<n>=<choice> authorization required; batch recommendation shortcuts do not cover this decision`
+and its concrete reason; high-risk authorization is the exception that must
+remain visibly separate.
 
 Wait for the batch response. Accept an ID mapped to an option letter, exact
 option label, or `recommended`, for example `R1=A; R2=recommended`. “Accept all

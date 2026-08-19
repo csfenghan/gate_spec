@@ -3,7 +3,7 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.5.0"
+  version: "0.5.1"
   description: "Scenario-first human-gated requirements/design with triaged engineering determinations plus fresh-context reviews around the native tasks/analyze/implement workflow"
   category: "process"
   effect: "read-write"

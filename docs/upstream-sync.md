@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.5.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.5.1 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -62,10 +62,14 @@ In a scratch initialized project:
    contains a language-tagged core contract skeleton plus ordered success and
    failure flow; and directional text is accepted without Mermaid. Confirm a
    shallow legacy one-line dimension fails.
-9. For every R/D card, remove Technical basis identifiers mentally and confirm
-   the actor, trigger, options, and consequences remain understandable. Confirm
-   fixed boundary and why-human-input fields precede options, while FRs,
-   constraints, paths, and flows appear last.
+9. For every conversational R/D card, confirm it uses a short domain-native
+   engineering scenario, direct option bullets, and a natural recommendation;
+   it must not render the structured Decision Log labels or invent UI actions
+   for a non-UI feature. Remove citations mentally and confirm the situation,
+   boundary, options, and consequences remain understandable, then use
+   `explain R<n>` / `explain D<n>` to confirm the full basis remains available.
+   For an approved D choice, confirm plan.md still contains the existing
+   structured fields and passes the Design gate.
 10. Confirm a co-presented defaults card needs its own explicit approval,
    partial answers retain IDs and refill the next batch, conflicting answers
    preserve unaffected approvals, and a legacy Draft resumes without rewriting

@@ -1,4 +1,4 @@
-# GateSpec 0.5.0 Gate Protocol
+# GateSpec 0.5.1 Gate Protocol
 
 This document defines the Requirements/Design approval gates, native-task
 review contract, fresh-context review receipts, fixed hooks, templates, and
@@ -72,12 +72,17 @@ scenario, options, recommendation, or constraint result. Only frontier
 decisions may share a batch; uncertainty creates an edge, and a cycle
 collapses into one coherent bundled decision.
 
-Every card is self-contained and ordered for human comprehension: plain
-question, one shared actor/trigger/outcome or failure scenario, fixed boundary,
-why human input matters, options compared in that same scenario, recommendation,
-then Technical basis (FRs, constraints, paths, and flow evidence). Observable
-consequences precede mechanisms. Removing Technical basis identifiers must not
-make the choice unintelligible.
+Every conversational card is self-contained and ordered for human
+comprehension: a plain question, one short domain-native engineering scenario,
+direct option bullets in that scenario, and a natural recommendation.
+Observable consequences precede mechanisms, while relevant API, thread,
+lifecycle, protocol, state, and error vocabulary remains intact instead of
+becoming a consumer analogy. Fixed boundaries and supporting evidence are
+integrated where they affect the choice or expanded through `explain R<n>` /
+`explain D<n>`; conversation does not expose them as a fixed questionnaire
+schema. A non-UI feature never gains invented clicks, buttons, pages, or other
+UI proxies. Removing artifact identifiers and citations must not make the
+choice unintelligible.
 
 Each round has cognitive load at most four. A normal card has load one; a
 complex or high-risk card consumes all four units and is presented alone.
@@ -85,24 +90,27 @@ Simple cards share an actor/journey where possible; the agent presents fewer
 rather than force unrelated mental contexts together. High-risk cards require
 an explicit ID/choice; whole-batch recommendation shortcuts exclude them.
 
-A compact progress line reports only resolved/currently-known human decisions,
-current IDs, and dependency-blocked human topics. A separate digest reports
-other bucket counts on first inventory or classification change. Partial
-answers are validated together, then every unaffected explicit answer is
-retained. Unanswered IDs lead the next batch, conflicts become an explicit
-reconciliation decision, and retired legacy IDs are not reused. Per-round
-split/single/cap and explain/discuss controls are temporary. The Bash checker
-validates compatible artifact structure, not semantic classification,
-self-containment, or batch provenance; rendered-protocol assertions and
+A compact progress line reports resolved/currently-known human decisions plus
+current IDs and topics. Dependency-blocked topics are named only when they
+explain sequencing; raw dependency counts, unchanged hashes, successful or
+absent hooks, and resume recaps stay out unless they require action or affect a
+choice. A separate digest reports other bucket counts only on first inventory
+or material reclassification. Partial answers are validated together, then
+every unaffected explicit answer is retained. Unanswered IDs lead the next
+batch, conflicts become an explicit reconciliation decision, and retired
+legacy IDs are not reused. Per-round split/single/cap and explain/discuss
+controls are temporary. The Bash checker validates compatible artifact
+structure, not semantic classification, self-containment, conversational
+presentation, or batch provenance; rendered-protocol assertions and
 dual-platform behavioral smoke cover those prompt contracts.
 
 ## Requirements protocol
 
 Repository facts are discovered. Technology choice alone is not a blocking
 Requirement: technical-only matters move to Design. Each blocking card has
-2–4 viable options in one shared scenario, fixed boundaries, the consequence
-that requires human input, constraint results, a recommendation, and Technical
-basis last. Stable `R<n>` IDs map explicit answers into the existing
+2–4 viable options in one shared engineering scenario, with boundaries and
+decision-relevant evidence integrated into its prose rather than rendered as
+fixed fields. Stable `R<n>` IDs map explicit answers into the existing
 `- Q: [R<n>] ... → A: ...` form; legacy unnumbered entries remain valid.
 Proposed defaults are batch-approved once. They may be co-presented as one
 independent normal card, never with a complex/high-risk card, and require their
@@ -136,8 +144,10 @@ Every design choice requiring individual human approval uses an exact
 `### D<n>: <topic>` block with one shared scenario, fixed boundary, why human
 input matters, at least two viable same-scenario options, observable trade-offs,
 constraint results, a recommendation, Technical basis, and one dated user
-choice. Adaptive batch grouping is never stored in the Decision Log. A design
-with no such decision uses:
+choice. The agent normalizes the approved conversational choice into this
+structured artifact form; the fields are not the interactive card. Adaptive
+batch grouping is never stored in the Decision Log. A design with no such
+decision uses:
 
 ```markdown
 - None — <specific reason no design choice required individual human approval>

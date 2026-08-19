@@ -158,36 +158,56 @@ one actor or operational journey; present fewer rather than mix unrelated
 mental contexts. Within a coherent set, prefer decisions that unlock the most
 downstream decisions, then P1/external behavior, then discovery order.
 
-Start each batch with one compact progress line containing resolved and
-currently-known **human decision** counts, this batch's IDs, and the number of
-dependency-blocked human topics. Do not count engineering determinations or
-Implementation Freedoms as decisions. On first inventory and whenever a bucket
-changes, add a compact bucket-count digest and state that any topic can be
-expanded or promoted.
+Start each batch with one compact progress line containing the Design status
+when useful, resolved/currently-known **human decision** counts, and this
+batch's IDs and topics. Mention a dependency-blocked topic only when it helps
+explain why it comes later; do not report a raw dependency count. Do not count
+engineering determinations or Implementation Freedoms as decisions. Report the
+other bucket counts only on the first inventory or after a material
+reclassification, in one compact sentence that preserves the user's ability to
+request expansion or promotion.
+A hash-only refresh is not progress. A resumed answer recap, unchanged
+constraint hash, or successful or absent hook stays out of the decision
+introduction unless it requires user action or changes the available choices.
 
-For each platform-neutral Markdown decision card, include in this exact
-cognitive order:
+Present each platform-neutral Markdown decision as an engineering scenario,
+not as a labeled questionnaire. Use this conversational shape:
 
-1. `D<n>` plus a plain-language question understandable without identifiers.
-2. **Scenario** — the affected actor, initial state, trigger, and observable
-   outcome or field failure.
-3. **Fixed boundary** — what approved Requirements or higher-priority
-   constraints already decide and this card cannot reopen.
-4. **Why this needs you** — the concrete consequence on which reasonable humans
-   could prefer different answers.
-5. **Options** — 2–4 viable mutually exclusive options applied to the same
-   scenario. State observable result/trade-off first, then technical mechanism
-   and constraint result. Never include a dominated or forbidden foil.
-6. **Recommendation** — 1–2 sentences, after all options.
-7. **Technical basis** — FRs, prior decisions, constraint sources, repository
-   facts, file trees, or flow traces last rather than as the comprehension entry.
-8. When applicable, `⚠ High risk — explicit D<n>=<choice> authorization
-   required; batch recommendation shortcuts do not cover this decision`, plus
-   the concrete reason.
+1. A `### D<n>: <plain-language question>` heading understandable without
+   artifact identifiers.
+2. One to three short prose paragraphs describing the concrete current state,
+   trigger, affected caller/operator/system, observable outcome or failure, and
+   the decision boundaries. Use domain-native roles and actions.
+   Keep relevant technical vocabulary intact: APIs, threads, lifecycle,
+   protocol, state, and error terms must not become consumer analogies. Do not
+   invent a click, button, page, or other UI proxy unless the feature itself has
+   that UI.
+3. When useful, one natural bridge sentence such as “This needs to determine
+   whether ...”; it is prose, not a required field.
+4. Two to four direct `- **A**: ...` option bullets applied to the same scenario.
+   Mark the recommended bullet `- **A (Recommended)**: ...`. State observable
+   behavior and trade-offs first, then only the mechanism needed to distinguish
+   the options. Exclude dominated or forbidden foils.
+5. One final natural recommendation sentence after the options, including any
+   material caveat the user must understand.
 
-The card is self-contained only when deleting Technical basis identifiers still
-leaves enough information to explain the situation, alternatives, and human
-consequences. Rewrite or split a card that fails this test before presenting it.
+Do not render standalone `Scenario`, `Fixed boundary`, `Why this needs you`,
+`Options`, `Recommendation`, or `Technical basis` labels in the conversation.
+Integrate fixed boundaries and decision-relevant evidence into the scenario,
+options, or recommendation instead. If every option has the same constraint
+result, state it once only when material rather than repeating it per option.
+Put a citation next to a claim only when that source materially affects the
+choice; provide full FR, prior-decision, constraint, repository, path, and flow
+detail on `explain D<n>` or `explain <topic>`. This expansion is evidence, not
+another approval mechanism.
+
+The card remains self-contained: without opening cited artifacts, a reader can
+restate the situation, decision boundary, alternatives, and human consequences.
+Rewrite or split a card that fails this test. When applicable, append the
+explicit warning
+`⚠ High risk — explicit D<n>=<choice> authorization required; batch recommendation shortcuts do not cover this decision`
+and its concrete reason; high-risk authorization is the exception that must
+remain visibly separate.
 
 Wait for the batch response. Accept an ID mapped to an option letter, exact
 option label, or `recommended`, for example `D1=A; D2=recommended`. “Accept all
@@ -195,14 +215,18 @@ recommendations in this batch” answers every non-high-risk card in the current
 batch only. Every high-risk card requires its explicit `D<n>` choice; this is
 the normal individual-decision approval mechanism, not a fourth mechanism.
 
-Validate all answers as a set before writing. Record each unambiguous,
-unaffected choice under exact heading `### D<n>: <topic>` with one
-`**Approved**: <choice> (YYYY-MM-DD)`. Preserve unanswered IDs and put them
-first in the next batch, refilling remaining capacity with newly eligible
-independent decisions. If choices conflict or introduce a cross-cutting
-constraint, retain unaffected approvals and turn only the conflict into a
-reconciliation decision; never choose or revise an option automatically. A
-constitution MUST conflict is not recorded.
+Validate all answers as a set before writing. Normalize each unambiguous,
+unaffected conversational choice into the existing structured Decision Log
+block under exact heading `### D<n>: <topic>`, retaining the `Scenario`, `Fixed
+boundary`, `Why this needs you`, `Options`, `Recommendation`, `Technical basis`,
+and one `**Approved**: <choice> (YYYY-MM-DD)` field. The conversational shape
+does not change the artifact schema, and existing structured D blocks remain
+valid and are not rewritten merely for presentation. Preserve unanswered IDs
+and put them first in the next batch, refilling remaining capacity with newly
+eligible independent decisions. If choices conflict or introduce a
+cross-cutting constraint, retain unaffected approvals and turn only the
+conflict into a reconciliation decision; never choose or revise an option
+automatically. A constitution MUST conflict is not recorded.
 
 Honor cheap, non-persistent controls such as `split D2`, `ask one next round`,
 or `next round at most N` (1–4). A deferred human decision remains unresolved

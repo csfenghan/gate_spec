@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 (2026-08-19)
+
+- Replaced schema-like conversational R/D cards with concise, domain-native
+  engineering scenarios, direct option bullets, and natural recommendations.
+- Kept fixed boundaries and technical evidence available inline when material
+  or through `explain`, while suppressing unchanged hashes, absent hooks,
+  resume recaps, and other non-actionable progress telemetry.
+- Preserved the structured Design Decision Log, artifact schema, checker,
+  stable IDs, approval mechanisms, and spec-kit compatibility window.
+
 ## 0.5.0 (2026-08-19)
 
 - Added decision triage so only choices with at least two viable options and
