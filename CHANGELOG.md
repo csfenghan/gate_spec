@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 (2026-08-19)
+
+- Replaced serial Specify/Plan questioning with adaptive batches of up to four
+  pairwise-independent frontier decisions under a cognitive-load budget.
+- Added complete first-pass decision inventories, transient dependency graphs,
+  stable Requirements `R<n>` IDs, compact progress, and temporary per-round
+  split/single/cap controls without adding workflow state or flags.
+- Preserved full per-decision facts, options, constraint results, concrete
+  Design scenarios, recommendations, and individual approvals inside batches.
+- Added explicit high-risk authorization, partial-answer retention/refill, and
+  conflict reconciliation that keeps unaffected approvals and forbids inferred
+  option changes.
+- Allowed an independent defaults batch to share a round while retaining its
+  separate explicit approval; decision shortcuts never approve defaults.
+- Kept legacy unnumbered Clarifications valid, left checker/hook/artifact hash
+  contracts unchanged, and added dual-platform batching smoke requirements.
+
 ## 0.3.0 (2026-08-18)
 
 - Added an approved `Implementation Review Contract` with exact checkpoint,

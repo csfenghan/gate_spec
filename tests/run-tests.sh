@@ -301,7 +301,7 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 **Status**: Approved-Requirements (2026-08-07)
 ## Clarifications
 ### Session 2026-08-07
-- Q: What reload scope is required? → A: Replace values without dropping connections.
+- Q: [R1] What reload scope is required? → A: Replace values without dropping connections.
 ## Approved Defaults
 | # | Item | Approved Default | Approved |
 |---|------|------------------|----------|
@@ -388,6 +388,11 @@ seal "$TEST_TMP/good/plan.md"
 
 expect pass spec "$TEST_TMP/good" "approved requirements pass"
 expect pass design "$TEST_TMP/good" "approved requirements and design pass"
+
+clone_good legacy-clarification
+rewrite "$TEST_TMP/legacy-clarification/spec.md" 's/\[R1\] //'
+seal "$TEST_TMP/legacy-clarification/spec.md"
+expect pass spec "$TEST_TMP/legacy-clarification" "legacy unnumbered clarification remains valid"
 
 clone_good chinese-constraint-basis
 rewrite "$TEST_TMP/chinese-constraint-basis/spec.md" 's/portable watcher; connections remain active\./必须使用可移植的监视机制，并保持现有连接。/'

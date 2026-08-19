@@ -24,12 +24,14 @@
   GATESPEC: Every clarification round lands here AND its conclusion MUST be
   applied to the body sections below (self-containment: a reader who never saw
   the conversation can implement from this file alone).
+  Stable R<n> IDs map adaptive decision cards to their explicit answers.
+  Legacy concluded entries without an ID remain valid and are not rewritten.
   Format per session (compatible with core speckit.clarify):
 -->
 
 ### Session [YYYY-MM-DD]
 
-- Q: [question asked] → A: [user's final answer]
+- Q: [R1] [question asked] → A: [user's final answer]
 
 <!-- If no clarification was needed, replace the session and example with:
 - None — <specific reason no blocking decision was required>

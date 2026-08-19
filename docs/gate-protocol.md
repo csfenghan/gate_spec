@@ -1,4 +1,4 @@
-# GateSpec 0.3.0 Gate Protocol
+# GateSpec 0.4.0 Gate Protocol
 
 This document defines the Requirements/Design approval gates, native-task
 review contract, fresh-context review receipts, fixed hooks, templates, and
@@ -44,13 +44,44 @@ use Simplified Chinese while paths, hashes, API names, code identifiers, and
 - User-constraint drift warns until `--refresh-constraints`; constitution or
   project-policy drift forces Requirements re-approval.
 
+## Adaptive decision batches
+
+Specify and Plan make a complete first-pass inventory of known decisions and
+their dependencies. The dependency graph is transient prompt reasoning, not a
+persisted workflow artifact or orchestration state. A decision depends on
+another when any option can change its existence, context, options,
+recommendation, or constraint result. Only dependency-frontier decisions may
+share a batch; uncertainty creates an edge, and a cycle collapses into one
+coherent bundled decision.
+
+Each round has at most four cards and cognitive load at most four. A normal
+card has load one; a complex or high-risk card has load two; a card that is
+both has load three. Complexity covers multi-option, cross-module/contract, or
+multi-step flow/failure/migration choices. High risk covers constraint
+exemptions, irreversible/migration behavior, security/privacy/compliance, and
+external compatibility breaks. High-risk cards may share a batch but require
+an explicit ID/choice; whole-batch recommendation shortcuts exclude them.
+
+A compact progress line reports resolved/currently-known counts, current IDs,
+and dependency-blocked topic count. Partial answers are validated together,
+then every unaffected explicit answer is retained. Unanswered IDs lead the
+next batch, newly eligible independent work may refill it, and conflicts become
+an explicit reconciliation decision without changing unaffected approvals.
+Per-round split/single/cap controls are temporary and create no workflow mode.
+The Bash checker validates the resulting per-decision records, not conversation
+batch provenance or semantic independence. Rendered-protocol assertions and
+dual-platform behavioral smoke provide evidence for those prompt contracts.
+
 ## Requirements protocol
 
 Repository facts are discovered. Unknown decisions are blocking questions or
-proposed defaults, with a cheap user veto. A blocking question presents 2–4
-mutually exclusive options, constraint results, and a recommendation, then
-waits. Proposed defaults are batch-approved once. “Proceed” never seals an
-unresolved blocking item.
+proposed defaults, with a cheap user veto. Each blocking card presents 2–4
+mutually exclusive options, constraint results, and a recommendation. Stable
+`R<n>` IDs map explicit answers into the existing
+`- Q: [R<n>] ... → A: ...` form; legacy unnumbered entries remain valid.
+Proposed defaults are batch-approved once. They may be co-presented as one
+independent card but require their own explicit approval; a decision shortcut
+never approves them. “Proceed” never seals an unresolved blocking item.
 
 Empty sections have exact semantics:
 
@@ -75,7 +106,8 @@ invalidates an old plan.
 
 Every non-trivial design decision uses an exact `### D<n>: <topic>` block with
 at least two concrete scenarios, observable trade-offs, constraint results, a
-recommendation, and one dated user choice. A design with no such decision uses:
+recommendation, and one dated user choice. Adaptive batch grouping is never
+stored in the Decision Log. A design with no such decision uses:
 
 ```markdown
 - None — <specific reason no non-trivial decision exists>

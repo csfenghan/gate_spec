@@ -1,6 +1,6 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.3.0 is a personal spec-kit extension that adds human approval gates
+GateSpec 0.4.0 is a personal spec-kit extension that adds human approval gates
 to Requirements and Design plus independent-context review checkpoints around
 native task generation and implementation. Read this file before changing the
 repository.
@@ -12,9 +12,10 @@ repository.
 2. **Low auto-inference**: unknowns become a blocking question or proposed
    default. The blocking/default classification has a cheap user veto.
 3. **Discuss before execute**: Requirements blocks plan; Design blocks tasks.
-4. **Bounded presentation**: one decision at a time, one defaults batch,
-   ≤20-line final summaries including “what I am least confident about”, and
-   diff-only re-approval.
+4. **Bounded presentation**: each round contains at most four cards—pairwise-
+   independent decisions plus at most one independent defaults card—within a
+   cognitive-load budget of four, ≤20-line final summaries including “what I
+   am least confident about”, and diff-only re-approval.
 5. **Concrete design**: every design option has a command/file-tree/flow/failure
    scenario and observable trade-offs; abstractions may only follow it.
 
@@ -74,7 +75,7 @@ walkthrough before summary; upstream analyze runs only after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.3.0 manifest, fixed hooks, verified version range |
+| `extension.yml` | 0.4.0 manifest, fixed hooks, verified version range |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/gatespec-{spec,plan}-template.md` | upstream-compatible artifacts |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |

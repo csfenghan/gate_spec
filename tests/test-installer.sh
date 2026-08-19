@@ -140,6 +140,36 @@ else
   not_ok "rendered Constraint Basis language rule"
 fi
 
+batching_contract_ok=1
+for skill in "$claude_spec" "$codex_spec" "$claude_plan" "$codex_plan"; do
+  for rule in \
+    'load at most four.' \
+    'ephemeral dependency graph' \
+    'batch recommendation shortcuts do not cover this decision' \
+    'first in the next batch' \
+    'next round at most N'; do
+    grep -F "$rule" "$skill" >/dev/null || batching_contract_ok=0
+  done
+done
+for rule in \
+  'R1=A; R2=recommended' \
+  'decision shortcut never approves' \
+  'do not rewrite concluded Clarifications that lack IDs'; do
+  grep -F "$rule" "$claude_spec" >/dev/null || batching_contract_ok=0
+  grep -F "$rule" "$codex_spec" >/dev/null || batching_contract_ok=0
+done
+for rule in \
+  'D1=A; D2=recommended' \
+  'grouping is conversational only'; do
+  grep -F "$rule" "$claude_plan" >/dev/null || batching_contract_ok=0
+  grep -F "$rule" "$codex_plan" >/dev/null || batching_contract_ok=0
+done
+if [[ "$batching_contract_ok" -eq 1 ]]; then
+  ok "rendered Claude/Codex skills preserve the adaptive batching contract"
+else
+  not_ok "rendered adaptive batching contract"
+fi
+
 if grep -F '/speckit-tasks' "$claude_plan" >/dev/null &&
    grep -F '/speckit-gatespec-plan' "$claude_spec" >/dev/null &&
    grep -F "${dollar}speckit-tasks" "$codex_plan" >/dev/null &&
@@ -261,7 +291,7 @@ else
   ok "atomic renderer and reviewer installer leave zero temporary files"
 fi
 
-if ! grep -F 'version: "0.3.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.4.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -272,9 +302,9 @@ if ! grep -F 'version: "0.3.0"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null; then
-  not_ok "0.3.0 manifest requirements and fixed hook entries"
+  not_ok "0.4.0 manifest requirements and fixed hook entries"
 else
-  ok "0.3.0 manifest requires the native sequence and registers all six fixed hooks"
+  ok "0.4.0 manifest requires the native sequence and registers all six fixed hooks"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

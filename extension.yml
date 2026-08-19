@@ -3,8 +3,8 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.3.0"
-  description: "Human-gated requirements/design plus fresh-context task and implementation review receipts around the native tasks/analyze/implement workflow"
+  version: "0.4.0"
+  description: "Human-gated requirements/design with adaptive decision batches plus fresh-context reviews around the native tasks/analyze/implement workflow"
   category: "process"
   effect: "read-write"
   author: "harry.feng"
@@ -24,12 +24,12 @@ provides:
   commands:
     - name: "speckit.gatespec.specify"
       file: "commands/speckit.gatespec.specify.md"
-      description: "Gated specify: grilling-style clarification, no auto-inference, explicit user approval"
+      description: "Gated specify: adaptive independent-decision batches, no auto-inference, explicit user approval"
       aliases: ["gatespec.specify"]
 
     - name: "speckit.gatespec.plan"
       file: "commands/speckit.gatespec.plan.md"
-      description: "Gated plan: per-decision options with concrete scenarios, user-approved Decision Log"
+      description: "Gated plan: adaptive concrete decision batches with a user-approved Decision Log"
       aliases: ["gatespec.plan"]
 
     - name: "speckit.gatespec.check"

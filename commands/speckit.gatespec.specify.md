@@ -1,5 +1,5 @@
 ---
-description: "GateSpec gated specify: one-at-a-time decisions, frozen constraint basis, safe resume, and explicit requirements approval."
+description: "GateSpec gated specify: adaptive independent-decision batches, frozen constraint basis, safe resume, and explicit requirements approval."
 handoffs:
   - label: Gated Technical Plan
     agent: speckit.gatespec.plan
@@ -22,14 +22,17 @@ Consider non-empty user input before proceeding.
 1. Never infer an unapproved decision. Unknowns remain a blocking question
    or a proposed default. Facts discoverable from the repository are looked
    up, not asked.
-2. Ask exactly one blocking decision at a time, with 2–4 mutually exclusive
-   options, a recommendation, and the applicable constraint result.
+2. Inventory known blocking decisions and their dependencies before asking.
+   Present only a current-frontier batch of 1–4 pairwise-independent decisions
+   within the cognitive-load budget below. Every decision still has 2–4
+   mutually exclusive options, a recommendation, and the applicable constraint
+   result, and each requires its own explicit answer.
 3. The user approves feature content in exactly three ways: individual
    decision answers, one batch approval of proposed defaults, and final
    approval of the compressed artifact summary/diff.
 4. A user saying “done”, “proceed”, or equivalent while any blocking item is
-   unresolved pauses the command. Preserve the Draft and explain the next
-   unresolved item; never seal it.
+   unresolved pauses the command. Preserve the Draft and present the next
+   legal unresolved batch; never seal it.
 5. Once all blocking items and defaults are resolved, write/update the Draft
    automatically. Do not require a separate “write it” confirmation.
 
@@ -107,23 +110,87 @@ conflict and its resolution explicitly.
 `--refresh-constraints` implies the `--revise` diff flow and recomputes all
 three sources. Never append personal constraints into the constitution.
 
-## Step 3: clarify one decision at a time
+## Step 3: inventory and clarify in adaptive batches
 
-Classify each unknown as blocking (changes scope, data, interface, technology,
-or visible behavior) or non-blocking (routine detail with a safe conventional
+Before asking, make one complete discovery pass over the request, approved or
+Draft artifact, constraints, and relevant repository facts. Run independent
+read-only searches in parallel when the platform supports it. Classify every
+known unknown as blocking (changes scope, data, interface, technology, or
+visible behavior) or non-blocking (routine detail with a safe conventional
 default). The user can veto this classification cheaply by pulling any default
 into full discussion.
 
-For each blocking item, in dependency order:
+Build an ephemeral dependency graph; never persist it or batch state as a new
+workflow artifact. Decision A depends on B when any choice for B can change
+A's existence, context, options, recommendation, or constraint result. If
+independence is uncertain, add the dependency. Collapse a dependency cycle
+into one composite decision whose options are coherent bundles. On resume,
+re-derive the inventory from repository artifacts and facts.
 
-1. State repository facts and the consequence of deciding.
-2. Present 2–4 mutually exclusive options and the constraint result for each.
-3. Recommend one option in 1–2 sentences.
-4. Wait. “recommended” accepts the recommendation.
-5. Record `- Q: ... → A: ...` under a dated Clarifications session.
+Assign a stable `R<n>` when a blocking decision is first presented and retain
+it in later batches while conversation context is available. For an existing
+Draft, do not rewrite concluded Clarifications that lack IDs. Choose the next
+number as one greater than both the number of existing concluded Q/A entries
+and the greatest existing `R<n>`. Record an accepted answer as
+`- Q: [R<n>] ... → A: ...` under a dated Clarifications session.
 
-Then present non-blocking items once as a numbered table. A single explicit
-batch approval accepts them; pulled-out rows become one-at-a-time decisions.
+For batch sizing, mark a decision **complex** when it has 3–4 viable options,
+spans multiple FR groups/artifacts/external contracts, or requires a multi-step
+flow, failure, or migration explanation. Mark it **high risk** when it grants a
+constraint exemption or constitution SHOULD deviation, controls irreversible
+or data-migration behavior, affects security/privacy/compliance, or breaks an
+external compatibility contract. Use the higher classification when unsure.
+The cognitive load is 1 for a normal card, 2 for a complex or high-risk card,
+and 3 for a card that is both. A batch contains at most four cards and total
+load at most four. Only dependency edges force serialization; high-risk cards
+may share a batch.
+
+Choose cards only from the unresolved dependency frontier, preferring items
+that unlock the most downstream decisions, then P1/external behavior, then
+discovery order. Before the cards, show one compact progress line containing
+resolved/currently-known blocking counts, this batch's IDs, and the number of
+dependency-blocked topics. The total is explicitly “currently known”; if it
+changes, state the cause in the next progress line without expanding the full
+future decision map.
+
+Each platform-neutral Markdown decision card contains:
+
+1. its `R<n>` and topic;
+2. repository facts and the consequence of deciding;
+3. 2–4 mutually exclusive options with the constraint result for each;
+4. a 1–2 sentence recommendation; and
+5. when applicable, `⚠ High risk — explicit R<n>=<choice> authorization
+   required; batch recommendation shortcuts do not cover this decision`, plus
+   the concrete reason.
+
+Wait for the batch response. Accept an ID mapped to an option letter, exact
+option label, or `recommended`, for example `R1=A; R2=recommended`. “Accept all
+recommendations in this batch” explicitly answers every non-high-risk card in
+the current batch only. It never answers a high-risk card or approves defaults.
+A high-risk `R<n>` choice is still the existing individual-decision approval
+mechanism, not a fourth approval mechanism.
+
+Validate the response as a set before writing. Record every unambiguous answer
+whose validity is unaffected by another answer. Preserve unanswered IDs and
+put them first in the next batch, then refill unused capacity with newly
+eligible independent cards. If answers conflict or introduce a cross-cutting
+constraint, keep unaffected answers and turn only the conflict into an
+explicit reconciliation decision; never choose or revise an option
+automatically. A constitution MUST conflict remains unapprovable and is not
+recorded.
+
+Honor cheap, non-persistent controls such as `split R2`, `ask one next round`,
+or `next round at most N` (1–4). They affect only the named/current next round
+and do not create a workflow flag or stored preference. A user may also defer a
+card; it remains unresolved and blocks final approval, while other independent
+work may continue.
+
+Present all non-blocking items exactly once as the existing numbered defaults
+table. The defaults table may occupy one normal card in a blocking-decision
+batch only when every row is independent of every unresolved and concurrently
+presented decision; otherwise defer it. It always requires its own explicit
+batch approval such as “approve defaults”. A decision shortcut never approves
+it. Pulled-out rows receive new `R<n>` IDs and re-enter the blocking inventory.
 Record approved rows with `✅ YYYY-MM-DD`.
 
 Use these exact empty states when applicable (a blank section never passes):
@@ -143,7 +210,8 @@ least one scenario. Remove all template examples and residual markers.
 
 Perform a fresh-eyes adversarial read for contradictions, terminology drift,
 and hidden guesses. Map every clarification, default, and effective constraint
-to the body. Resolve findings in the text or ask one decision. Run:
+to the body. Resolve findings in the text or return the affected decision to
+the inventory and present the next legal batch. Run:
 
 ```bash
 bash .specify/extensions/gatespec/scripts/bash/check-gate.sh spec <feature-dir>

@@ -1,5 +1,5 @@
 ---
-description: "GateSpec gated plan: concrete per-decision approval, requirements-basis chaining, safe resume, and explicit design approval."
+description: "GateSpec gated plan: concrete adaptive decision batches, requirements-basis chaining, safe resume, and explicit design approval."
 handoffs:
   - label: Create Tasks
     agent: speckit.tasks
@@ -78,10 +78,39 @@ Any spec re-approval makes a plan with the old Requirements hash stale. Archive
 tasks and current reviews, then re-plan; never continue executing stale tasks
 or trust their receipts.
 
-## Step 2: approve design decisions one at a time
+## Step 2: approve design decisions in adaptive batches
 
-Extract every non-trivial design decision. For each, present and wait before
-the next:
+Before asking, make one complete discovery pass over the approved Requirements,
+constraints, existing Draft design artifacts, and relevant repository facts.
+Run independent read-only searches in parallel when supported. Extract every
+known non-trivial design decision and build an ephemeral dependency graph;
+never persist the graph or batch state as a workflow artifact. Decision A
+depends on B when any B choice can change A's existence, context, options,
+recommendation, or constraint result. If independence is uncertain, add the
+dependency. Collapse a dependency cycle into one composite decision whose
+options are coherent design bundles. Re-derive this inventory on resume.
+
+Use unique, monotonically increasing `D<n>` IDs. Preserve existing IDs and
+continue after the greatest one; never renumber a resumed Draft. Mark a
+decision **complex** when it has 3–4 viable options, crosses multiple modules,
+Design Detailing dimensions, or external contracts, or needs a multi-step
+flow, failure, or migration explanation. Mark it **high risk** when it grants a
+constraint exemption or constitution SHOULD deviation, controls irreversible
+or data-migration behavior, affects security/privacy/compliance, or breaks an
+external compatibility contract. Use the higher classification when unsure.
+
+The cognitive load is 1 for a normal card, 2 for a complex or high-risk card,
+and 3 for a card that is both. A batch contains at most four cards and total
+load at most four. Only dependency edges force serialization; high-risk cards
+may share a batch. Choose only from the unresolved dependency frontier,
+preferring decisions that unlock the most downstream decisions, then P1 and
+external behavior, then discovery order.
+
+Start each batch with one compact progress line containing resolved and
+currently-known decision counts, this batch's IDs, and the number of
+dependency-blocked topics. The total is explicitly “currently known”; explain
+any later increase without displaying the full future decision map. For each
+platform-neutral Markdown decision card, include:
 
 1. Context citing FRs, constraint sources, and repository facts.
 2. At least two options, each grounded in a concrete command session, file
@@ -92,8 +121,29 @@ the next:
    needs a recorded reason; a GateSpec constraint exemption needs an explicit
    approval in this Decision Log.
 4. A 1–2 sentence recommendation.
-5. The user's explicit choice, recorded under exact heading
-   `### D<n>: <topic>` with one `**Approved**: <choice> (YYYY-MM-DD)`.
+5. When applicable, `⚠ High risk — explicit D<n>=<choice> authorization
+   required; batch recommendation shortcuts do not cover this decision`, plus
+   the concrete reason.
+
+Wait for the batch response. Accept an ID mapped to an option letter, exact
+option label, or `recommended`, for example `D1=A; D2=recommended`. “Accept all
+recommendations in this batch” answers every non-high-risk card in the current
+batch only. Every high-risk card requires its explicit `D<n>` choice; this is
+the normal individual-decision approval mechanism, not a fourth mechanism.
+
+Validate all answers as a set before writing. Record each unambiguous,
+unaffected choice under exact heading `### D<n>: <topic>` with one
+`**Approved**: <choice> (YYYY-MM-DD)`. Preserve unanswered IDs and put them
+first in the next batch, refilling remaining capacity with newly eligible
+independent decisions. If choices conflict or introduce a cross-cutting
+constraint, retain unaffected approvals and turn only the conflict into a
+reconciliation decision; never choose or revise an option automatically. A
+constitution MUST conflict is not recorded.
+
+Honor cheap, non-persistent controls such as `split D2`, `ask one next round`,
+or `next round at most N` (1–4). A deferred decision remains unresolved and
+blocks Design approval while other independent decisions may continue. Batch
+grouping is conversational only and is never recorded in the Decision Log.
 
 Use unique numeric IDs. If no non-trivial decision exists, write exactly one:
 
@@ -113,7 +163,9 @@ or `N/A — <reason>` / `无额外约束 — <原因>`.
 Ensure every FR has a technical home and every design element traces to an FR
 or approved decision. Remove unapproved gold-plating. Conduct an implementer's
 walkthrough using only spec + design artifacts; close every non-trivial fork
-with a Decision Log approval or bounded Implementation Freedom. quickstart.md
+with a Decision Log approval or bounded Implementation Freedom. If the
+walkthrough discovers a new non-trivial fork, return it to the decision
+inventory and present it in the next legal batch. quickstart.md
 must provide a runnable end-to-end validation path for each P1 story.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol

@@ -1,6 +1,6 @@
 # GateSpec
 
-GateSpec 0.3.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.4.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension that puts explicit human approval gates on requirements and design,
 then requires task and implementation review receipts around the unchanged
 native execution path. It does not fork or modify upstream commands.
@@ -44,6 +44,28 @@ Task and implementation review PASS verdicts are not additional human approval
 mechanisms. A reviewer cannot introduce a requirement, design choice, waiver,
 or scope change; such a finding returns to the existing Requirements or Design
 diff-approval flow.
+
+## Adaptive decision batches
+
+Specify and Plan first discover repository facts and inventory known decision
+dependencies. Each round then presents only pairwise-independent frontier
+decisions: at most four cards and a cognitive-load total of four. A normal card
+costs one, a complex or high-risk card costs two, and a card that is both costs
+three. Dependent decisions remain serial; cycles become one coherent bundled
+decision.
+
+Every card keeps its own options, constraint results, recommendation, stable
+ID, and explicit answer. Requirements IDs are stored inside the existing
+Clarification form as `- Q: [R<n>] ... → A: ...`; Design keeps `D<n>` blocks.
+Legacy Requirements entries without IDs remain valid and are never rewritten.
+
+“Accept all recommendations in this batch” covers only non-high-risk decision
+cards in the current batch. High-risk cards require an explicit ID/choice, and
+the separately presented defaults table still requires “approve defaults”.
+Partial answers are retained; unanswered IDs lead the next batch, which may be
+refilled with newly eligible independent decisions. Users can temporarily ask
+to split a card, ask one next round, or cap the next round at 1–4 cards without
+creating a stored mode.
 
 ## Task and implementation review
 
@@ -200,6 +222,10 @@ This runs Bash syntax checks, ShellCheck, deterministic checker fixtures,
 Claude/Codex renderer checks, manifest checks, and an extension-install smoke
 test when the `specify` CLI is available. Ubuntu and macOS CI run the same
 suite and assert that it leaves the worktree clean.
+
+Static tests cannot prove model batching behavior. Before publishing a release
+that changes Specify/Plan interaction, run the Claude and Codex behavioral
+cases in steps 6–7 of the upstream compatibility ritual; both must pass.
 
 See [the full gate protocol](docs/gate-protocol.md) and
 [the upstream compatibility ritual](docs/upstream-sync.md).

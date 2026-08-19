@@ -57,6 +57,8 @@ explicit Decision Log approval.]
   GATESPEC: One block per non-trivial decision. The gate fails while any
   block has an empty **Approved** field.
   Rules for each block:
+  - Adaptive batches are conversational only; each block remains one separately
+    approved decision with its stable D<n> ID
   - ≥2 options, each with a CONCRETE scenario (command session, file tree,
     failure-in-the-field picture) — abstract quality words alone are forbidden
   - Trade-offs stated as observable behavior, recommendation with reason
