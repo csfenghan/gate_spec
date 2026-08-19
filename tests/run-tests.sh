@@ -39,6 +39,218 @@ clone_good() {
   cp "$TEST_TMP/good/plan.md" "$TEST_TMP/$1/plan.md"
 }
 
+sha_stream() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum
+  else
+    shasum -a 256
+  fi
+}
+
+file_digest() {
+  sha_stream < "$1" | awk '{print $1}'
+}
+
+normalized_tasks_digest() {
+  local file="$1" cr
+  cr=$(printf '\r')
+  sed -E -e "s/${cr}\$//" \
+    -e 's/^(- \[)[xX](\] T[0-9][0-9][0-9]([[:space:]]|$))/\1 \2/' "$file" \
+    | sha_stream | awk '{print $1}'
+}
+
+attachments_digest() {
+  local feature="$1" source rel digest manifest="$TEST_TMP/attachment-manifest"
+  : > "$manifest"
+  for rel in research.md data-model.md quickstart.md; do
+    source="$feature/$rel"
+    if [[ -f "$source" ]]; then
+      digest=$(file_digest "$source")
+      printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+    fi
+  done
+  if [[ -d "$feature/contracts" ]]; then
+    while IFS= read -r source; do
+      [[ -f "$source" ]] || continue
+      rel=${source#"$feature"/}
+      digest=$(file_digest "$source")
+      printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+    done < <(find "$feature/contracts" -type f -print)
+  fi
+  LC_ALL=C sort "$manifest" | sha_stream | awk '{print $1}'
+}
+
+receipt_field() {
+  local file="$1" label="$2"
+  awk -v prefix="- **${label}**: \`" '
+    index($0, prefix) == 1 && substr($0, length($0), 1) == "`" {
+      print substr($0, length(prefix) + 1, length($0) - length(prefix) - 1)
+      exit
+    }
+  ' "$file"
+}
+
+seal_self_hash() {
+  local file="$1" label="$2" digest tmp="$1.tmp"
+  digest=$(sed "/^- \*\*${label}\*\*:/,\$d" "$file" | sha_stream | awk '{print $1}')
+  awk -v label="$label" -v digest="$digest" '
+    $0 ~ "^- \\*\\*" label "\\*\\*:" {
+      print "- **" label "**: `" digest "`"
+      next
+    }
+    { print }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+make_tasks() {
+  local feature="$1"
+  cat > "$feature/tasks.md" <<'EOF'
+# Tasks: Config hot reload
+
+## Phase 1: Setup
+
+- [ ] T001 Create the feature scaffolding
+
+## Phase 2: Foundational
+
+- [ ] T002 Implement the configuration store
+- [ ] T003 GateSpec review checkpoint REV-FOUNDATION: run speckit.gatespec.review-implementation --scope REV-FOUNDATION and require .gatespec/reviews/REV-FOUNDATION/seal.md before continuing
+
+## Phase 3: User Story 1 - Hot reload
+
+- [ ] T004 [US1] Implement hot reload
+- [ ] T005 [US1] GateSpec review checkpoint REV-US1: run speckit.gatespec.review-implementation --scope REV-US1 and require .gatespec/reviews/REV-US1/seal.md before continuing
+
+## Phase 4: Polish & Cross-Cutting Concerns
+
+- [ ] T006 Run complete feature validation
+- [ ] T007 GateSpec review checkpoint REV-FINAL: run speckit.gatespec.review-implementation --scope REV-FINAL and require .gatespec/reviews/REV-FINAL/seal.md before continuing
+EOF
+}
+
+changed_paths_digest() {
+  local repo="$1" base="$2" subject="$3"
+  git -C "$repo" diff --name-only --no-renames "$base" "$subject" \
+    | LC_ALL=C sort | sha_stream | awk '{print $1}'
+}
+
+write_pass_review() {
+  local feature="$1" id="$2" scope="$3" baseline="$4" base="$5" subject="$6" task_ids="$7"
+  local request_tests="$8" verdict_tests="$9" limitations="${10-- None}"
+  local round="${11:-00}" previous="${12:-none}" status="${13:-PASS}"
+  local blocker_body="${14:-- BLOCKER: fixture remediation required}"
+  local directory request verdict seal_file repo changed
+  local spec_hash plan_hash attachments_hash tasks_hash request_hash verdict_hash label
+  directory="$feature/.gatespec/reviews/$id"
+  request="$directory/round-${round}-request.md"
+  verdict="$directory/round-${round}-verdict.md"
+  seal_file="$directory/seal.md"
+  mkdir -p "$directory"
+  spec_hash=$(hash_of "$feature/spec.md")
+  plan_hash=$(hash_of "$feature/plan.md")
+  attachments_hash=$(attachments_digest "$feature")
+  tasks_hash=$(normalized_tasks_digest "$feature/tasks.md")
+  if [[ "$scope" == 'TASKS' ]]; then
+    changed='not-applicable'
+  else
+    repo=$(git -C "$feature" rev-parse --show-toplevel)
+    changed=$(changed_paths_digest "$repo" "$base" "$subject")
+  fi
+  cat > "$request" <<EOF
+- **Protocol-Version**: \`1\`
+- **Review-ID**: \`$id\`
+- **Round**: \`$round\`
+- **Scope**: \`$scope\`
+- **Spec-Content-SHA256**: \`$spec_hash\`
+- **Plan-Content-SHA256**: \`$plan_hash\`
+- **Design-Attachments-SHA256**: \`$attachments_hash\`
+- **Tasks-Definition-SHA256**: \`$tasks_hash\`
+- **Implementation-Baseline**: \`$baseline\`
+- **Base-Commit**: \`$base\`
+- **Subject-Commit**: \`$subject\`
+- **Task-IDs**: \`$task_ids\`
+- **Changed-Paths-SHA256**: \`$changed\`
+- **Previous-Verdict-SHA256**: \`$previous\`
+
+## Required Tests
+
+$request_tests
+
+- **Request-SHA256**: \`pending\`
+EOF
+  seal_self_hash "$request" 'Request-SHA256'
+  request_hash=$(receipt_field "$request" 'Request-SHA256')
+  cat > "$verdict" <<EOF
+- **Protocol-Version**: \`1\`
+- **Review-ID**: \`$id\`
+- **Round**: \`$round\`
+- **Request-SHA256**: \`$request_hash\`
+- **Reviewer-Platform**: \`manual-codex\`
+- **Reviewer-Context-ID**: \`fixture-$id-$round\`
+- **Isolation**: \`fresh\`
+- **Status**: \`$status\`
+
+## Tests Run
+
+$verdict_tests
+
+## Blockers
+
+- None
+
+## Observations
+
+- Receipt fixture is structurally valid.
+
+## Limitations
+
+$limitations
+
+- **Verdict-SHA256**: \`pending\`
+EOF
+  if [[ "$status" == 'BLOCKED' ]]; then
+    rewrite "$verdict" 's/^- None$/'"$blocker_body"'/'
+  fi
+  seal_self_hash "$verdict" 'Verdict-SHA256'
+  verdict_hash=$(receipt_field "$verdict" 'Verdict-SHA256')
+  if [[ "$status" != 'PASS' ]]; then
+    return
+  fi
+  cat > "$seal_file" <<EOF
+- **Protocol-Version**: \`1\`
+- **Review-ID**: \`$id\`
+- **Round**: \`$round\`
+- **Status**: \`PASS\`
+- **Request-SHA256**: \`$request_hash\`
+- **Verdict-SHA256**: \`$verdict_hash\`
+EOF
+  for label in Spec-Content-SHA256 Plan-Content-SHA256 Design-Attachments-SHA256 \
+    Tasks-Definition-SHA256 Implementation-Baseline Base-Commit Subject-Commit; do
+    # Literal Markdown backticks are intentional; printf substitutions supply the values.
+    # shellcheck disable=SC2016
+    printf -- '- **%s**: `%s`\n' "$label" "$(receipt_field "$request" "$label")" >> "$seal_file"
+  done
+  cat >> "$seal_file" <<'EOF'
+- **Sealed-At**: `2026-08-18T12:00:00Z`
+- **Seal-SHA256**: `pending`
+EOF
+  seal_self_hash "$seal_file" 'Seal-SHA256'
+}
+
+init_feature_repo() {
+  local repo="$1" feature
+  feature="$repo/specs/001-hot-reload"
+  mkdir -p "$feature"
+  cp "$TEST_TMP/good/spec.md" "$feature/spec.md"
+  cp "$TEST_TMP/good/plan.md" "$feature/plan.md"
+  make_tasks "$feature"
+  git -C "$repo" init -q
+  git -C "$repo" symbolic-ref HEAD refs/heads/feature
+  git -C "$repo" config user.name 'GateSpec Fixture'
+  git -C "$repo" config user.email 'fixture@example.invalid'
+  printf '%s' "$feature"
+}
+
 expect() {
   local wanted="$1" mode="$2" dir="$3" label="$4" diagnostic="${5:-}"
   local got rc=0
@@ -62,6 +274,22 @@ expect_silent() {
     PASS=$((PASS + 1)); echo "✓ $label"
   else
     FAIL=$((FAIL + 1)); echo "✗ $label (rc=$rc, expected zero output)"; sed 's/^/    /' "$TEST_TMP/out"
+  fi
+}
+
+expect_review() {
+  local wanted="$1" mode="$2" dir="$3" id="$4" label="$5" diagnostic="${6:-}"
+  local got rc=0
+  bash "$SCRIPT" "$mode" "$dir" "$id" > "$TEST_TMP/out" 2>&1 || rc=$?
+  if [[ "$rc" -eq 0 ]]; then got=pass; else got=fail; fi
+  if [[ "$got" == "$wanted" ]] && { [[ -z "$diagnostic" ]] || grep -F "$diagnostic" "$TEST_TMP/out" >/dev/null 2>&1; }; then
+    PASS=$((PASS + 1))
+    echo "✓ $label"
+  else
+    FAIL=$((FAIL + 1))
+    echo "✗ $label (wanted $wanted, got $got/$rc)"
+    [[ -n "$diagnostic" ]] && echo "    required diagnostic: $diagnostic"
+    sed 's/^/    /' "$TEST_TMP/out"
   fi
 }
 
@@ -130,6 +358,22 @@ All effective constraints are satisfied.
 6. **Setup / runtime / teardown phase interactions**: Setup loads once, runtime polls, and teardown stops then joins.
 ## Implementation Freedoms
 - Poll interval representation — constraints: preserve the one-second acceptance bound.
+## Implementation Review Contract
+- **Protocol Version**: \`1\`
+- **Required Checkpoints**: \`REV-FOUNDATION, REV-US1, REV-FINAL\`
+- **Review Root**: \`.gatespec/reviews\`
+- **Task Review**: \`REV-TASKS after speckit.analyze; PASS required before speckit.implement\`
+- **Reviewer Isolation**: \`fresh-context-required; manual-new-session-on-unavailable; same-context-forbidden\`
+- **Parallel Policy**: \`same-phase-disjoint-only; join-before-review; cross-checkpoint-forbidden\`
+- **Git Policy**: \`clean-feature-branch; local-checkpoint-commits; no-push\`
+- **Remediation Limit**: \`2\`
+### Checkpoint Test Mapping
+| Checkpoint | Required test command(s) |
+|------------|--------------------------|
+| REV-FOUNDATION | bash tests/unit.sh |
+| REV-US1 | bash tests/integration.sh |
+| REV-FINAL | bash tests/run-all.sh |
+- **Final Validation**: \`bash tests/run-all.sh\`
 ## Project Structure
 ### Documentation (this feature)
 ### Source Code (repository root)
@@ -156,10 +400,18 @@ mkdir -p "$TEST_TMP/auto"
 printf '# Upstream spec\n**Status**: Draft\n' > "$TEST_TMP/auto/spec.md"
 expect_silent spec "$TEST_TMP/auto" "unmarked auto-track requirements are truly silent"
 expect_silent design "$TEST_TMP/auto" "unmarked auto-track design is truly silent"
+expect_silent tasks-structure "$TEST_TMP/auto" "unmarked auto-track tasks structure is truly silent"
+expect_silent task-review "$TEST_TMP/auto" "unmarked auto-track task review is truly silent"
+expect_silent implementation-candidate "$TEST_TMP/auto" "unmarked auto-track implementation candidate is truly silent"
+expect_silent implementation-review "$TEST_TMP/auto" "unmarked auto-track implementation review is truly silent"
 
 clone_good displaced-marker
 rewrite "$TEST_TMP/displaced-marker/spec.md" '1{h;d;};2{G;}'
 expect fail spec "$TEST_TMP/displaced-marker" "marker on a later line fails" "not line 1"
+expect fail tasks-structure "$TEST_TMP/displaced-marker" "displaced marker fails before tasks structure" "not line 1"
+expect fail task-review "$TEST_TMP/displaced-marker" "displaced marker fails before task review" "not line 1"
+expect fail implementation-candidate "$TEST_TMP/displaced-marker" "displaced marker fails before implementation candidate" "not line 1"
+expect fail implementation-review "$TEST_TMP/displaced-marker" "displaced marker fails before implementation review" "not line 1"
 
 mkdir -p "$TEST_TMP/json-root/.specify" "$TEST_TMP/json-root/features/with space"
 cp "$TEST_TMP/good/spec.md" "$TEST_TMP/json-root/features/with space/spec.md"
@@ -380,6 +632,354 @@ clone_good plan-placeholder
 rewrite "$TEST_TMP/plan-placeholder/plan.md" 's/C++20/[e.g., C++20]/'
 seal "$TEST_TMP/plan-placeholder/plan.md"
 expect fail design "$TEST_TMP/plan-placeholder" "known plan template remnant fails" "template/residual marker"
+
+# Native tasks and checkpoint structure -------------------------------------
+clone_good tasks-good
+make_tasks "$TEST_TMP/tasks-good"
+expect pass tasks-structure "$TEST_TMP/tasks-good" "native task checkpoints pass structural validation"
+
+clone_good mapping-pipeline
+make_tasks "$TEST_TMP/mapping-pipeline"
+rewrite "$TEST_TMP/mapping-pipeline/plan.md" 's#| REV-FOUNDATION | bash tests/unit.sh |#| REV-FOUNDATION | bash tests/unit.sh | tee unit.log |#'
+seal "$TEST_TMP/mapping-pipeline/plan.md"
+expect fail tasks-structure "$TEST_TMP/mapping-pipeline" "mapping pipelines require an unambiguous script wrapper" "rows must have exactly two columns"
+
+clone_good missing-review-contract
+awk '
+  /^## Implementation Review Contract/ {skip=1; next}
+  skip && /^## / {skip=0}
+  !skip {print}
+' "$TEST_TMP/good/plan.md" > "$TEST_TMP/missing-review-contract/plan.md"
+seal "$TEST_TMP/missing-review-contract/plan.md"
+expect fail design "$TEST_TMP/missing-review-contract" "design requires the implementation review contract" "Implementation Review Contract"
+
+clone_good task-id-gap
+make_tasks "$TEST_TMP/task-id-gap"
+rewrite "$TEST_TMP/task-id-gap/tasks.md" 's/T004 \[US1\]/T009 [US1]/'
+expect fail tasks-structure "$TEST_TMP/task-id-gap" "task IDs must be continuous in file order" "strictly continuous from T001"
+
+clone_good checkpoint-parallel
+make_tasks "$TEST_TMP/checkpoint-parallel"
+rewrite "$TEST_TMP/checkpoint-parallel/tasks.md" 's/T003 GateSpec/T003 [P] GateSpec/'
+expect fail tasks-structure "$TEST_TMP/checkpoint-parallel" "checkpoint tasks cannot be parallel" "must not be marked [P]"
+
+clone_good checkpoint-not-explicit
+make_tasks "$TEST_TMP/checkpoint-not-explicit"
+rewrite "$TEST_TMP/checkpoint-not-explicit/tasks.md" 's/speckit\.gatespec\.review-implementation/review-implementation/'
+expect fail tasks-structure "$TEST_TMP/checkpoint-not-explicit" "checkpoint names the explicit independent reviewer command" "must name speckit.gatespec.review-implementation"
+
+clone_good checkpoint-not-last
+make_tasks "$TEST_TMP/checkpoint-not-last"
+rewrite "$TEST_TMP/checkpoint-not-last/tasks.md" 's|T002 Implement the configuration store|T002 GateSpec review checkpoint REV-FOUNDATION: run speckit.gatespec.review-implementation --scope REV-FOUNDATION and require .gatespec/reviews/REV-FOUNDATION/seal.md before continuing|'
+rewrite "$TEST_TMP/checkpoint-not-last/tasks.md" 's|T003 GateSpec review checkpoint REV-FOUNDATION: run speckit.gatespec.review-implementation --scope REV-FOUNDATION and require .gatespec/reviews/REV-FOUNDATION/seal.md before continuing|T003 Implement the configuration store|'
+expect fail tasks-structure "$TEST_TMP/checkpoint-not-last" "checkpoint must be phase-final" "must be the final task in its phase"
+
+clone_good story-checkpoint-label
+make_tasks "$TEST_TMP/story-checkpoint-label"
+rewrite "$TEST_TMP/story-checkpoint-label/tasks.md" 's/T005 \[US1\] GateSpec/T005 GateSpec/'
+expect fail tasks-structure "$TEST_TMP/story-checkpoint-label" "story checkpoint carries its story label" "must carry [US1]"
+
+clone_good actual-story-mismatch
+make_tasks "$TEST_TMP/actual-story-mismatch"
+rewrite "$TEST_TMP/actual-story-mismatch/tasks.md" 's/User Story 1 - Hot reload/User Story 2 - Hot reload/'
+expect fail tasks-structure "$TEST_TMP/actual-story-mismatch" "every actual story phase has its matching checkpoint" "User Story 2 phase requires exactly one REV-US2"
+
+rc=0
+bash "$SCRIPT" tasks-structure "$TEST_TMP/tasks-good" REV-FINAL > "$TEST_TMP/out" 2>&1 || rc=$?
+if [[ "$rc" -eq 2 ]] && grep -F 'does not accept a REV-ID' "$TEST_TMP/out" >/dev/null; then
+  PASS=$((PASS + 1)); echo "✓ non-review modes reject a REV-ID"
+else
+  FAIL=$((FAIL + 1)); echo "✗ non-review mode REV-ID CLI boundary"; sed 's/^/    /' "$TEST_TMP/out"
+fi
+
+rc=0
+bash "$SCRIPT" spec "$TEST_TMP/good" REV-FINAL extra > "$TEST_TMP/out" 2>&1 || rc=$?
+if [[ "$rc" -eq 2 ]] && grep -F 'Usage:' "$TEST_TMP/out" >/dev/null; then
+  PASS=$((PASS + 1)); echo "✓ checker rejects a fourth argument"
+else
+  FAIL=$((FAIL + 1)); echo "✗ checker arity boundary"; sed 's/^/    /' "$TEST_TMP/out"
+fi
+
+# Task-review receipt, hash binding, and Git handoff ------------------------
+task_repo="$TEST_TMP/task-review-repo"
+task_feature=$(init_feature_repo "$task_repo")
+write_pass_review "$task_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$task_repo" add -- .
+git -C "$task_repo" commit -qm 'Seal task review baseline'
+expect_review pass task-review "$task_feature" REV-TASKS "valid task-review receipt is clean, tracked, and bound"
+
+printf '%s\n' 'untracked handoff dirt' > "$task_repo/untracked.txt"
+expect_review fail task-review "$task_feature" REV-TASKS "task review rejects a dirty worktree" "worktree must be clean"
+mv "$task_repo/untracked.txt" "$TEST_TMP/task-review-untracked.txt"
+
+rewrite "$task_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+git -C "$task_repo" add -- specs/001-hot-reload/tasks.md
+git -C "$task_repo" commit -qm 'Complete one task checkbox'
+expect_review pass task-review "$task_feature" REV-TASKS "checkbox-only task progress preserves the normalized definition hash"
+
+git -C "$task_repo" checkout -q --detach
+expect_review fail task-review "$task_feature" REV-TASKS "task review rejects detached HEAD" "attached to a local feature branch"
+git -C "$task_repo" checkout -q feature
+
+rewrite "$task_feature/tasks.md" 's/Create the feature scaffolding/Create revised feature scaffolding/'
+git -C "$task_repo" add -- specs/001-hot-reload/tasks.md
+git -C "$task_repo" commit -qm 'Drift task definition'
+expect_review fail task-review "$task_feature" REV-TASKS "task definition drift invalidates the receipt" "normalized tasks definition hash is stale"
+
+empty_request_repo="$TEST_TMP/empty-request-tests-repo"
+empty_request_feature=$(init_feature_repo "$empty_request_repo")
+write_pass_review "$empty_request_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '' '- Not run — task-plan review'
+git -C "$empty_request_repo" add -- .
+git -C "$empty_request_repo" commit -qm 'Receipt with empty required tests'
+expect_review fail task-review "$empty_request_feature" REV-TASKS "request self-hash cannot masquerade as Required Tests body" "at least one well-formed bullet"
+
+empty_limit_repo="$TEST_TMP/empty-limitations-repo"
+empty_limit_feature=$(init_feature_repo "$empty_limit_repo")
+write_pass_review "$empty_limit_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' ''
+git -C "$empty_limit_repo" add -- .
+git -C "$empty_limit_repo" commit -qm 'Receipt with empty limitations'
+expect_review fail task-review "$empty_limit_feature" REV-TASKS "verdict self-hash cannot masquerade as Limitations body" "## Limitations must contain"
+
+canonical_repo="$TEST_TMP/canonical-receipt-repo"
+canonical_feature=$(init_feature_repo "$canonical_repo")
+write_pass_review "$canonical_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+awk 'BEGIN {print "# Injected heading"} {print}' \
+  "$canonical_feature/.gatespec/reviews/REV-TASKS/round-00-request.md" \
+  > "$canonical_feature/.gatespec/reviews/REV-TASKS/round-00-request.md.tmp"
+mv "$canonical_feature/.gatespec/reviews/REV-TASKS/round-00-request.md.tmp" \
+  "$canonical_feature/.gatespec/reviews/REV-TASKS/round-00-request.md"
+git -C "$canonical_repo" add -- .
+git -C "$canonical_repo" commit -qm 'Inject noncanonical request heading'
+expect_review fail task-review "$canonical_feature" REV-TASKS "request rejects an extra H1 heading" "non-canonical heading, field, or prose"
+
+write_pass_review "$canonical_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+awk '/^- \*\*Seal-SHA256\*\*:/ {print "injected prose"} {print}' \
+  "$canonical_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+  > "$canonical_feature/.gatespec/reviews/REV-TASKS/seal.md.tmp"
+mv "$canonical_feature/.gatespec/reviews/REV-TASKS/seal.md.tmp" \
+  "$canonical_feature/.gatespec/reviews/REV-TASKS/seal.md"
+git -C "$canonical_repo" add -- .
+git -C "$canonical_repo" commit -qm 'Inject noncanonical seal prose'
+expect_review fail task-review "$canonical_feature" REV-TASKS "seal rejects extra prose outside its fields" "non-canonical heading, field, or prose"
+
+task_round_repo="$TEST_TMP/task-remediation-repo"
+task_round_feature=$(init_feature_repo "$task_round_repo")
+write_pass_review "$task_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- None' 00 none BLOCKED
+task_blocked_hash=$(receipt_field "$task_round_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+write_pass_review "$task_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- None' 01 "$task_blocked_hash" PASS
+git -C "$task_round_repo" add -- .
+git -C "$task_round_repo" commit -qm 'Repeat task review without remediation'
+expect_review fail task-review "$task_round_feature" REV-TASKS "task retry cannot repeat the same task definition" "remediation must change Tasks-Definition-SHA256"
+
+rewrite "$task_round_feature/tasks.md" 's/Create the feature scaffolding/Create reviewed feature scaffolding/'
+write_pass_review "$task_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- None' 01 "$task_blocked_hash" PASS
+git -C "$task_round_repo" add -- .
+git -C "$task_round_repo" commit -qm 'Remediate task definition and reseal'
+expect_review pass task-review "$task_round_feature" REV-TASKS "task retry passes only after definition remediation"
+
+task_basis_repo="$TEST_TMP/task-basis-drift-repo"
+task_basis_feature=$(init_feature_repo "$task_basis_repo")
+write_pass_review "$task_basis_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- None' 00 none BLOCKED
+task_basis_blocked_hash=$(receipt_field "$task_basis_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+rewrite "$task_basis_feature/tasks.md" 's/Create the feature scaffolding/Create basis-drift scaffolding/'
+rewrite "$task_basis_feature/plan.md" 's/Add portable polling/Add revised portable polling/'
+seal "$task_basis_feature/plan.md"
+write_pass_review "$task_basis_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- None' 01 "$task_basis_blocked_hash" PASS
+git -C "$task_basis_repo" add -- .
+git -C "$task_basis_repo" commit -qm 'Attempt task remediation across design basis drift'
+expect_review fail task-review "$task_basis_feature" REV-TASKS "task remediation cannot bridge a changed design basis" "must retain Spec, Plan, and Design-Attachments hashes"
+
+ignored_handoff_repo="$TEST_TMP/ignored-task-handoff-repo"
+ignored_handoff_feature=$(init_feature_repo "$ignored_handoff_repo")
+printf '%s\n' 'specs/001-hot-reload/.gatespec/reviews/' > "$ignored_handoff_repo/.gitignore"
+write_pass_review "$ignored_handoff_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$ignored_handoff_repo" add -- .gitignore specs/001-hot-reload/spec.md \
+  specs/001-hot-reload/plan.md specs/001-hot-reload/tasks.md
+git -C "$ignored_handoff_repo" commit -qm 'Ignore rather than track task receipt'
+expect_review fail task-review "$ignored_handoff_feature" REV-TASKS "ignored task receipt cannot bypass tracked handoff" "must be tracked at HEAD"
+
+# Implementation phase seals and cumulative final review -------------------
+implementation_repo="$TEST_TMP/implementation-repo"
+implementation_feature=$(init_feature_repo "$implementation_repo")
+write_pass_review "$implementation_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$implementation_repo" add -- .
+git -C "$implementation_repo" commit -qm 'Seal task review baseline'
+implementation_baseline=$(git -C "$implementation_repo" rev-parse HEAD)
+
+mkdir -p "$implementation_repo/src"
+printf '%s\n' 'foundation' > "$implementation_repo/src/implementation.txt"
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T002/- [x] T002/'
+git -C "$implementation_repo" add -- src/implementation.txt specs/001-hot-reload/tasks.md
+git -C "$implementation_repo" commit -qm 'Implement foundation'
+foundation_first_subject=$(git -C "$implementation_repo" rev-parse HEAD)
+write_pass_review "$implementation_feature" REV-FOUNDATION FOUNDATION "$implementation_baseline" \
+  "$implementation_baseline" "$foundation_first_subject" T001,T002 '- bash tests/unit.sh' \
+  '- bash tests/unit.sh — FAIL' '- None' 00 none BLOCKED
+foundation_blocked_hash=$(receipt_field "$implementation_feature/.gatespec/reviews/REV-FOUNDATION/round-00-verdict.md" 'Verdict-SHA256')
+expect_review fail implementation-candidate "$implementation_feature" REV-FOUNDATION "candidate mode rejects a BLOCKED round without a seal" "PASS seal not found"
+git -C "$implementation_repo" add -- \
+  specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/round-00-request.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/round-00-verdict.md
+git -C "$implementation_repo" commit -qm 'Record foundation review finding'
+foundation_finding=$(git -C "$implementation_repo" rev-parse HEAD)
+write_pass_review "$implementation_feature" REV-FOUNDATION FOUNDATION "$implementation_baseline" \
+  "$implementation_baseline" "$foundation_first_subject" T001,T002 '- bash tests/unit.sh' \
+  '- bash tests/unit.sh — PASS' '- None' 01 "$foundation_blocked_hash" PASS
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T003/- [x] T003/'
+expect_review fail implementation-candidate "$implementation_feature" REV-FOUNDATION "implementation retry cannot reuse its prior subject" "remediation must advance Subject-Commit"
+
+write_pass_review "$implementation_feature" REV-FOUNDATION FOUNDATION "$implementation_baseline" \
+  "$implementation_baseline" "$foundation_finding" T001,T002 '- bash tests/unit.sh' \
+  '- bash tests/unit.sh — PASS' '- None' 01 "$foundation_blocked_hash" PASS
+expect_review fail implementation-candidate "$implementation_feature" REV-FOUNDATION "finding metadata commit cannot masquerade as remediation subject" "must strictly descend from the finding commit"
+
+printf '%s\n' 'foundation-remediation' >> "$implementation_repo/src/implementation.txt"
+git -C "$implementation_repo" add -- src/implementation.txt
+git -C "$implementation_repo" commit -qm 'Remediate foundation review'
+foundation_subject=$(git -C "$implementation_repo" rev-parse HEAD)
+write_pass_review "$implementation_feature" REV-FOUNDATION FOUNDATION "$implementation_baseline" \
+  "$implementation_baseline" "$foundation_subject" T001,T002 '- bash tests/unit.sh' \
+  '- bash tests/unit.sh — PASS' '- None' 01 "$foundation_blocked_hash" PASS
+rewrite "$implementation_feature/.gatespec/reviews/REV-FOUNDATION/round-01-verdict.md" 's/fixture-REV-FOUNDATION-01/tampered-context/'
+expect_review fail implementation-candidate "$implementation_feature" REV-FOUNDATION "candidate mode rejects a tampered verdict" "Verdict-SHA256 self-hash mismatch"
+write_pass_review "$implementation_feature" REV-FOUNDATION FOUNDATION "$implementation_baseline" \
+  "$implementation_baseline" "$foundation_subject" T001,T002 '- bash tests/unit.sh' \
+  '- bash tests/unit.sh — PASS' '- None' 01 "$foundation_blocked_hash" PASS
+expect_review pass implementation-candidate "$implementation_feature" REV-FOUNDATION "foundation candidate binds baseline, subject, tests, and checkbox"
+git -C "$implementation_repo" add -- specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION
+git -C "$implementation_repo" commit -qm 'Commit foundation review metadata and progress'
+expect_review pass implementation-review "$implementation_feature" REV-FOUNDATION "clean committed foundation review passes the after-hook mode"
+
+printf '%s\n' 'user-story-1' >> "$implementation_repo/src/implementation.txt"
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T004/- [x] T004/'
+git -C "$implementation_repo" add -- src/implementation.txt specs/001-hot-reload/tasks.md
+git -C "$implementation_repo" commit -qm 'Implement user story one'
+us1_subject=$(git -C "$implementation_repo" rev-parse HEAD)
+write_pass_review "$implementation_feature" REV-US1 US1 "$implementation_baseline" \
+  "$foundation_subject" "$us1_subject" T004 '- bash tests/integration.sh' '- bash tests/integration.sh — PASS'
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T005/- [x] T005/'
+expect_review pass implementation-candidate "$implementation_feature" REV-US1 "user-story seal starts at the preceding checkpoint subject"
+git -C "$implementation_repo" add -- specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-US1
+git -C "$implementation_repo" commit -qm 'Commit user-story review metadata and progress'
+expect_review pass implementation-review "$implementation_feature" REV-US1 "clean committed user-story review passes"
+
+printf '%s\n' 'final-validation' >> "$implementation_repo/src/implementation.txt"
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T006/- [x] T006/'
+git -C "$implementation_repo" add -- src/implementation.txt specs/001-hot-reload/tasks.md
+git -C "$implementation_repo" commit -qm 'Complete final implementation'
+final_subject=$(git -C "$implementation_repo" rev-parse HEAD)
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$final_subject" T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final Task-IDs cannot omit feature implementation tasks" "Task-IDs must exactly match"
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$us1_subject" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final review cannot use only the last phase diff" "Base-Commit must equal Implementation-Baseline"
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final seal requires every task checkbox complete" "requires every valid task checkbox"
+
+rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T007/- [x] T007/'
+expect_review pass implementation-candidate "$implementation_feature" REV-FINAL "cumulative final candidate and all phase seals pass"
+expect_review fail implementation-review "$implementation_feature" REV-FINAL "after-hook mode rejects an uncommitted candidate" "requires a clean worktree"
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- echo substitute-test' '- echo substitute-test — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "request cannot replace the approved checkpoint test" "must exactly match the approved checkpoint mapping"
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "verdict must record an outcome for every approved test" "plus its result"
+
+final_tree=$(git -C "$implementation_repo" rev-parse "$final_subject^{tree}")
+alternate_subject=$(printf '%s\n' 'alternate final without stage ancestry' | \
+  git -C "$implementation_repo" commit-tree "$final_tree" -p "$implementation_baseline")
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$alternate_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final subject must contain every previously sealed stage" "must descend from the preceding checkpoint Subject-Commit"
+
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review pass implementation-candidate "$implementation_feature" REV-FINAL "restored cumulative final candidate passes"
+git -C "$implementation_repo" add -- specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-FINAL
+git -C "$implementation_repo" commit -qm 'Commit final review metadata and progress'
+expect_review pass implementation-review "$implementation_feature" REV-FINAL "clean tracked final review passes after_implement"
+
+printf '%s\n' 'specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/seal.md' \
+  >> "$implementation_repo/.git/info/exclude"
+git -C "$implementation_repo" rm -q --cached -- \
+  specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/seal.md
+git -C "$implementation_repo" commit -qm 'Simulate ignored earlier checkpoint seal'
+expect_review fail implementation-review "$implementation_feature" REV-FINAL "final committed mode verifies every earlier scope receipt" "REV-FOUNDATION/seal.md' must be tracked at HEAD"
+
+prechecked_tree=$(git -C "$implementation_repo" rev-parse 'HEAD^{tree}')
+prechecked_subject=$(printf '%s\n' 'malicious prechecked final subject' | \
+  git -C "$implementation_repo" commit-tree "$prechecked_tree" -p "$us1_subject")
+write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
+  "$implementation_baseline" "$prechecked_subject" T001,T002,T004,T006 \
+  '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "review subject cannot pre-complete its own checkpoint" "checkpoint checkbox must be open in the subject commit"
+
+bad_baseline_repo="$TEST_TMP/disallowed-baseline-repo"
+bad_baseline_feature=$(init_feature_repo "$bad_baseline_repo")
+write_pass_review "$bad_baseline_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+mkdir -p "$bad_baseline_repo/src"
+printf '%s\n' 'product code committed too early' > "$bad_baseline_repo/src/premature.txt"
+git -C "$bad_baseline_repo" add -- .
+git -C "$bad_baseline_repo" commit -qm 'Invalid task baseline containing product code'
+bad_baseline=$(git -C "$bad_baseline_repo" rev-parse HEAD)
+printf '%s\n' 'foundation change' >> "$bad_baseline_repo/src/premature.txt"
+rewrite "$bad_baseline_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+rewrite "$bad_baseline_feature/tasks.md" 's/^- \[ \] T002/- [x] T002/'
+git -C "$bad_baseline_repo" add -- src/premature.txt specs/001-hot-reload/tasks.md
+git -C "$bad_baseline_repo" commit -qm 'Foundation on invalid baseline'
+bad_baseline_subject=$(git -C "$bad_baseline_repo" rev-parse HEAD)
+write_pass_review "$bad_baseline_feature" REV-FOUNDATION FOUNDATION "$bad_baseline" \
+  "$bad_baseline" "$bad_baseline_subject" T001,T002 '- bash tests/unit.sh' '- bash tests/unit.sh — PASS'
+rewrite "$bad_baseline_feature/tasks.md" 's/^- \[ \] T003/- [x] T003/'
+expect_review fail implementation-candidate "$bad_baseline_feature" REV-FOUNDATION "implementation baseline commit cannot smuggle product or test paths" "checkpoint commit contains disallowed path"
+
+missing_baseline_repo="$TEST_TMP/missing-baseline-handoff-repo"
+missing_baseline_feature=$(init_feature_repo "$missing_baseline_repo")
+printf '%s\n' \
+  'specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-*-request.md' \
+  'specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-*-verdict.md' \
+  >> "$missing_baseline_repo/.git/info/exclude"
+write_pass_review "$missing_baseline_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$missing_baseline_repo" add -- .
+git -C "$missing_baseline_repo" commit -qm 'Baseline missing ignored task request and verdict'
+missing_baseline=$(git -C "$missing_baseline_repo" rev-parse HEAD)
+mkdir -p "$missing_baseline_repo/src"
+printf '%s\n' 'foundation' > "$missing_baseline_repo/src/foundation.txt"
+rewrite "$missing_baseline_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+rewrite "$missing_baseline_feature/tasks.md" 's/^- \[ \] T002/- [x] T002/'
+git -C "$missing_baseline_repo" add -- src/foundation.txt specs/001-hot-reload/tasks.md
+git -C "$missing_baseline_repo" commit -qm 'Foundation after incomplete handoff'
+missing_baseline_subject=$(git -C "$missing_baseline_repo" rev-parse HEAD)
+write_pass_review "$missing_baseline_feature" REV-FOUNDATION FOUNDATION "$missing_baseline" \
+  "$missing_baseline" "$missing_baseline_subject" T001,T002 '- bash tests/unit.sh' '- bash tests/unit.sh — PASS'
+rewrite "$missing_baseline_feature/tasks.md" 's/^- \[ \] T003/- [x] T003/'
+expect_review fail implementation-candidate "$missing_baseline_feature" REV-FOUNDATION "implementation baseline must contain the complete task-review handoff" "round-00-request.md' is absent from the baseline commit"
 
 echo ''
 echo "==> checker fixtures: $PASS passed, $FAIL failed"

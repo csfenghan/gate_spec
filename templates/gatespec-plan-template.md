@@ -109,8 +109,10 @@ explicit Decision Log approval.]
   native speckit.tasks / speckit.implement plus GateSpec hook checks.
   - Replace REV-US<n> with one checkpoint per actual user-story phase.
   - Each Required Checkpoint has exactly one mapping row.
+  - A mapping cell is one line and cannot contain a raw `|`; put pipelines or
+    multi-command validation in an executable script and name that script.
   - Native tasks must end the corresponding phase with one non-[P] task whose
-    description contains all three literal elements, preferably as:
+    description contains this canonical reviewer command and stop condition:
       GateSpec review checkpoint <REV-ID>: run
       speckit.gatespec.review-implementation --scope <REV-ID>; require
       .gatespec/reviews/<REV-ID>/seal.md before continuing.

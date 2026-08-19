@@ -22,6 +22,49 @@ else
   ok "all arguments are validated before writes"
 fi
 
+# A conflicting custom reviewer is a fatal preflight error. Nothing else may
+# be installed before the user chooses --force.
+CONFLICT_HOME="$TEST_TMP/conflict-home"
+mkdir -p "$CONFLICT_HOME/.codex/agents"
+printf '%s\n' 'user-owned reviewer' > "$CONFLICT_HOME/expected-reviewer"
+cp "$CONFLICT_HOME/expected-reviewer" "$CONFLICT_HOME/.codex/agents/gatespec-reviewer.toml"
+if HOME="$CONFLICT_HOME" bash "$REPO/install.sh" --agent codex > "$TEST_TMP/out" 2>&1; then
+  not_ok "conflicting reviewer adapter is rejected without --force"
+elif ! cmp -s "$CONFLICT_HOME/expected-reviewer" "$CONFLICT_HOME/.codex/agents/gatespec-reviewer.toml" ||
+     [[ -e "$CONFLICT_HOME/.gatespec" || -e "$CONFLICT_HOME/.agents" || -e "$CONFLICT_HOME/.claude" ]] ||
+     ! grep -F 'reviewer adapter conflict' "$TEST_TMP/out" >/dev/null; then
+  not_ok "reviewer conflict preflight preserved no-write behavior"
+else
+  ok "reviewer conflict is detected before any installer write"
+fi
+
+if HOME="$CONFLICT_HOME" bash "$REPO/install.sh" --agent codex --force > "$TEST_TMP/out" 2>&1; then
+  adapter_backup=$(find "$CONFLICT_HOME/.codex/agents" -type f -name 'gatespec-reviewer.toml.bak.*' | head -1)
+  if cmp -s "$REPO/reviewers/codex/gatespec-reviewer.toml" "$CONFLICT_HOME/.codex/agents/gatespec-reviewer.toml" &&
+     [[ -n "$adapter_backup" ]] && cmp -s "$CONFLICT_HOME/expected-reviewer" "$adapter_backup" &&
+     [[ ! -e "$CONFLICT_HOME/.claude" ]] &&
+     grep -F 'Start a new Codex session to load this agent definition' "$TEST_TMP/out" >/dev/null; then
+    ok "--force backs up and atomically replaces only the selected reviewer adapter"
+  else
+    not_ok "forced reviewer adapter replacement or backup"
+  fi
+else
+  not_ok "--force reviewer adapter installation"
+  sed 's/^/    /' "$TEST_TMP/out"
+fi
+
+backups_before=$(find "$CONFLICT_HOME/.codex/agents" -type f -name 'gatespec-reviewer.toml.bak.*' | wc -l | tr -d ' ')
+if HOME="$CONFLICT_HOME" bash "$REPO/install.sh" --agent codex > "$TEST_TMP/out" 2>&1; then
+  backups_after=$(find "$CONFLICT_HOME/.codex/agents" -type f -name 'gatespec-reviewer.toml.bak.*' | wc -l | tr -d ' ')
+  if [[ "$backups_before" -eq 1 && "$backups_after" -eq "$backups_before" ]]; then
+    ok "identical reviewer adapter reinstall is idempotent"
+  else
+    not_ok "idempotent reviewer reinstall created another backup"
+  fi
+else
+  not_ok "identical reviewer adapter reinstall"
+fi
+
 # Render both integrations into an isolated home.
 RENDER_HOME="$TEST_TMP/render-home"
 mkdir -p "$RENDER_HOME"
@@ -30,6 +73,13 @@ if HOME="$RENDER_HOME" bash "$REPO/install.sh" --agent all > "$TEST_TMP/out" 2>&
 else
   not_ok "Claude/Codex rendering failed"
   sed 's/^/    /' "$TEST_TMP/out"
+fi
+
+if grep -F 'Start a new Claude Code session to load this agent definition' "$TEST_TMP/out" >/dev/null &&
+   grep -F 'Start a new Codex session to load this agent definition' "$TEST_TMP/out" >/dev/null; then
+  ok "installer explains that changed reviewer definitions need a new session"
+else
+  not_ok "reviewer adapter reload guidance"
 fi
 
 expected=0
@@ -69,6 +119,12 @@ claude_plan="$RENDER_HOME/.claude/skills/speckit-gatespec-plan/SKILL.md"
 codex_plan="$RENDER_HOME/.agents/skills/speckit-gatespec-plan/SKILL.md"
 claude_spec="$RENDER_HOME/.claude/skills/speckit-gatespec-specify/SKILL.md"
 codex_spec="$RENDER_HOME/.agents/skills/speckit-gatespec-specify/SKILL.md"
+claude_review_tasks="$RENDER_HOME/.claude/skills/speckit-gatespec-review-tasks/SKILL.md"
+claude_review_implementation="$RENDER_HOME/.claude/skills/speckit-gatespec-review-implementation/SKILL.md"
+codex_review_tasks="$RENDER_HOME/.agents/skills/speckit-gatespec-review-tasks/SKILL.md"
+codex_review_implementation="$RENDER_HOME/.agents/skills/speckit-gatespec-review-implementation/SKILL.md"
+claude_reviewer="$RENDER_HOME/.claude/agents/gatespec-reviewer.md"
+codex_reviewer="$RENDER_HOME/.codex/agents/gatespec-reviewer.toml"
 dollar='$'
 if cmp -s "$REPO/constraints.md" "$RENDER_HOME/.gatespec/constraints.md" &&
    grep -F '**Constraint Basis 正文使用中文。**' "$RENDER_HOME/.gatespec/constraints.md" >/dev/null; then
@@ -100,18 +156,125 @@ else
   not_ok "absolute repository path rendering"
 fi
 
-if find "$RENDER_HOME" -name '.gatespec-skill.*' -o -name '.gatespec-copy.*' | grep -q .; then
-  not_ok "atomic renderer left temporary files"
+if cmp -s "$REPO/reviewers/claude/gatespec-reviewer.md" "$claude_reviewer" &&
+   cmp -s "$REPO/reviewers/codex/gatespec-reviewer.toml" "$codex_reviewer"; then
+  ok "Claude and Codex reviewer adapters install from repository sources"
 else
-  ok "atomic renderer leaves no temporary files"
+  not_ok "reviewer adapter installation content"
 fi
 
-if ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
-   ! grep -F 'command: "speckit.gatespec.check-requirements"' extension.yml >/dev/null ||
-   ! grep -F 'command: "speckit.gatespec.check-design"' extension.yml >/dev/null; then
-  not_ok "manifest version range/fixed hook entries"
+claude_agent_fields=$(awk 'NR == 1 && $0 == "---" {inside=1; next} inside && /^---$/ {exit} inside && NF {n++} END {print n+0}' "$claude_reviewer" 2>/dev/null)
+if [[ "$claude_agent_fields" -eq 4 ]] &&
+   grep -Fx 'name: gatespec-reviewer' "$claude_reviewer" >/dev/null &&
+   grep -Fx 'tools: Read, Grep, Glob, Bash' "$claude_reviewer" >/dev/null &&
+   grep -Fx 'isolation: worktree' "$claude_reviewer" >/dev/null &&
+   ! grep -E '^tools:.*(Write|Edit)' "$claude_reviewer" >/dev/null; then
+  ok "Claude reviewer uses official worktree isolation and no source-edit tool"
 else
-  ok "manifest pins the verified range and fixed hook commands"
+  not_ok "Claude reviewer frontmatter/tool boundary"
+fi
+
+if grep -Fx 'name = "gatespec_reviewer"' "$codex_reviewer" >/dev/null &&
+   grep -Fx 'sandbox_mode = "workspace-write"' "$codex_reviewer" >/dev/null &&
+   grep -Fx 'developer_instructions = """' "$codex_reviewer" >/dev/null; then
+  ok "Codex reviewer uses the supported custom-agent schema"
+else
+  not_ok "Codex reviewer custom-agent schema"
+fi
+
+reviewer_safety_ok=1
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  # Literal Markdown backticks must not be interpreted by the shell.
+  # shellcheck disable=SC2016
+  for rule in \
+    'Accept exactly one value: the absolute review-request path' \
+    '<feature-root>/.gatespec/reviews/<REV-ID>/round-<NN>-request.md' \
+    'extra field, H2, or prose' \
+    '**Spec-Content-SHA256**' \
+    '**Design-Attachments-SHA256**' \
+    '**Tasks-Definition-SHA256**' \
+    '**Previous-Verdict-SHA256**' \
+    "sed '/^## Gate Approval/,\$d'" \
+    '<feature-relative-path><TAB><file-SHA256><LF>' \
+    'every raw byte before its final field line' \
+    'C-sorted exact output of' \
+    'Implementation Review Contract' \
+    'Tests must contain exactly that mapping cell' \
+    'from the first task through immediately' \
+    'walk every earlier `- BLOCKER:` item' \
+    'all approved requirements, stories, acceptance' \
+    'input validation and security boundaries' \
+    'execute every Required Tests bullet separately' \
+    'unsafe, unavailable' \
+    'style only in Observations' \
+    'modify product source' \
+    'git status --porcelain=v1 --untracked-files=all' \
+    'prefixed `generated-`' \
+    'Not run — task-plan review' \
+    '**Verdict-SHA256**'; do
+    grep -F "$rule" "$reviewer" >/dev/null || reviewer_safety_ok=0
+  done
+done
+if [[ "$reviewer_safety_ok" -eq 1 ]]; then
+  ok "reviewer adapters are self-contained across hashes, judgment, tests, and verdict output"
+else
+  not_ok "self-contained reviewer adapter contract"
+fi
+
+# Literal Markdown backticks must not be interpreted by the shell.
+# shellcheck disable=SC2016
+if grep -F 'platform-provided' "$claude_reviewer" >/dev/null &&
+   grep -F 'Do not create or remove a Git worktree' "$claude_reviewer" >/dev/null &&
+   grep -F 'Never run `git worktree add`' "$codex_reviewer" >/dev/null &&
+   grep -F 'git clone --local --no-hardlinks --no-checkout' "$codex_reviewer" >/dev/null &&
+   grep -F 'git checkout --detach <Subject-Commit>' "$codex_reviewer" >/dev/null; then
+  ok "Claude and Codex use platform-safe isolated checkout strategies"
+else
+  not_ok "platform-specific reviewer checkout isolation"
+fi
+
+# Literal Markdown backticks must not be interpreted by the shell.
+# shellcheck disable=SC2016
+if grep -F 'dispatch `gatespec-reviewer` as' "$claude_review_tasks" >/dev/null &&
+   grep -F 'new top-level Claude Code session' "$claude_review_implementation" >/dev/null &&
+   grep -F 'do not carry `--scope` into manual mode' "$claude_review_implementation" >/dev/null &&
+   grep -F 'In manual `--request` mode, this command is reviewer-only' "$claude_review_implementation" >/dev/null &&
+   grep -F 'set `Reviewer-Platform` to `manual-claude`' "$claude_review_tasks" >/dev/null &&
+   grep -F 'spawn the custom agent' "$codex_review_tasks" >/dev/null &&
+   grep -F '`gatespec_reviewer` with `fork_turns="none"`' "$codex_review_tasks" >/dev/null &&
+   grep -F 'new top-level Codex session' "$codex_review_implementation" >/dev/null &&
+   grep -F 'do not carry `--scope` into manual mode' "$codex_review_implementation" >/dev/null &&
+   grep -F 'In manual `--request` mode, this command is reviewer-only' "$codex_review_implementation" >/dev/null &&
+   grep -F 'set `Reviewer-Platform` to `manual-codex`' "$codex_review_tasks" >/dev/null &&
+   grep -F 'Do not dispatch' "$claude_review_tasks" >/dev/null &&
+   grep -F 'Do not dispatch' "$codex_review_tasks" >/dev/null &&
+   ! grep -F '## Fresh reviewer dispatch' "$claude_plan" >/dev/null &&
+   ! grep -F '## Fresh reviewer dispatch' "$codex_plan" >/dev/null; then
+  ok "review commands receive platform-specific fresh-context dispatch and blocking manual fallback"
+else
+  not_ok "platform reviewer dispatcher rendering"
+fi
+
+if find "$RENDER_HOME" "$CONFLICT_HOME" \( -name '.gatespec-skill.*' -o -name '.gatespec-copy.*' \) | grep -q .; then
+  not_ok "atomic renderer left temporary files"
+else
+  ok "atomic renderer and reviewer installer leave zero temporary files"
+fi
+
+if ! grep -F 'version: "0.3.0"' extension.yml >/dev/null ||
+   ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
+   ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
+   ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
+   ! grep -F -- '- "speckit.implement"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-requirements"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-design"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-tasks"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null; then
+  not_ok "0.3.0 manifest requirements and fixed hook entries"
+else
+  ok "0.3.0 manifest requires the native sequence and registers all six fixed hooks"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,
@@ -127,8 +290,12 @@ if command -v specify >/dev/null 2>&1; then
     after_status=$(git status --porcelain)
     if [[ -d "$package" ]] &&
        [[ ! -e "$package/.git" ]] && [[ ! -e "$package/.agents" ]] && [[ ! -e "$package/.codex" ]] &&
+       cmp -s "$REPO/reviewers/claude/gatespec-reviewer.md" "$package/reviewers/claude/gatespec-reviewer.md" &&
+       cmp -s "$REPO/reviewers/claude/dispatcher.md" "$package/reviewers/claude/dispatcher.md" &&
+       cmp -s "$REPO/reviewers/codex/gatespec-reviewer.toml" "$package/reviewers/codex/gatespec-reviewer.toml" &&
+       cmp -s "$REPO/reviewers/codex/dispatcher.md" "$package/reviewers/codex/dispatcher.md" &&
        [[ "$before_status" == "$after_status" ]]; then
-      ok "scratch extension install excludes VCS/agent state and leaves the source tree untouched"
+      ok "scratch extension install includes reviewer sources, excludes agent state, and leaves the source tree untouched"
     else
       not_ok "scratch package contents or source-tree cleanliness"
     fi

@@ -121,7 +121,9 @@ version `1` and the fixed Review Root, task-review, isolation, parallel, Git,
 and remediation values from the template. Select actual Required Checkpoints:
 `REV-FOUNDATION`, one `REV-US<n>` per implemented user-story phase, and exactly
 one final `REV-FINAL`. Give every ID exactly one non-empty Checkpoint Test
-Mapping row and provide non-empty Final Validation. The contract requires
+Mapping row and provide non-empty Final Validation. A mapping cell is one line
+and cannot contain a raw `|`; wrap pipelines or multi-command validation in an
+executable script and map the checkpoint to that script. The contract requires
 native tasks to end each corresponding phase with a non-`[P]` row containing:
 
 ```text

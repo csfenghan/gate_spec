@@ -36,9 +36,10 @@ the absolute path is the current feature's REV-TASKS request, then skip every
 Coordinator step. Do not create, modify, persist, move, or commit any request,
 verdict, seal, task, or source file. Do not alter the primary worktree, index,
 branch, or commits, and never push. A test that may write may run only in a
-unique detached temporary worktree; verify it has no tracked delta afterward
-and remove it. Ephemeral files for hashing/test output may use `/tmp`; no
-repository or other persistent file may be written.
+unique isolated temporary checkout (a platform worktree or local clone);
+verify it has no tracked delta afterward and remove it. Ephemeral files for
+hashing/test output may use `/tmp`; no repository or other persistent file may
+be written.
 Review under the installed adapter's remaining read-only rules and return only
 the exact Verdict Markdown to the user, using `Reviewer-Platform`
 `manual-codex` or `manual-claude` as selected by the active dispatcher and

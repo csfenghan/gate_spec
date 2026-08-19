@@ -1,7 +1,9 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.2.0 is a personal spec-kit extension that adds human approval gates
-to Requirements and Design. Read this file before changing the repository.
+GateSpec 0.3.0 is a personal spec-kit extension that adds human approval gates
+to Requirements and Design plus independent-context review checkpoints around
+native task generation and implementation. Read this file before changing the
+repository.
 
 ## Product invariants
 
@@ -19,6 +21,8 @@ to Requirements and Design. Read this file before changing the repository.
 Feature content has exactly three approval mechanisms: a decision answer, the
 defaults batch, and final summary/diff approval. “Proceed” cannot seal unresolved
 blocking work; a complete clarification set writes a Draft automatically.
+Reviewer PASS/BLOCKED verdicts are engineering evidence, never a fourth human
+approval mechanism.
 
 ## Architecture invariants
 
@@ -35,6 +39,16 @@ blocking work; a complete clarification set writes a Draft automatically.
   invalidates an old plan and its tasks.
 - Enforcement remains prompt rules plus one thin portable Bash checker. Do not
   introduce orchestration/state machines.
+- GateSpec review tasks are cooperative checkpoints inside native implement;
+  only registered boundary hooks and receipt checks are deterministic gates.
+  Never claim that Markdown, a hook, or a self-hashed receipt proves reviewer
+  identity or fresh-context provenance.
+- A reviewer receives a self-contained request in a fresh Codex/Claude context.
+  Same-context fallback is forbidden; unavailable isolation blocks and requires
+  a new top-level session. Reviewers do not author product changes.
+- Implementation checkpoints use local commits and isolated review checkouts
+  (a Claude worktree or Codex temporary clone). GateSpec never pushes or
+  performs any other remote VCS write.
 - The repository is the source of truth. Edit `commands/`, never rendered
   global skills.
 
@@ -50,7 +64,7 @@ Approved Requirements freezes its basis. User constraint drift warns until
 `--refresh-constraints`; constitution/project-policy drift forces re-approval.
 Drafts resume in place, approved artifacts are read-only, `--revise` uses diff
 re-approval, and `--restart` archives before rebuilding. Revision/restart must
-archive tasks rather than leave stale execution work.
+archive tasks and review receipts rather than leave stale execution work.
 
 The six Design Detailing dimensions are exact mandatory core fields. Constraints
 may add fields, never replace them. Plan performs its own attachment consistency
@@ -60,10 +74,10 @@ walkthrough before summary; upstream analyze runs only after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.2.0 manifest, fixed hooks, verified version range |
-| `commands/speckit.gatespec.{specify,plan,check}.md` | public protocols |
-| `commands/speckit.gatespec.check-{requirements,design}.md` | fixed hook entries |
+| `extension.yml` | 0.3.0 manifest, fixed hooks, verified version range |
+| `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/gatespec-{spec,plan}-template.md` | upstream-compatible artifacts |
+| `reviewers/` | Codex/Claude custom reviewer source definitions |
 | `scripts/bash/check-gate.sh` | deterministic machine gate |
 | `install.sh` | atomic global renderer + optional project registration |
 | `tests/run-tests.sh` | checker fixtures |
@@ -80,10 +94,14 @@ Windows uses WSL/Git Bash.
 - Primary extension command names are `speckit.{extension-id}.{command}`.
 - Aliases render only in commands mode. Skill invocations are
   `/speckit-gatespec-*` (Claude) and `$speckit-gatespec-*` (Codex).
-- `before_plan` is fixed to `check-requirements`; `before_tasks` is fixed to
-  `check-design`. Manual check may accept `[spec|design]`.
+- `before_plan` and `before_tasks` retain the Requirements/Design gates.
+  Review hooks occupy `after_tasks`, `after_analyze`, `before_implement`, and
+  `after_implement`. Manual check accepts `spec`, `design`, `tasks-structure`,
+  `task-review`, or `implementation-review [REV-ID]`.
 - Core hooks fire on core commands. Gated commands run their inline gate plus
   peer same-phase before/after hooks and skip every `speckit.gatespec.*` hook.
+- Core hooks ask the current agent/session to invoke a command; independent
+  review therefore comes from the installed platform adapter, not the hook.
 - Manifest compatibility is `>=0.16.0,<0.17.0`; do not widen without the
   upstream sync ritual.
 

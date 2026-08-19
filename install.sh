@@ -82,7 +82,11 @@ for required in \
   "$REPO/constraints.md" \
   "$REPO/templates/gatespec-spec-template.md" \
   "$REPO/templates/gatespec-plan-template.md" \
-  "$REPO/scripts/bash/check-gate.sh"; do
+  "$REPO/scripts/bash/check-gate.sh" \
+  "$REPO/reviewers/claude/gatespec-reviewer.md" \
+  "$REPO/reviewers/claude/dispatcher.md" \
+  "$REPO/reviewers/codex/gatespec-reviewer.toml" \
+  "$REPO/reviewers/codex/dispatcher.md"; do
   if [[ ! -f "$required" ]]; then
     echo "GateSpec install is incomplete; required file missing: $required" >&2
     exit 1
@@ -102,6 +106,76 @@ atomic_copy() {
   cp "$src" "$tmp"
   chmod 0644 "$tmp"
   mv -f "$tmp" "$dest"
+}
+
+reviewer_source() {
+  case "$1" in
+    claude) printf '%s' "$REPO/reviewers/claude/gatespec-reviewer.md" ;;
+    codex) printf '%s' "$REPO/reviewers/codex/gatespec-reviewer.toml" ;;
+    *) echo "unknown reviewer adapter: $1" >&2; return 1 ;;
+  esac
+}
+
+reviewer_destination() {
+  case "$1" in
+    claude) printf '%s' "$HOME/.claude/agents/gatespec-reviewer.md" ;;
+    codex) printf '%s' "$HOME/.codex/agents/gatespec-reviewer.toml" ;;
+    *) echo "unknown reviewer adapter: $1" >&2; return 1 ;;
+  esac
+}
+
+preflight_reviewer_adapter() {
+  local agent="$1" src dest
+  src=$(reviewer_source "$agent")
+  dest=$(reviewer_destination "$agent")
+  if [[ ! -e "$dest" && ! -L "$dest" ]]; then
+    return 0
+  fi
+  if [[ -L "$dest" || ! -f "$dest" ]]; then
+    echo "reviewer adapter target is not a regular file: $dest" >&2
+    return 1
+  fi
+  if cmp -s "$src" "$dest"; then
+    return 0
+  fi
+  if [[ "$FORCE" -ne 1 ]]; then
+    echo "reviewer adapter conflict: $dest differs from GateSpec" >&2
+    echo "  Re-run with --force to keep a timestamped backup and replace it." >&2
+    return 1
+  fi
+}
+
+preflight_reviewer_adapters() {
+  local failed=0
+  if [[ "$AGENT" == all || "$AGENT" == claude ]]; then
+    preflight_reviewer_adapter claude || failed=1
+  fi
+  if [[ "$AGENT" == all || "$AGENT" == codex ]]; then
+    preflight_reviewer_adapter codex || failed=1
+  fi
+  return "$failed"
+}
+
+install_reviewer_adapter() {
+  local agent="$1" src dest backup platform
+  src=$(reviewer_source "$agent")
+  dest=$(reviewer_destination "$agent")
+  if [[ -f "$dest" ]] && cmp -s "$src" "$dest"; then
+    echo "✓ $dest (unchanged)"
+    return 0
+  fi
+  if [[ -e "$dest" ]]; then
+    backup="$dest.bak.$(date +%Y%m%d-%H%M%S)-$$"
+    atomic_copy "$dest" "$backup"
+    echo "✓ reviewer adapter backup: $backup"
+  fi
+  atomic_copy "$src" "$dest"
+  echo "✓ $dest"
+  case "$agent" in
+    claude) platform='Claude Code' ;;
+    codex) platform='Codex' ;;
+  esac
+  echo "  Start a new $platform session to load this agent definition; existing sessions do not reload it."
 }
 
 yaml_quote() {
@@ -168,6 +242,12 @@ render_skill() {
     echo '---'
     echo ''
     awk 'BEGIN {fence=0} /^---$/ {fence++; next} fence >= 2 {print}' "$src"
+    case "$(basename "$src")" in
+      speckit.gatespec.review-tasks.md|speckit.gatespec.review-implementation.md)
+        echo ''
+        cat "$REPO/reviewers/$agent/dispatcher.md"
+        ;;
+    esac
   } | sed \
     -e "s|\.specify/extensions/gatespec/templates|$repo_escaped/templates|g" \
     -e "s|\.specify/extensions/gatespec/scripts|$repo_escaped/scripts|g" \
@@ -203,6 +283,11 @@ install_for_agent() {
   done
 }
 
+# Adapter conflicts are fatal and are checked before any installer write, so a
+# selected Claude/Codex bundle is never reported as usable after preserving a
+# conflicting custom agent.
+preflight_reviewer_adapters || exit 1
+
 # Global constraints (also atomic; preserve user edits unless explicitly forced).
 mkdir -p "$HOME/.gatespec"
 if [[ -f "$HOME/.gatespec/constraints.md" ]] && ! diff -q "$REPO/constraints.md" "$HOME/.gatespec/constraints.md" >/dev/null 2>&1; then
@@ -221,13 +306,19 @@ else
   echo "✓ ~/.gatespec/constraints.md installed"
 fi
 
-[[ "$AGENT" == all || "$AGENT" == claude ]] && install_for_agent claude
-[[ "$AGENT" == all || "$AGENT" == codex ]] && install_for_agent codex
+if [[ "$AGENT" == all || "$AGENT" == claude ]]; then
+  install_for_agent claude
+  install_reviewer_adapter claude
+fi
+if [[ "$AGENT" == all || "$AGENT" == codex ]]; then
+  install_for_agent codex
+  install_reviewer_adapter codex
+fi
 
 if [[ -n "$TARGET" ]]; then
   if [[ -d "$TARGET/.specify" ]]; then
     (cd "$TARGET" && specify extension add --dev "$REPO" --force)
-    echo "✓ project wiring: $TARGET (fixed before_plan/before_tasks gates active)"
+    echo "✓ project wiring: $TARGET (six fixed gate/review hooks active)"
   else
     echo "⚠ $TARGET is not initialized for spec-kit (missing .specify/)."
     echo "  Global skills were installed, but the full plan/tasks workflow requires:"

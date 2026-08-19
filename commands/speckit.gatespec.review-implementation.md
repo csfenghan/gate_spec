@@ -44,8 +44,9 @@ and validate REV-ID from the absolute request path, then skip every Scope
 coordinator step. Do not create, modify, persist, move, or commit any request,
 verdict, seal, task, or source file. Do not alter the primary worktree, index,
 branch, or commits, and never push. Tests that may write run only in a unique
-detached temporary worktree at Subject-Commit; verify it has no tracked delta
-afterward and remove it. Review under the installed adapter's remaining
+isolated temporary checkout at Subject-Commit (a platform worktree or local
+clone); verify it has no tracked delta afterward and remove it. Review under
+the installed adapter's remaining
 read-only rules. Ephemeral files for hashing/test output may use `/tmp`; no
 repository or other persistent file may be written. Return only the exact
 Verdict Markdown to the user, with `Reviewer-Platform`
@@ -145,7 +146,7 @@ Validate the request and its bound commits before reviewing. Inspect only the
 approved artifacts and base-to-subject diff it binds. Check correctness,
 Requirements/Design compliance, task completion, error/failure behavior,
 regressions, scope, and material test gaps. Run the Required Tests in the
-adapter's detached temporary worktree when safe. A changed primary worktree,
+adapter's isolated temporary checkout when safe. A changed primary worktree,
 unsafe/unavailable mandatory test, stale hash, unclosed prior blocker, or
 material uncertainty is BLOCKED. Tests Run contains evidence for every Required
 Tests bullet: include that exact approved string plus non-empty result text.

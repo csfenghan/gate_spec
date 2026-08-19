@@ -53,10 +53,12 @@ The approved plan contains one exact `Implementation Review Contract`. It lists
 commits without pushing, and permits at most two remediation rounds.
 
 Native tasks end each corresponding phase with a non-parallel row containing
-`GateSpec review checkpoint <REV-ID>:`, `--scope <REV-ID>`, and
-`.gatespec/reviews/<REV-ID>/seal.md`. Native analyze still runs immediately
-after tasks. A separate `REV-TASKS` PASS seal is required before native
-implement begins; REV-FINAL is required before its completion report.
+`GateSpec review checkpoint <REV-ID>:`,
+`speckit.gatespec.review-implementation`, `--scope <REV-ID>`, the matching
+`.gatespec/reviews/<REV-ID>/seal.md`, and `before continuing`. Native analyze
+still runs immediately after tasks. A separate `REV-TASKS` PASS seal is
+required before native implement begins; REV-FINAL is required before its
+completion report.
 
 Review data is stored under
 `<feature>/.gatespec/reviews/<REV-ID>/`. Round zero uses
@@ -148,6 +150,8 @@ The installer also installs the GateSpec reviewer adapter as
 `~/.claude/agents/gatespec-reviewer.md` and
 `~/.codex/agents/gatespec-reviewer.toml`; conflicting local adapters require
 explicit `--force` and receive a timestamped backup.
+Start a new Claude Code or Codex session after installing or updating an agent
+definition; an already-running session does not reload it.
 Keep the repository in place. Global skills are available everywhere, but the
 complete plan/tasks workflow requires a project initialized by spec-kit.
 

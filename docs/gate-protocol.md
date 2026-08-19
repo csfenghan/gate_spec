@@ -122,6 +122,10 @@ implemented user-story phase, and exactly one `REV-FINAL`. An exact
 - **Final Validation**: `<non-empty end-to-end validation>`
 ```
 
+Each mapping cell is one line and has exactly two Markdown-table columns. A
+raw `|` is rejected; put pipelines or multi-command validation in an
+executable script and use the script invocation as the mapped value.
+
 REV-FINAL reviews the complete feature subject; earlier seals cannot be
 aggregated as a substitute.
 
@@ -138,7 +142,7 @@ finding returns to Requirements or Design diff-approval.
 
 Native `speckit.tasks` remains the only task generator. Every required
 checkpoint maps to exactly one phase-ending, non-`[P]` checklist row containing
-all three literal elements:
+the canonical reviewer command and stop condition:
 
 ```text
 GateSpec review checkpoint <REV-ID>: run speckit.gatespec.review-implementation --scope <REV-ID>; require .gatespec/reviews/<REV-ID>/seal.md before continuing.
@@ -189,9 +193,9 @@ including remediation and re-review by one context, is forbidden. The receipt
 records the isolation claim, but the Bash checker does not cryptographically
 attest reviewer identity or session origin. A manual reviewer never changes the
 primary worktree, index, branch, commits, or remotes; a test that may write runs
-only in a unique detached temporary worktree, which must be clean and removed
-afterward. Ephemeral hashing/test files may use `/tmp`; repository and other
-persistent files remain read-only.
+only in a unique isolated temporary checkout (a platform worktree or local
+clone), which must be clean and removed afterward. Ephemeral hashing/test files
+may use `/tmp`; repository and other persistent files remain read-only.
 
 The implementation baseline is exactly the current REV-TASKS seal path's
 latest-touch commit (`git log -1 --format=%H -- <feature-relative-seal-path>`),
@@ -303,8 +307,9 @@ Decision Log, six Design Detailing dimensions, mandatory upstream sections,
 Implementation Review Contract, template remnants, and approval snapshot.
 
 Tasks-structure checks cover exact contract fields, checkpoint/test-set
-equality, checkpoint row uniqueness/order/non-parallel form, and the three
-literal task tokens. Task-review checks validate REV-TASKS request, PASS
+equality, checkpoint row uniqueness/order/non-parallel form, and every
+canonical reviewer-command/stop token. Task-review checks validate REV-TASKS
+request, PASS
 verdict, seal chain, plan basis, and normalized tasks definition.
 Implementation-review checks validate the selected REV-ID (REV-FINAL by
 default), bounded rounds, request/verdict/seal chain, subject/upstream hashes,
