@@ -138,13 +138,15 @@ never infer closure from a new subject hash alone.
 ## Review criteria
 
 For REV-TASKS, require all approved requirements, stories, acceptance and
-failure scenarios, design decisions/attachments, and mapped validations to
-have executable tasks. Require unambiguous actions and file paths, correct
-dependencies/order, race-free `[P]` scopes, independently testable phases, and
-no unapproved choice or gold-plating. Require every plan checkpoint exactly
-once, non-parallel, phase-final, in declared order, mapped to executable tests,
-with no work crossing it. Missing coverage, an implementation-time decision,
-or material uncertainty is a blocker.
+failure scenarios, approved human decisions, recorded engineering
+determinations, bounded Implementation Freedoms, design attachments, and mapped
+validations to have executable tasks. Require unambiguous actions and file
+paths, correct dependencies/order, race-free `[P]` scopes, independently
+testable phases, and no unclassified human choice or gold-plating. Require every
+plan checkpoint exactly once, non-parallel, phase-final, in declared order,
+mapped to executable tests, with no work crossing it. Missing coverage, an
+unbounded or human-relevant implementation-time decision, or material
+uncertainty is a blocker.
 
 For implementation, inspect code rather than trusting test results. Check the
 bound Task-IDs and diff for functional correctness; approved Requirements and

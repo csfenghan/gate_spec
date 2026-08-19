@@ -1,4 +1,4 @@
-# GateSpec 0.4.0 Gate Protocol
+# GateSpec 0.5.0 Gate Protocol
 
 This document defines the Requirements/Design approval gates, native-task
 review contract, fresh-context review receipts, fixed hooks, templates, and
@@ -44,44 +44,70 @@ use Simplified Chinese while paths, hashes, API names, code identifiers, and
 - User-constraint drift warns until `--refresh-constraints`; constitution or
   project-policy drift forces Requirements re-approval.
 
-## Adaptive decision batches
+## Scenario-first decision triage and batches
 
-Specify and Plan make a complete first-pass inventory of known decisions and
-their dependencies. The dependency graph is transient prompt reasoning, not a
-persisted workflow artifact or orchestration state. A decision depends on
-another when any option can change its existence, context, options,
-recommendation, or constraint result. Only dependency-frontier decisions may
-share a batch; uncertainty creates an edge, and a cycle collapses into one
-coherent bundled decision.
+Specify and Plan make a complete first-pass inventory, then classify before
+asking. A Requirements unknown is a blocking human decision, a proposed
+routine default, or a technical matter deferred to Design. A Design fork is a
+human decision, a reasoned engineering determination, or bounded
+Implementation Freedom. Only a choice with at least two viable compliant
+options and materially different consequences for an affected user, product
+owner, operator, or maintainer receives an `R<n>`/`D<n>` approval card.
+Requirement/MUST conflicts and dominated alternatives are excluded, not used
+as artificial options. Uncertain classification is promoted to human decision.
 
-Each round has at most four cards and cognitive load at most four. A normal
-card has load one; a complex or high-risk card has load two; a card that is
-both has load three. Complexity covers multi-option, cross-module/contract, or
-multi-step flow/failure/migration choices. High risk covers constraint
-exemptions, irreversible/migration behavior, security/privacy/compliance, and
-external compatibility breaks. High-risk cards may share a batch but require
+Engineering determinations cover requirement-fixed outcomes whose
+cross-component contract must be closed in Design, or a strictly simpler option
+with no worse material consequence. They are recorded in Design
+Detailing/research without `D<n>` or an individual approval field. Externally
+equivalent choices on which no approved artifact depends are bounded in
+Implementation Freedoms. `explain <topic>` and `discuss <topic>`
+let the user inspect or promote either bucket before final approval; this is a
+cheap conversational veto, not stored state or a fourth approval mechanism.
+
+The dependency graph covers only human decisions and remains transient prompt
+reasoning, not a persisted workflow artifact or orchestration state. A
+decision depends on another when any option can change its existence,
+scenario, options, recommendation, or constraint result. Only frontier
+decisions may share a batch; uncertainty creates an edge, and a cycle
+collapses into one coherent bundled decision.
+
+Every card is self-contained and ordered for human comprehension: plain
+question, one shared actor/trigger/outcome or failure scenario, fixed boundary,
+why human input matters, options compared in that same scenario, recommendation,
+then Technical basis (FRs, constraints, paths, and flow evidence). Observable
+consequences precede mechanisms. Removing Technical basis identifiers must not
+make the choice unintelligible.
+
+Each round has cognitive load at most four. A normal card has load one; a
+complex or high-risk card consumes all four units and is presented alone.
+Simple cards share an actor/journey where possible; the agent presents fewer
+rather than force unrelated mental contexts together. High-risk cards require
 an explicit ID/choice; whole-batch recommendation shortcuts exclude them.
 
-A compact progress line reports resolved/currently-known counts, current IDs,
-and dependency-blocked topic count. Partial answers are validated together,
-then every unaffected explicit answer is retained. Unanswered IDs lead the
-next batch, newly eligible independent work may refill it, and conflicts become
-an explicit reconciliation decision without changing unaffected approvals.
-Per-round split/single/cap controls are temporary and create no workflow mode.
-The Bash checker validates the resulting per-decision records, not conversation
-batch provenance or semantic independence. Rendered-protocol assertions and
-dual-platform behavioral smoke provide evidence for those prompt contracts.
+A compact progress line reports only resolved/currently-known human decisions,
+current IDs, and dependency-blocked human topics. A separate digest reports
+other bucket counts on first inventory or classification change. Partial
+answers are validated together, then every unaffected explicit answer is
+retained. Unanswered IDs lead the next batch, conflicts become an explicit
+reconciliation decision, and retired legacy IDs are not reused. Per-round
+split/single/cap and explain/discuss controls are temporary. The Bash checker
+validates compatible artifact structure, not semantic classification,
+self-containment, or batch provenance; rendered-protocol assertions and
+dual-platform behavioral smoke cover those prompt contracts.
 
 ## Requirements protocol
 
-Repository facts are discovered. Unknown decisions are blocking questions or
-proposed defaults, with a cheap user veto. Each blocking card presents 2–4
-mutually exclusive options, constraint results, and a recommendation. Stable
-`R<n>` IDs map explicit answers into the existing
+Repository facts are discovered. Technology choice alone is not a blocking
+Requirement: technical-only matters move to Design. Each blocking card has
+2–4 viable options in one shared scenario, fixed boundaries, the consequence
+that requires human input, constraint results, a recommendation, and Technical
+basis last. Stable `R<n>` IDs map explicit answers into the existing
 `- Q: [R<n>] ... → A: ...` form; legacy unnumbered entries remain valid.
 Proposed defaults are batch-approved once. They may be co-presented as one
-independent card but require their own explicit approval; a decision shortcut
-never approves them. “Proceed” never seals an unresolved blocking item.
+independent normal card, never with a complex/high-risk card, and require their
+own explicit approval; a decision shortcut never approves them. “Proceed” never
+seals an unresolved blocking item.
 
 Empty sections have exact semantics:
 
@@ -104,13 +130,15 @@ The Requirements Gate passes before planning. plan.md records the approved spec
 content hash computed before its Gate Approval H2. Spec re-approval therefore
 invalidates an old plan.
 
-Every non-trivial design decision uses an exact `### D<n>: <topic>` block with
-at least two concrete scenarios, observable trade-offs, constraint results, a
-recommendation, and one dated user choice. Adaptive batch grouping is never
-stored in the Decision Log. A design with no such decision uses:
+Every design choice requiring individual human approval uses an exact
+`### D<n>: <topic>` block with one shared scenario, fixed boundary, why human
+input matters, at least two viable same-scenario options, observable trade-offs,
+constraint results, a recommendation, Technical basis, and one dated user
+choice. Adaptive batch grouping is never stored in the Decision Log. A design
+with no such decision uses:
 
 ```markdown
-- None — <specific reason no non-trivial decision exists>
+- None — <specific reason no design choice required individual human approval>
 ```
 
 The six exact Design Detailing dimensions are concurrency, object
@@ -118,11 +146,15 @@ lifetime/ownership, modules/classes, internal API interactions, external
 behavior contracts, and setup/runtime/teardown. Each has substantive content
 or `N/A — <reason>`; constraints may add dimensions but never replace them.
 
-An implementer's walkthrough closes each unsigned fork as an approved decision
-or bounded Implementation Freedom. Bidirectional traceability prevents orphan
-FRs and unapproved design. quickstart supplies a runnable path per P1 story.
-Immediately before summary, the agent checks spec, plan, research, data model,
-contracts, and quickstart. Native analyze still occurs only after native tasks.
+An implementer's walkthrough closes each fork as an approved human decision, a
+reasoned engineering determination in Design Detailing/research, or bounded
+Implementation Freedom. It also audits classification so a human-relevant
+consequence cannot hide in a technical bucket. Bidirectional traceability
+prevents orphan FRs and unapproved design. quickstart supplies a runnable path
+per P1 story. Immediately before summary, the agent checks spec, plan, research,
+data model, contracts, and quickstart. The ≤20-line Design summary exposes
+material engineering determinations so the user can promote one before final
+approval. Native analyze still occurs only after native tasks.
 
 ### Implementation Review Contract
 
@@ -188,9 +220,12 @@ work crosses a checkpoint without its matching PASS seal.
 Native `speckit.analyze` then runs unchanged. Its after hook obtains the
 separate `REV-TASKS` semantic review. That review checks coverage, ordering,
 dependency/parallel safety, exact test/checkpoint mapping, and absence of new
-unapproved choices. The tasks-definition hash normalizes only checkbox progress
-(`[ ]`, `[x]`, `[X]`) so native implementation can safely resume. A current
-REV-TASKS PASS seal is required by the fixed `before_implement` hook.
+unclassified human choices. Approved decisions, recorded engineering
+determinations, and bounded Implementation Freedoms are all valid task inputs;
+an unbounded or human-relevant implementation-time choice is a blocker. The
+tasks-definition hash normalizes only checkbox progress (`[ ]`, `[x]`, `[X]`)
+so native implementation can safely resume. A current REV-TASKS PASS seal is
+required by the fixed `before_implement` hook.
 The coordinator commits the approved artifacts, tasks, REV-TASKS rounds, and
 seal locally, verifies a clean worktree, and only then runs the task-review
 checker. That clean HEAD is the implementation baseline; checking before this

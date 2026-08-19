@@ -1,5 +1,5 @@
 ---
-description: "GateSpec gated plan: concrete adaptive decision batches, requirements-basis chaining, safe resume, and explicit design approval."
+description: "GateSpec gated plan: scenario-first human decisions, recorded engineering determinations, safe resume, and explicit design approval."
 handoffs:
   - label: Create Tasks
     agent: speckit.tasks
@@ -82,48 +82,97 @@ or trust their receipts.
 
 Before asking, make one complete discovery pass over the approved Requirements,
 constraints, existing Draft design artifacts, and relevant repository facts.
-Run independent read-only searches in parallel when supported. Extract every
-known non-trivial design decision and build an ephemeral dependency graph;
-never persist the graph or batch state as a workflow artifact. Decision A
-depends on B when any B choice can change A's existence, context, options,
-recommendation, or constraint result. If independence is uncertain, add the
-dependency. Collapse a dependency cycle into one composite decision whose
-options are coherent design bundles. Re-derive this inventory on resume.
+Run independent read-only searches in parallel when supported. Classify every
+known design fork into exactly one conversational bucket:
 
-Use unique, monotonically increasing `D<n>` IDs. Preserve existing IDs and
-continue after the greatest one; never renumber a resumed Draft. Mark a
-decision **complex** when it has 3–4 viable options, crosses multiple modules,
-Design Detailing dimensions, or external contracts, or needs a multi-step
-flow, failure, or migration explanation. Mark it **high risk** when it grants a
-constraint exemption or constitution SHOULD deviation, controls irreversible
-or data-migration behavior, affects security/privacy/compliance, or breaks an
-external compatibility contract. Use the higher classification when unsure.
+1. **Human decision** — at least two viable options satisfy approved
+   Requirements and constitution `MUST` rules, and a reasonable product owner,
+   operator, maintainer, or affected user could prefer either because it changes
+   visible behavior, scope, data/security/privacy, compatibility, measurable
+   cost/performance, an expensive or irreversible boundary, or an approvable
+   constraint trade-off.
+2. **Engineering determination** — Requirements already fix the observable
+   outcome and Design must commit to a mechanism to close a cross-component
+   contract, or one option is strictly simpler without a worse material
+   consequence. Select the safest simplest compliant mechanism and record it
+   with rationale in the applicable Design Detailing dimension and, when useful,
+   research.md. It gets no `D<n>` ID and no individual `Approved` field.
+3. **Implementation Freedom** — multiple externally equivalent compliant
+   options remain, no approved artifact depends on the exact mechanism, and the
+   choice is safe to defer. Record the choice and exact bounds in the existing
+   section.
 
-The cognitive load is 1 for a normal card, 2 for a complex or high-risk card,
-and 3 for a card that is both. A batch contains at most four cards and total
-load at most four. Only dependency edges force serialization; high-risk cards
-may share a batch. Choose only from the unresolved dependency frontier,
-preferring decisions that unlock the most downstream decisions, then P1 and
-external behavior, then discovery order.
+An option conflicting with approved Requirements or a constitution `MUST` is
+excluded rather than offered as a foil. A `SHOULD` deviation or GateSpec
+constraint exemption may be offered only with its reason/consequence and is
+high risk. If fewer than two viable options remain, use an engineering
+determination; when “do not build/change scope” is a genuine alternative,
+return that higher-level choice to Requirements. When classification is
+uncertain, use a human decision. The user may cheaply request `explain <topic>`
+or `discuss <topic>` at any point; expose the rationale or promote the item to a
+human decision without creating a workflow flag or fourth approval mechanism.
+
+Build an ephemeral dependency graph only for human decisions; never persist the
+graph, classification inventory, or batch state as a workflow artifact.
+Decision A depends on B when any B choice can change A's existence, scenario,
+options, recommendation, or constraint result. If independence is uncertain,
+add the dependency. Collapse a dependency cycle into one composite decision
+whose options are coherent design bundles. Re-derive and reclassify the
+inventory on resume and after every answer.
+
+Assign unique, monotonically increasing `D<n>` IDs only when a human decision
+is first presented. Preserve every accepted ID and continue after the greatest
+ID; never renumber a resumed Draft. An unanswered legacy card may be
+reclassified: explain the change, move its substance to Design Detailing or
+Implementation Freedoms, remove any unresolved placeholder, and never reuse
+its retired ID.
+
+Mark a human decision **complex** when it has 3–4 viable options, crosses
+multiple modules, Design Detailing dimensions, or external contracts, or needs
+a multi-step flow, failure, or migration explanation. Mark it **high risk**
+when it grants a constraint exemption or constitution SHOULD deviation,
+controls irreversible or data-migration behavior, affects
+security/privacy/compliance, or breaks an external compatibility contract. Use
+the higher classification when unsure. A normal card costs one unit; any
+complex or high-risk card consumes the full four-unit cognitive budget and is
+the only decision card in its round. A batch contains at most four normal cards
+and total load at most four.
+
+Choose only from the unresolved human-decision frontier. Prefer cards sharing
+one actor or operational journey; present fewer rather than mix unrelated
+mental contexts. Within a coherent set, prefer decisions that unlock the most
+downstream decisions, then P1/external behavior, then discovery order.
 
 Start each batch with one compact progress line containing resolved and
-currently-known decision counts, this batch's IDs, and the number of
-dependency-blocked topics. The total is explicitly “currently known”; explain
-any later increase without displaying the full future decision map. For each
-platform-neutral Markdown decision card, include:
+currently-known **human decision** counts, this batch's IDs, and the number of
+dependency-blocked human topics. Do not count engineering determinations or
+Implementation Freedoms as decisions. On first inventory and whenever a bucket
+changes, add a compact bucket-count digest and state that any topic can be
+expanded or promoted.
 
-1. Context citing FRs, constraint sources, and repository facts.
-2. At least two options, each grounded in a concrete command session, file
-   tree, request/flow trace, or field failure; state trade-offs as observable
-   behavior.
-3. Constraint result per option. A constitution `MUST` conflict is not
-   approvable without a separate constitution amendment; a `SHOULD` deviation
-   needs a recorded reason; a GateSpec constraint exemption needs an explicit
-   approval in this Decision Log.
-4. A 1–2 sentence recommendation.
-5. When applicable, `⚠ High risk — explicit D<n>=<choice> authorization
+For each platform-neutral Markdown decision card, include in this exact
+cognitive order:
+
+1. `D<n>` plus a plain-language question understandable without identifiers.
+2. **Scenario** — the affected actor, initial state, trigger, and observable
+   outcome or field failure.
+3. **Fixed boundary** — what approved Requirements or higher-priority
+   constraints already decide and this card cannot reopen.
+4. **Why this needs you** — the concrete consequence on which reasonable humans
+   could prefer different answers.
+5. **Options** — 2–4 viable mutually exclusive options applied to the same
+   scenario. State observable result/trade-off first, then technical mechanism
+   and constraint result. Never include a dominated or forbidden foil.
+6. **Recommendation** — 1–2 sentences, after all options.
+7. **Technical basis** — FRs, prior decisions, constraint sources, repository
+   facts, file trees, or flow traces last rather than as the comprehension entry.
+8. When applicable, `⚠ High risk — explicit D<n>=<choice> authorization
    required; batch recommendation shortcuts do not cover this decision`, plus
    the concrete reason.
+
+The card is self-contained only when deleting Technical basis identifiers still
+leaves enough information to explain the situation, alternatives, and human
+consequences. Rewrite or split a card that fails this test before presenting it.
 
 Wait for the batch response. Accept an ID mapped to an option letter, exact
 option label, or `recommended`, for example `D1=A; D2=recommended`. “Accept all
@@ -141,14 +190,15 @@ reconciliation decision; never choose or revise an option automatically. A
 constitution MUST conflict is not recorded.
 
 Honor cheap, non-persistent controls such as `split D2`, `ask one next round`,
-or `next round at most N` (1–4). A deferred decision remains unresolved and
-blocks Design approval while other independent decisions may continue. Batch
-grouping is conversational only and is never recorded in the Decision Log.
+or `next round at most N` (1–4). A deferred human decision remains unresolved
+and blocks Design approval while other independent decisions may continue.
+Batch grouping and triage buckets are conversational only and are never stored
+as workflow state.
 
-Use unique numeric IDs. If no non-trivial decision exists, write exactly one:
+If no design choice requires individual human approval, write exactly one:
 
 ```markdown
-- None — <specific reason no non-trivial design decision was required>
+- None — <specific reason no design choice required individual human approval>
 ```
 
 ## Step 3: fill plan and design attachments
@@ -163,9 +213,11 @@ or `N/A — <reason>` / `无额外约束 — <原因>`.
 Ensure every FR has a technical home and every design element traces to an FR
 or approved decision. Remove unapproved gold-plating. Conduct an implementer's
 walkthrough using only spec + design artifacts; close every non-trivial fork
-with a Decision Log approval or bounded Implementation Freedom. If the
-walkthrough discovers a new non-trivial fork, return it to the decision
-inventory and present it in the next legal batch. quickstart.md
+as an approved human decision, a reasoned engineering determination in Design
+Detailing/research.md, or a bounded Implementation Freedom. If the walkthrough
+discovers a new fork or a human-relevant consequence hidden in another bucket,
+reclassify it and present any resulting decision in the next legal batch.
+quickstart.md
 must provide a runnable end-to-end validation path for each P1 story.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
@@ -189,16 +241,19 @@ stage verdicts.
 
 Immediately before the final summary, internally compare spec.md, plan.md,
 research.md, data-model.md, contracts/, and quickstart.md for terminology,
-interfaces, constraints, traceability, and contradictions. Resolve findings
-or obtain the appropriate decision approval. Do **not** call upstream analyze
-during plan: native analyze belongs after tasks, when tasks.md exists.
+interfaces, constraints, traceability, contradictions, and bucket correctness.
+Confirm no human-relevant fork was hidden as an engineering determination or
+Implementation Freedom. Resolve findings or obtain the appropriate decision
+approval. Do **not** call upstream analyze during plan: native analyze belongs
+after tasks, when tasks.md exists.
 
 ## Step 4: Design approval
 
-Present at most 20 lines: technical approach, approved decisions, explicit
-implementation freedoms, validation approach, and mandatory “what I am least
-confident about”. Wait for unambiguous approval. Changes produce a diff-only
-re-approval round.
+Present at most 20 lines: technical approach, approved human decisions,
+material engineering determinations, explicit implementation freedoms,
+validation approach, and mandatory “what I am least confident about”. Remind
+the user that any determination/freedom may still be promoted before approval.
+Wait for unambiguous approval. Changes produce a diff-only re-approval round.
 
 On explicit approval only:
 

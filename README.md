@@ -1,13 +1,13 @@
 # GateSpec
 
-GateSpec 0.4.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.5.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension that puts explicit human approval gates on requirements and design,
 then requires task and implementation review receipts around the unchanged
 native execution path. It does not fork or modify upstream commands.
 
 Its operating principles are human-led constraints, low auto-inference,
-discussion before execution, bounded review artifacts, and concrete design
-options.
+discussion before execution, bounded review artifacts, and scenario-first
+human decisions.
 
 ## Two paths, one downstream workflow
 
@@ -26,7 +26,7 @@ A displaced marker is treated as a damaged gated artifact and fails.
 
 Feature content has exactly three human approval mechanisms:
 
-1. an answer to each blocking requirements/design decision;
+1. an answer to each approval-eligible Requirements/Design decision;
 2. one batch approval for proposed non-blocking defaults;
 3. final approval of a ≤20-line Requirements or Design summary (or a diff on
    revision), including “what I am least confident about”.
@@ -45,19 +45,39 @@ mechanisms. A reviewer cannot introduce a requirement, design choice, waiver,
 or scope change; such a finding returns to the existing Requirements or Design
 diff-approval flow.
 
-## Adaptive decision batches
+## Scenario-first decision triage
 
-Specify and Plan first discover repository facts and inventory known decision
-dependencies. Each round then presents only pairwise-independent frontier
-decisions: at most four cards and a cognitive-load total of four. A normal card
-costs one, a complex or high-risk card costs two, and a card that is both costs
-three. Dependent decisions remain serial; cycles become one coherent bundled
-decision.
+Specify first classifies Requirements unknowns as a blocking human decision, a
+batch-approved routine default, or a technical matter deferred to Design. Plan
+classifies design forks as a human decision, a reasoned engineering
+determination, or bounded Implementation Freedom. Individual approval is used
+only when at least two compliant options remain and a reasonable affected
+human could prefer either because their observable consequences differ.
+Forbidden or dominated alternatives cannot be used as foils.
 
-Every card keeps its own options, constraint results, recommendation, stable
-ID, and explicit answer. Requirements IDs are stored inside the existing
-Clarification form as `- Q: [R<n>] ... → A: ...`; Design keeps `D<n>` blocks.
-Legacy Requirements entries without IDs remain valid and are never rewritten.
+Engineering determinations are not hidden: they are recorded with rationale in
+Design Detailing/research and covered by final Design approval. They do not get
+`D<n>` IDs or individual approval fields. Technical choices that are safe to
+defer stay in Implementation Freedoms with explicit bounds. A user can request
+an explanation or promote either classification into full discussion before
+final approval.
+
+Human decisions retain a transient dependency graph and stable IDs. Each card
+starts with one shared actor/trigger/outcome or failure scenario, states what is
+already fixed and why human input matters, compares every option in that same
+scenario, and puts FRs, constraints, paths, and flow evidence last. A reader
+must be able to understand the choice without opening those references.
+
+Each round contains at most four simple, pairwise-independent cards under a
+four-unit cognitive budget. A complex or high-risk card consumes the full
+budget and is presented alone. Progress counts only approval-eligible human
+decisions; a separate compact digest reports other buckets without turning
+them into a decision backlog. Dependent decisions remain serial and cycles
+become one coherent bundled decision.
+
+Requirements IDs are stored inside the existing Clarification form as
+`- Q: [R<n>] ... → A: ...`; Design keeps `D<n>` blocks only for individually
+approved choices. Legacy approved entries remain valid and are never rewritten.
 
 “Accept all recommendations in this batch” covers only non-high-risk decision
 cards in the current batch. High-risk cards require an explicit ID/choice, and
@@ -65,7 +85,9 @@ the separately presented defaults table still requires “approve defaults”.
 Partial answers are retained; unanswered IDs lead the next batch, which may be
 refilled with newly eligible independent decisions. Users can temporarily ask
 to split a card, ask one next round, or cap the next round at 1–4 cards without
-creating a stored mode.
+creating a stored mode. They may also ask to explain or discuss an engineering
+determination or Implementation Freedom; this likewise creates no stored mode
+or fourth approval mechanism.
 
 ## Task and implementation review
 

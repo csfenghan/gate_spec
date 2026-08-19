@@ -54,28 +54,35 @@ explicit Decision Log approval.]
 ## Decision Log *(gatespec: mandatory)*
 
 <!--
-  GATESPEC: One block per non-trivial decision. The gate fails while any
-  block has an empty **Approved** field.
+  GATESPEC: One block per design choice that required individual human
+  approval. Engineering determinations belong in Design Detailing/research;
+  deferred safe choices belong in Implementation Freedoms. The gate fails
+  while any D<n> block has an empty **Approved** field.
   Rules for each block:
   - Adaptive batches are conversational only; each block remains one separately
     approved decision with its stable D<n> ID
-  - ≥2 options, each with a CONCRETE scenario (command session, file tree,
-    failure-in-the-field picture) — abstract quality words alone are forbidden
-  - Trade-offs stated as observable behavior, recommendation with reason
+  - One shared human-recognizable scenario comes before technical references
+  - ≥2 viable options apply to that same scenario; forbidden or dominated
+    alternatives are never used as foils
+  - Each option states observable consequences before mechanisms; FRs,
+    constraints, paths, and flow evidence come last in Technical basis
   - **Approved** filled with the user's explicit choice + date
 -->
 
-### D1: [decision topic]
+### D1: [plain-language decision question]
 
-- **Context**: [what forces this decision]
+- **Scenario**: [actor, initial state, trigger, and observable outcome or failure]
+- **Fixed boundary**: [approved behavior or higher-priority constraint this choice cannot reopen]
+- **Why this needs you**: [material consequence on which reasonable humans may prefer different answers]
 - **Options**:
-  - A. [option] — concrete scenario: [what using it looks like]; trade-off: [observable consequence]
-  - B. [option] — concrete scenario: [...]; trade-off: [...]
-- **Recommendation**: [A/B] — [reason, incl. constitution-constraint check result]
+  - A. [same-scenario observable result and trade-off] — mechanism: [technical approach]; constraint result: [result]
+  - B. [same-scenario observable result and trade-off] — mechanism: [technical approach]; constraint result: [result]
+- **Recommendation**: [A/B] — [reason]
+- **Technical basis**: [FRs, prior decisions, constraints, repository facts, paths, or flow trace]
 - **Approved**: [choice] ([YYYY-MM-DD])
 
-<!-- If no non-trivial design decision exists, replace the D1 example with:
-- None — <specific reason no non-trivial design decision was required>
+<!-- If no design choice required individual human approval, replace the D1 example with:
+- None — <specific reason no design choice required individual human approval>
 -->
 
 ## Design Detailing *(gatespec: mandatory)*
@@ -83,6 +90,8 @@ explicit Decision Log approval.]
 <!--
   GATESPEC: Every dimension MUST have substantive content OR an explicit
   "N/A — <one-line reason>". Silent omission fails the gate.
+  Record reasoned engineering determinations under their applicable dimensions;
+  they do not receive D<n> IDs or individual approval fields.
   Constraints may add dimensions, but cannot delete, rename, or replace the
   six core dimensions below.
 -->
@@ -98,8 +107,9 @@ explicit Decision Log approval.]
 
 <!--
   GATESPEC: Non-trivial choices deliberately left to implementation time.
-  Anything NOT listed here and NOT in the Decision Log is a silent gap —
-  the implementer's walkthrough must have found none remaining.
+  Anything not approved in the Decision Log, determined with rationale in
+  Design Detailing/research, or bounded here is a silent gap — the
+  implementer's walkthrough must have found none remaining.
 -->
 
 - [choice left open] — constraints: [boundaries the implementer must respect]

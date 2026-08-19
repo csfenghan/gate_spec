@@ -160,7 +160,7 @@ for rule in \
 done
 for rule in \
   'D1=A; D2=recommended' \
-  'grouping is conversational only'; do
+  'Batch grouping and triage buckets are conversational only'; do
   grep -F "$rule" "$claude_plan" >/dev/null || batching_contract_ok=0
   grep -F "$rule" "$codex_plan" >/dev/null || batching_contract_ok=0
 done
@@ -168,6 +168,51 @@ if [[ "$batching_contract_ok" -eq 1 ]]; then
   ok "rendered Claude/Codex skills preserve the adaptive batching contract"
 else
   not_ok "rendered adaptive batching contract"
+fi
+
+triage_contract_ok=1
+for skill in "$claude_spec" "$codex_spec"; do
+  for rule in \
+    '**Blocking human decision**' \
+    '**Technical matter deferred to Design**' \
+    'Technology choice alone never makes an item blocking.' \
+    '**Scenario**' \
+    '**Fixed boundary**' \
+    '**Why this needs you**' \
+    '**Technical basis**' \
+    'deleting Technical basis identifiers'; do
+    grep -F "$rule" "$skill" >/dev/null || triage_contract_ok=0
+  done
+done
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    '**Human decision**' \
+    '**Engineering determination**' \
+    '**Implementation Freedom**' \
+    'It gets no' \
+    'dominated or forbidden foil' \
+    'complex or high-risk card consumes the full' \
+    '**Why this needs you**' \
+    'deleting Technical basis identifiers'; do
+    grep -F "$rule" "$skill" >/dev/null || triage_contract_ok=0
+  done
+done
+if [[ "$triage_contract_ok" -eq 1 ]]; then
+  ok "rendered Claude/Codex skills preserve scenario-first decision triage"
+else
+  not_ok "rendered scenario-first decision triage contract"
+fi
+
+if grep -F 'Only approval-eligible human decisions belong here' "$REPO/templates/gatespec-spec-template.md" >/dev/null &&
+   grep -F -- '- **Scenario**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
+   grep -F -- '- **Fixed boundary**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
+   grep -F -- '- **Why this needs you**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
+   grep -F -- '- **Technical basis**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
+   grep -F 'approved human decisions, recorded engineering' "$claude_reviewer" >/dev/null &&
+   grep -F 'approved human decisions, recorded engineering' "$codex_reviewer" >/dev/null; then
+  ok "templates and reviewer adapters preserve the decision-triage taxonomy"
+else
+  not_ok "template/reviewer decision-triage taxonomy"
 fi
 
 if grep -F '/speckit-tasks' "$claude_plan" >/dev/null &&
@@ -291,7 +336,7 @@ else
   ok "atomic renderer and reviewer installer leave zero temporary files"
 fi
 
-if ! grep -F 'version: "0.4.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.5.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -302,9 +347,9 @@ if ! grep -F 'version: "0.4.0"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null; then
-  not_ok "0.4.0 manifest requirements and fixed hook entries"
+  not_ok "0.5.0 manifest requirements and fixed hook entries"
 else
-  ok "0.4.0 manifest requires the native sequence and registers all six fixed hooks"
+  ok "0.5.0 manifest requires the native sequence and registers all six fixed hooks"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

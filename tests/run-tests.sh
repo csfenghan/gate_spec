@@ -592,9 +592,32 @@ rewrite "$TEST_TMP/unapproved-decision/plan.md" 's/- \*\*Approved\*\*: A (2026-0
 seal "$TEST_TMP/unapproved-decision/plan.md"
 expect fail design "$TEST_TMP/unapproved-decision" "decision without explicit approval fails" "must contain exactly one"
 
+clone_good scenario-first-decision
+awk '
+  /^## Decision Log/ {
+    print
+    print "### D1: Should operators trade portability for immediate reload?"
+    print "- **Scenario**: An operator saves a valid config while the service is handling requests; reload should become visible without a restart."
+    print "- **Fixed boundary**: Invalid config must retain the prior snapshot and supported platforms cannot change."
+    print "- **Why this needs you**: The choice changes reload latency and platform-specific maintenance cost."
+    print "- **Options**:"
+    print "  - A. Every platform observes the update within one second — mechanism: portable polling; constraint result: satisfies all constraints."
+    print "  - B. Supported native platforms observe it immediately — mechanism: platform notifications; constraint result: requires per-platform adapters."
+    print "- **Recommendation**: A — the bounded delay buys one portable behavior."
+    print "- **Technical basis**: FR-001, FR-002, ConfigWatcher, and the supported-platform constraint."
+    print "- **Approved**: A (2026-08-07)"
+    skip=1
+    next
+  }
+  skip && /^## Design Detailing/ {skip=0}
+  !skip {print}
+' "$TEST_TMP/good/plan.md" > "$TEST_TMP/scenario-first-decision/plan.md.tmp" && mv "$TEST_TMP/scenario-first-decision/plan.md.tmp" "$TEST_TMP/scenario-first-decision/plan.md"
+seal "$TEST_TMP/scenario-first-decision/plan.md"
+expect pass design "$TEST_TMP/scenario-first-decision" "scenario-first decision blocks remain checker-compatible"
+
 clone_good zero-decision
 awk '
-  /^## Decision Log/ {print; print "- None — implementation is fully fixed by the approved requirements and existing architecture."; skip=1; next}
+  /^## Decision Log/ {print; print "- None — no design choice required individual human approval."; skip=1; next}
   skip && /^## Design Detailing/ {skip=0}
   !skip {print}
 ' "$TEST_TMP/good/plan.md" > "$TEST_TMP/zero-decision/plan.md.tmp" && mv "$TEST_TMP/zero-decision/plan.md.tmp" "$TEST_TMP/zero-decision/plan.md"

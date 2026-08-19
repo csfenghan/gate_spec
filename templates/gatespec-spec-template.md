@@ -24,6 +24,9 @@
   GATESPEC: Every clarification round lands here AND its conclusion MUST be
   applied to the body sections below (self-containment: a reader who never saw
   the conversation can implement from this file alone).
+  Only approval-eligible human decisions belong here: each had ≥2 viable
+  options with materially different human consequences. Purely technical
+  matters are deferred to Design, not recorded as Clarifications or Defaults.
   Stable R<n> IDs map adaptive decision cards to their explicit answers.
   Legacy concluded entries without an ID remain valid and are not rewritten.
   Format per session (compatible with core speckit.clarify):
@@ -40,8 +43,9 @@
 ## Approved Defaults *(gatespec: mandatory)*
 
 <!--
-  GATESPEC: Non-blocking unknowns resolved via batch-approved defaults.
+  GATESPEC: Routine non-blocking unknowns resolved via batch-approved defaults.
   Blocking decisions NEVER go here — they belong to ## Clarifications.
+  Purely technical matters also NEVER go here — they are deferred to Design.
   Each row must carry an approval mark (✅ + date) before the gate can pass.
   Any row may be pulled out for full discussion at the user's request.
 -->

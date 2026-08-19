@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.4.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.5.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -43,33 +43,46 @@ In a scratch initialized project:
 4. An unmarked upstream spec produces no GateSpec output in every fixed hook.
 5. Gated specify/plan execute a harmless peer hook exactly once and skip their
    own hook entries.
-6. In both Claude and Codex, present six simple independent decisions and
-   confirm they take at most two question rounds; present six complex
-   independent decisions and confirm they take at most three. A three-decision
-   dependency chain must remain three serial rounds, and a high-risk card must
-   not be accepted by the batch recommendation shortcut.
-7. Confirm a co-presented defaults card needs its own explicit approval,
+6. In both Claude and Codex, present six genuine simple independent human
+   decisions sharing one journey and confirm they take at most two question
+   rounds. Present two genuine complex decisions and confirm each is alone in
+   its round. A three-decision dependency chain remains three serial rounds,
+   and a high-risk card is alone and cannot use the batch recommendation
+   shortcut.
+7. Present a technology-only Requirements unknown and confirm it creates no R
+   card. Present a D56/D57-style design where Requirements fix the outcome,
+   alternatives are externally equivalent, and one candidate violates a MUST;
+   confirm the invalid candidate is excluded, the selected mechanism is a
+   reasoned Design Detailing/research engineering determination, and no D card
+   is created. Then request `discuss <topic>` and confirm promotion creates a
+   self-contained shared-scenario card only when two viable options exist.
+8. For every R/D card, remove Technical basis identifiers mentally and confirm
+   the actor, trigger, options, and consequences remain understandable. Confirm
+   fixed boundary and why-human-input fields precede options, while FRs,
+   constraints, paths, and flows appear last.
+9. Confirm a co-presented defaults card needs its own explicit approval,
    partial answers retain IDs and refill the next batch, conflicting answers
    preserve unaffected approvals, and a legacy Draft resumes without rewriting
-   unnumbered Clarifications.
-8. Re-approve a spec and confirm the old plan fails Requirements basis match.
-9. Generate native tasks with one non-parallel checkpoint row per approved
+   unnumbered Clarifications or accepted D IDs; a retired unanswered ID is not
+   reused.
+10. Re-approve a spec and confirm the old plan fails Requirements basis match.
+11. Generate native tasks with one non-parallel checkpoint row per approved
    REV-ID and confirm `after_tasks` rejects a missing, duplicate, extra, or
    parallel checkpoint.
-10. Run native analyze. Confirm the same author/analyzer context may coordinate
+12. Run native analyze. Confirm the same author/analyzer context may coordinate
    REV-TASKS receipts but is forbidden from judging or authoring the verdict;
    obtain judgment from a fresh Claude/Codex context or the manual new-session
    fallback, and confirm `before_implement` rejects missing, BLOCKED, and stale
    task-review seals.
-11. Run native implement through a stage checkpoint. Confirm parallel work joins,
+13. Run native implement through a stage checkpoint. Confirm parallel work joins,
    the context creates only a local commit/request and never pushes, a fresh
    reviewer alone returns verdict text, the coordinator validates/persists it
    and creates a PASS-only candidate seal, candidate validation precedes the
    receipt/checkmark commit, the clean tracked final check follows it, and
    rounds 03+ fail.
-12. Confirm `after_implement` rejects missing/stale REV-FINAL and accepts a
+14. Confirm `after_implement` rejects missing/stale REV-FINAL and accepts a
     current full-feature PASS seal without replacing native implement.
-13. Resume an old Approved-Design plan without Implementation Review Contract;
+15. Resume an old Approved-Design plan without Implementation Review Contract;
     confirm tasks/reviews archive, the plan reopens Draft, and diff re-approval
     is required before task regeneration.
 

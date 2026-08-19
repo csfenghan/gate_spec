@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 (2026-08-19)
+
+- Added decision triage so only choices with at least two viable options and
+  materially different human consequences receive individual R/D approval.
+- Split Requirements unknowns into human decisions, proposed defaults, and
+  technical matters deferred to Design; split Design forks into human
+  decisions, reasoned engineering determinations, and bounded Implementation
+  Freedoms without adding an approval mechanism or workflow state.
+- Reframed every human decision around one shared actor/trigger/outcome or
+  failure scenario, with fixed boundaries and human consequences before
+  options, recommendations, FRs, constraints, paths, and flow evidence.
+- Excluded requirement/MUST-conflicting and dominated alternatives from option
+  sets instead of using them as approval foils.
+- Changed progress to count only human decisions and made every complex or
+  high-risk card a single-card round; simple coherent cards retain the bounded
+  adaptive batch flow.
+- Kept existing artifact/checker compatibility, stable accepted IDs, three
+  approval mechanisms, fixed hooks, and the native tasks/analyze/implement
+  sequence; added cheap explain/promote controls and dual-platform behavior
+  cases for the new prompt contract.
+
 ## 0.4.0 (2026-08-19)
 
 - Replaced serial Specify/Plan questioning with adaptive batches of up to four

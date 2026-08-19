@@ -1,6 +1,6 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.4.0 is a personal spec-kit extension that adds human approval gates
+GateSpec 0.5.0 is a personal spec-kit extension that adds human approval gates
 to Requirements and Design plus independent-context review checkpoints around
 native task generation and implementation. Read this file before changing the
 repository.
@@ -8,16 +8,23 @@ repository.
 ## Product invariants
 
 1. **Human-led constraints**: agents propose and humans approve; no key feature
-   decision takes effect implicitly.
-2. **Low auto-inference**: unknowns become a blocking question or proposed
-   default. The blocking/default classification has a cheap user veto.
+   decision takes effect implicitly. Only choices with at least two viable
+   options and materially different human consequences require individual
+   approval; reasoned engineering determinations remain visible in Design.
+2. **Low auto-inference**: Requirements unknowns become a blocking human
+   question, proposed default, or technical matter deferred to Design. Design
+   forks become a human decision, engineering determination, or bounded
+   Implementation Freedom. Every classification has a cheap user veto.
 3. **Discuss before execute**: Requirements blocks plan; Design blocks tasks.
-4. **Bounded presentation**: each round contains at most four cards—pairwise-
-   independent decisions plus at most one independent defaults card—within a
-   cognitive-load budget of four, ≤20-line final summaries including “what I
-   am least confident about”, and diff-only re-approval.
-5. **Concrete design**: every design option has a command/file-tree/flow/failure
-   scenario and observable trade-offs; abstractions may only follow it.
+4. **Bounded presentation**: a round contains at most four total cards—simple
+   pairwise-independent decisions plus at most one independent defaults card;
+   complex or high-risk decisions are presented alone. Progress counts only
+   human decisions. Final summaries stay ≤20 lines, include “what I am least
+   confident about”, and revisions use diff-only re-approval.
+5. **Scenario-first design**: every human decision starts with one shared,
+   self-contained actor/trigger/outcome or failure scenario. Options compare
+   observable consequences in that same scenario; abstractions, FRs, paths,
+   and flow evidence follow as Technical basis.
 
 Feature content has exactly three approval mechanisms: a decision answer, the
 defaults batch, and final summary/diff approval. “Proceed” cannot seal unresolved
@@ -67,15 +74,17 @@ Drafts resume in place, approved artifacts are read-only, `--revise` uses diff
 re-approval, and `--restart` archives before rebuilding. Revision/restart must
 archive tasks and review receipts rather than leave stale execution work.
 
-The six Design Detailing dimensions are exact mandatory core fields. Constraints
-may add fields, never replace them. Plan performs its own attachment consistency
-walkthrough before summary; upstream analyze runs only after tasks.
+The six Design Detailing dimensions are exact mandatory core fields and record
+reasoned engineering determinations where applicable. Constraints may add
+fields, never replace them. Plan performs its own attachment consistency and
+decision-classification walkthrough before summary; upstream analyze runs only
+after tasks.
 
 ## Repository map
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.4.0 manifest, fixed hooks, verified version range |
+| `extension.yml` | 0.5.0 manifest, fixed hooks, verified version range |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/gatespec-{spec,plan}-template.md` | upstream-compatible artifacts |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |
