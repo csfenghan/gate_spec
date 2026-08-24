@@ -3,8 +3,8 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.5.1"
-  description: "Scenario-first human-gated requirements/design with triaged engineering determinations plus fresh-context reviews around the native tasks/analyze/implement workflow"
+  version: "0.6.0"
+  description: "Scenario-first gated requirements/design, optional reviewed Source Design, fresh implementation reviews, and explicit final delivery acceptance"
   category: "process"
   effect: "read-write"
   author: "harry.feng"
@@ -32,9 +32,14 @@ provides:
       description: "Gated plan: scenario-first human decisions with recorded engineering determinations"
       aliases: ["gatespec.plan"]
 
+    - name: "speckit.gatespec.source-design"
+      file: "commands/speckit.gatespec.source-design.md"
+      description: "Optional source-level design with fresh review and explicit whole-design approval"
+      aliases: ["gatespec.source-design"]
+
     - name: "speckit.gatespec.check"
       file: "commands/speckit.gatespec.check.md"
-      description: "Run requirements, design, task, or implementation receipt checks for the current feature"
+      description: "Run Requirements, Design, Source, task/review, or final acceptance checks for the current feature"
       aliases: ["gatespec.check"]
 
     - name: "speckit.gatespec.check-requirements"
@@ -45,6 +50,10 @@ provides:
       file: "commands/speckit.gatespec.check-design.md"
       description: "Internal fixed Design Gate hook entry"
 
+    - name: "speckit.gatespec.check-source-design"
+      file: "commands/speckit.gatespec.check-source-design.md"
+      description: "Internal conditional Source Design Gate hook entry"
+
     - name: "speckit.gatespec.check-tasks"
       file: "commands/speckit.gatespec.check-tasks.md"
       description: "Internal fixed post-tasks structure hook entry"
@@ -52,6 +61,10 @@ provides:
     - name: "speckit.gatespec.review-tasks"
       file: "commands/speckit.gatespec.review-tasks.md"
       description: "Fresh-context semantic review of native tasks after analyze"
+
+    - name: "speckit.gatespec.review-source-design"
+      file: "commands/speckit.gatespec.review-source-design.md"
+      description: "Fresh-context REV-SOURCE review coordinator and manual request path"
 
     - name: "speckit.gatespec.check-task-review"
       file: "commands/speckit.gatespec.check-task-review.md"
@@ -65,6 +78,10 @@ provides:
       file: "commands/speckit.gatespec.check-implementation-review.md"
       description: "Internal fixed implementation-review receipt hook entry"
 
+    - name: "speckit.gatespec.accept-implementation"
+      file: "commands/speckit.gatespec.accept-implementation.md"
+      description: "Final whole-implementation user acceptance and bound local record"
+
 hooks:
   # Fires when the CORE speckit.plan runs on a gatespec-track spec (mixed path).
   # gatespec.plan itself runs the spec check inline at startup.
@@ -76,9 +93,14 @@ hooks:
   # Fires when core speckit.tasks runs — the mandatory convergence point
   # for both gatespec.plan and core speckit.plan outputs.
   before_tasks:
-    command: "speckit.gatespec.check-design"
-    optional: false
-    description: "Design Gate: plan must be Approved-Design before task generation"
+    - command: "speckit.gatespec.check-design"
+      priority: 10
+      optional: false
+      description: "Design Gate: plan must be Approved-Design before task generation"
+    - command: "speckit.gatespec.check-source-design"
+      priority: 20
+      optional: false
+      description: "Conditional Source Design Gate: when enabled, Source and REV-SOURCE must be approved/current"
 
   # Native tasks.md remains upstream-owned. This validates only the approved
   # review contract and the explicit non-parallel checkpoint task rows.
@@ -100,9 +122,14 @@ hooks:
     description: "Task Review Gate: a current REV-TASKS PASS seal is required before native implementation"
 
   after_implement:
-    command: "speckit.gatespec.check-implementation-review"
-    optional: false
-    description: "Implementation Review Gate: a current REV-FINAL PASS seal is required before completion"
+    - command: "speckit.gatespec.check-implementation-review"
+      priority: 10
+      optional: false
+      description: "Implementation Review Gate: a current REV-FINAL PASS seal is required before completion"
+    - command: "speckit.gatespec.accept-implementation"
+      priority: 20
+      optional: false
+      description: "Delivery Acceptance Gate: explicit user acceptance is required before completion"
 
 tags:
   - "sdd"
@@ -110,4 +137,6 @@ tags:
   - "requirements"
   - "design-review"
   - "implementation-review"
+  - "source-design"
+  - "delivery-acceptance"
   - "workflow"

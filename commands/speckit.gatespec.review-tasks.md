@@ -56,6 +56,9 @@ commit in manual reviewer mode.
 2. Use review ID `REV-TASKS`, scope `TASKS`, and directory
    `<feature>/.gatespec/reviews/REV-TASKS/`. If `check-gate.sh task-review`
    already accepts a current seal, keep all receipt bytes read-only and return.
+   Select the active protocol deterministically: an approved Plan declaring 1
+   with no Source entry is legacy v1; a Plan declaring 2, or any feature with
+   `contracts/source-design.md`, is v2. Never downgrade a v2 feature.
 3. Select the next round without guessing:
    - no prior files → `00`, Previous-Verdict-SHA256 `none`;
    - a complete prior BLOCKED round → `01` or `02`, chained to that verdict;
@@ -68,9 +71,23 @@ commit in manual reviewer mode.
    the C-sorted relative-path/TAB/file-hash design-attachment manifest, and
    tasks.md with CRLF normalized and only valid T### `[xX]` progress normalized
    to `[ ]`.
+   For v2, exclude the Source bundle from Design-Attachments-SHA256. Initialize
+   execution state before the request. With Source enabled, initialize the IA
+   template to its canonical empty state; without Source, IA is
+   `not-applicable`. Before round 00 only, create and verify a clean local
+   pre-review Task-Handoff commit that contains current approved artifacts,
+   Source/REV-SOURCE/revalidations when applicable, tasks.md, empty IA, and the
+   execution state while its Task-Handoff-Commit value is still `pending`.
+   Record that new OID in the working execution state and recompute its
+   self-hash; the later REV-TASKS metadata commit records those final state
+   bytes without creating a self-referential commit hash. Keep the unchanged
+   Original Baseline/Execution Epoch. Remediation rounds retain that immutable
+   handoff OID while changing the bound tasks definition; they do not create a
+   second handoff. No implementation path or task progress may enter either
+   commit.
 5. Write `round-<NN>-request.md` atomically with exactly this field/section
    order. Replace values, omit angle brackets, and hash every raw byte before
-   the final Request-SHA256 field:
+   the final Request-SHA256 field. Use the following only for legacy v1:
 
 ```markdown
 - **Protocol-Version**: `1`
@@ -95,6 +112,37 @@ commit in manual reviewer mode.
 - **Request-SHA256**: `<lowercase 64-hex>`
 ```
 
+For active Protocol v2, use this exact request instead:
+
+```markdown
+- **Protocol-Version**: `2`
+- **Review-ID**: `REV-TASKS`
+- **Round**: `<00|01|02>`
+- **Scope**: `TASKS`
+- **Spec-Content-SHA256**: `<lowercase 64-hex>`
+- **Plan-Content-SHA256**: `<lowercase 64-hex>`
+- **Design-Attachments-SHA256**: `<lowercase 64-hex; Source excluded>`
+- **Tasks-Definition-SHA256**: `<lowercase 64-hex>`
+- **Execution-Epoch**: `<E1|E2|...>`
+- **Source-Design-Content-SHA256**: `<lowercase 64-hex|not-applicable>`
+- **Implementation-Adjustments-SHA256**: `<empty IA raw hash|not-applicable>`
+- **Task-Handoff-Commit**: `<lowercase commit OID>`
+- **Preserved-Reviews-SHA256**: `<lowercase 64-hex|not-applicable>`
+- **Implementation-Baseline**: `not-applicable`
+- **Base-Commit**: `not-applicable`
+- **Subject-Commit**: `not-applicable`
+- **Task-IDs**: `none`
+- **Changed-Paths-SHA256**: `not-applicable`
+- **Final-Delta-SHA256**: `not-applicable`
+- **Previous-Verdict-SHA256**: `<none|prior Verdict-SHA256>`
+
+## Required Tests
+
+- Not run — task-plan review
+
+- **Request-SHA256**: `<lowercase 64-hex>`
+```
+
 6. Dispatch exactly that absolute request path using the appended or packaged platform
    adapter. Do not send conversation, analysis summaries, suggested findings,
    or a proposed verdict.
@@ -110,10 +158,15 @@ preserved; exact file scopes and dependencies are sufficient; parallel labels
 cannot race; phases remain independently testable; every Implementation Review
 Contract checkpoint is phase-final and its tests are executable; and tasks
 introduce no unapproved requirement, design choice, or gold-plating. A material
-uncertainty is a BLOCKER, not an inferred default.
+uncertainty is a BLOCKER, not an inferred default. For source-enabled v2, read
+the full Source bundle and require every SD-F path, SD-U symbol, SD-FLOW,
+SD-ALG, SD-FAIL, and SD-TEST to map to executable tasks with exact paths and
+dependencies. Validate Source content hash, empty IA baseline, execution epoch,
+Task-Handoff commit, and every preserved revalidation.
 
 The adapter, or a manual fresh session whose returned text is supplied back to
-this no-input coordinator, returns exactly:
+this no-input coordinator, returns exactly the active request Protocol-Version
+(`1` below for legacy; substitute `2` only for a v2 request):
 
 ```markdown
 - **Protocol-Version**: `1`
@@ -177,10 +230,25 @@ as `round-<NN>-verdict.md`; never rewrite reviewer prose.
 - **Seal-SHA256**: `<lowercase 64-hex>`
 ```
 
+For Protocol v2, insert the following request-bound fields after
+Tasks-Definition-SHA256 and before Implementation-Baseline, and insert
+Final-Delta-SHA256 after Subject-Commit. The seal Protocol-Version is `2`:
+
+```markdown
+- **Execution-Epoch**: `<request value>`
+- **Source-Design-Content-SHA256**: `<request value>`
+- **Implementation-Adjustments-SHA256**: `<request value>`
+- **Task-Handoff-Commit**: `<request value>`
+- **Preserved-Reviews-SHA256**: `<request value>`
+...
+- **Final-Delta-SHA256**: `not-applicable`
+```
+
 After writing the seal, first validate its exact local schema/hash chain. Then
 verify the feature branch contains no unrelated dirty paths and create one
-local checkpoint commit containing only the approved Requirements/Design
-artifacts, tasks.md, and the REV-TASKS request, verdict, and seal. Never push.
+local checkpoint commit containing only the approved Requirements/Design,
+optional Source/REV-SOURCE/revalidation artifacts, tasks.md, execution state,
+optional empty IA, and the REV-TASKS request, verdict, and seal. Never push.
 Require a clean worktree after that commit, then run
 `check-gate.sh task-review <feature-dir>`; the checker requires the seal to be
 tracked at clean HEAD. Do not report PASS unless it succeeds. That exact HEAD

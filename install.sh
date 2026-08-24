@@ -82,6 +82,8 @@ for required in \
   "$REPO/constraints.md" \
   "$REPO/templates/gatespec-spec-template.md" \
   "$REPO/templates/gatespec-plan-template.md" \
+  "$REPO/templates/gatespec-source-design-template.md" \
+  "$REPO/templates/gatespec-implementation-adjustments-template.md" \
   "$REPO/scripts/bash/check-gate.sh" \
   "$REPO/reviewers/claude/gatespec-reviewer.md" \
   "$REPO/reviewers/claude/dispatcher.md" \
@@ -191,12 +193,18 @@ command_ref() {
   case "$agent:$command" in
     claude:gatespec-specify) printf '%s' '/speckit-gatespec-specify' ;;
     claude:gatespec-plan)    printf '%s' '/speckit-gatespec-plan' ;;
+    claude:gatespec-source-design) printf '%s' '/speckit-gatespec-source-design' ;;
+    claude:gatespec-review-source-design) printf '%s' '/speckit-gatespec-review-source-design' ;;
+    claude:gatespec-accept-implementation) printf '%s' '/speckit-gatespec-accept-implementation' ;;
     claude:gatespec-check)   printf '%s' '/speckit-gatespec-check' ;;
     claude:tasks)            printf '%s' '/speckit-tasks' ;;
     claude:analyze)          printf '%s' '/speckit-analyze' ;;
     claude:implement)        printf '%s' '/speckit-implement' ;;
     codex:gatespec-specify)  printf '%s' "${dollar}speckit-gatespec-specify" ;;
     codex:gatespec-plan)     printf '%s' "${dollar}speckit-gatespec-plan" ;;
+    codex:gatespec-source-design) printf '%s' "${dollar}speckit-gatespec-source-design" ;;
+    codex:gatespec-review-source-design) printf '%s' "${dollar}speckit-gatespec-review-source-design" ;;
+    codex:gatespec-accept-implementation) printf '%s' "${dollar}speckit-gatespec-accept-implementation" ;;
     codex:gatespec-check)    printf '%s' "${dollar}speckit-gatespec-check" ;;
     codex:tasks)             printf '%s' "${dollar}speckit-tasks" ;;
     codex:analyze)           printf '%s' "${dollar}speckit-analyze" ;;
@@ -207,7 +215,7 @@ command_ref() {
 
 render_skill() {
   local agent="$1" src="$2" dest="$3" name description parent tmp repo_escaped
-  local ref_specify ref_plan ref_check ref_tasks ref_analyze ref_implement
+  local ref_specify ref_plan ref_source ref_review_source ref_accept ref_check ref_tasks ref_analyze ref_implement
   name=$(basename "$dest")
   description=$(awk '
     /^---$/ { fence++; next }
@@ -226,6 +234,9 @@ render_skill() {
 
   ref_specify=$(command_ref "$agent" gatespec-specify)
   ref_plan=$(command_ref "$agent" gatespec-plan)
+  ref_source=$(command_ref "$agent" gatespec-source-design)
+  ref_review_source=$(command_ref "$agent" gatespec-review-source-design)
+  ref_accept=$(command_ref "$agent" gatespec-accept-implementation)
   ref_check=$(command_ref "$agent" gatespec-check)
   ref_tasks=$(command_ref "$agent" tasks)
   ref_analyze=$(command_ref "$agent" analyze)
@@ -243,7 +254,7 @@ render_skill() {
     echo ''
     awk 'BEGIN {fence=0} /^---$/ {fence++; next} fence >= 2 {print}' "$src"
     case "$(basename "$src")" in
-      speckit.gatespec.review-tasks.md|speckit.gatespec.review-implementation.md)
+      speckit.gatespec.review-source-design.md|speckit.gatespec.review-tasks.md|speckit.gatespec.review-implementation.md)
         echo ''
         cat "$REPO/reviewers/$agent/dispatcher.md"
         ;;
@@ -254,6 +265,9 @@ render_skill() {
     -e 's|{SCRIPT}|.specify/scripts/bash/setup-plan.sh --json|g' \
     -e "s|__SPECKIT_COMMAND_GATESPEC_SPECIFY__|$(sed_replacement "$ref_specify")|g" \
     -e "s|__SPECKIT_COMMAND_GATESPEC_PLAN__|$(sed_replacement "$ref_plan")|g" \
+    -e "s|__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__|$(sed_replacement "$ref_source")|g" \
+    -e "s|__SPECKIT_COMMAND_GATESPEC_REVIEW_SOURCE_DESIGN__|$(sed_replacement "$ref_review_source")|g" \
+    -e "s|__SPECKIT_COMMAND_GATESPEC_ACCEPT_IMPLEMENTATION__|$(sed_replacement "$ref_accept")|g" \
     -e "s|__SPECKIT_COMMAND_GATESPEC_CHECK__|$(sed_replacement "$ref_check")|g" \
     -e "s|__SPECKIT_COMMAND_TASKS__|$(sed_replacement "$ref_tasks")|g" \
     -e "s|__SPECKIT_COMMAND_ANALYZE__|$(sed_replacement "$ref_analyze")|g" \
@@ -318,7 +332,7 @@ fi
 if [[ -n "$TARGET" ]]; then
   if [[ -d "$TARGET/.specify" ]]; then
     (cd "$TARGET" && specify extension add --dev "$REPO" --force)
-    echo "✓ project wiring: $TARGET (six fixed gate/review hooks active)"
+    echo "✓ project wiring: $TARGET (6 events / 8 ordered gate-review-acceptance entries active)"
   else
     echo "⚠ $TARGET is not initialized for spec-kit (missing .specify/)."
     echo "  Global skills were installed, but the full plan/tasks workflow requires:"
@@ -331,4 +345,4 @@ fi
 
 echo ''
 dollar='$'
-printf 'Done. Claude: /speckit-gatespec-specify · Codex: %sspeckit-gatespec-specify\n' "$dollar"
+printf 'Done. Claude: /speckit-gatespec-specify · Codex: %sspeckit-gatespec-specify · optional Source Design available\n' "$dollar"

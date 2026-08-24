@@ -1,17 +1,18 @@
-# GateSpec 0.5.1 Gate Protocol
+# GateSpec 0.6.0 Gate Protocol
 
-This document defines the Requirements/Design approval gates, native-task
-review contract, fresh-context review receipts, fixed hooks, templates, and
-`check-gate.sh`.
+This document defines Requirements/Design gates, optional Source Design,
+native-task and implementation reviews, final delivery acceptance, hooks,
+templates, and `check-gate.sh`.
 
 ## Architecture
 
 GateSpec remains a parallel gated path, not an upstream replacement:
 
 ```text
-auto:   speckit.specify ─→ speckit.plan ─┐
-                                         ├→ speckit.tasks → speckit.analyze → speckit.implement
-gated:  gatespec.specify ─→ gatespec.plan┘        │ task review         │ checkpoint/final review
+auto:   speckit.specify ─→ speckit.plan ────────────────────────────────┐
+gated:  gatespec.specify ─→ gatespec.plan ─→ [optional source-design] ─┤
+              └→ native speckit.tasks → speckit.analyze → speckit.implement
+                    task trace/review          automatic reviews → final acceptance
 ```
 
 Line 1 of a gated spec is exactly `<!-- path: gatespec -->`. If the marker is
@@ -195,7 +196,7 @@ Every newly approved plan contains one exact mandatory
 `## Implementation Review Contract` with these fields:
 
 ```markdown
-- **Protocol Version**: `1`
+- **Protocol Version**: `2`
 - **Required Checkpoints**: `REV-FOUNDATION, REV-US1, REV-FINAL`
 - **Review Root**: `.gatespec/reviews`
 - **Task Review**: `REV-TASKS after speckit.analyze; PASS required before speckit.implement`
@@ -235,6 +236,43 @@ Task and implementation review PASS verdicts are not human approvals. A
 reviewer cannot introduce a feature choice, waiver, or scope change. Such a
 finding returns to Requirements or Design diff-approval.
 
+Legacy approved Protocol v1 Plans remain valid only while Source Design is not
+enabled. Source activation independently switches downstream receipts to v2
+without editing the approved Plan.
+
+## Optional Source Design protocol
+
+`contracts/source-design.md` alone enables Source Design and starts with
+`<!-- gatespec: source-design -->`; orphan shards/REV-SOURCE fail. The user may
+enable it after Design and before product implementation, or skip directly to
+native tasks. Existing tasks/analyze/REV-TASKS may be archived and regenerated
+only when no implementation progress, product diff, IA, or implementation
+review exists.
+
+The entry and optional direct `contracts/source-design/*.md` shards specify maintainer
+scenario, before/after, success/failure, complete SD-F operations, critical
+SD-U declarations, SD-FLOW lifecycle/data/state paths, SD-ALG algorithms and
+invariants, SD-FAIL propagation/recovery/observability, SD-TEST traceability,
+cross-cutting design, bounded freedoms, and prohibited material boundaries.
+Human-relevant source choices use SD<n> and the existing decision mechanism.
+
+REV-SOURCE uses a distinct Protocol v2 SOURCE request. It binds current Spec,
+Plan, the original Design Basis with Source excluded, Source baseline commit,
+and Source-Design-Reviewed-SHA256. The reviewed manifest entry digest removes
+the unique Status line and final Gate Approval; shard digests are raw. Thus
+approval-only edits preserve PASS, while body/shard drift invalidates it. After
+fresh PASS, explicit user summary/diff approval sets
+Approved-Source-Design and Source-Design-Content-SHA256. The content manifest
+hashes entry bytes before Gate Approval plus raw shards. Both manifests hash
+the C-sorted `<feature-relative-path><TAB><file-SHA256><LF>` byte stream.
+
+Source revision after implementation blocks normal implement. Work after the
+last PASS Subject is preserved as binary patch and path manifest, a normal
+compensating commit restores the safe Subject without reset/rebase/stash, and
+old Source/tasks/reviews/IA/acceptance are archived. Original Baseline remains
+unchanged. Fresh revalidation under `.gatespec/revalidations/E<n>/` binds each
+preserved PASS Subject; unreviewed work is never reapplied automatically.
+
 ## Native task and task-review protocol
 
 Native `speckit.tasks` remains the only task generator. Every required
@@ -247,6 +285,9 @@ GateSpec review checkpoint <REV-ID>: run speckit.gatespec.review-implementation 
 
 The `after_tasks` structural hook rejects missing, duplicate, extra, parallel,
 or misplaced checkpoint rows and mismatched test mapping; it never edits tasks.
+With Source enabled it also requires the approved Source content hash, SD-* and
+precise-path refs on every non-checkpoint task, and complete coverage of all
+Source IDs/manifest paths.
 Same-phase parallel work must be disjoint and joined before the checkpoint. No
 work crosses a checkpoint without its matching PASS seal.
 
@@ -261,8 +302,10 @@ so native implementation can safely resume. A current REV-TASKS PASS seal is
 required by the fixed `before_implement` hook.
 The coordinator commits the approved artifacts, tasks, REV-TASKS rounds, and
 seal locally, verifies a clean worktree, and only then runs the task-review
-checker. That clean HEAD is the implementation baseline; checking before this
-commit is invalid.
+checker. V2 first binds a clean Task-Handoff commit, execution epoch, unchanged
+Original Baseline, optional empty IA, and preserved reviews; the later clean
+commit containing the REV-TASKS seal is the Implementation Baseline. Checking
+before it is invalid.
 
 Task-only findings return to native tasks/analyze. Requirement or design
 findings return to the applicable gated phase.
@@ -302,8 +345,10 @@ latest-touch commit (`git log -1 --format=%H -- <feature-relative-seal-path>`),
 whose blob must equal the current seal. It is constant across all requests; a
 later descendant that merely contains the seal is not the baseline.
 REV-FOUNDATION uses it as Base-Commit; each REV-US<n> uses the preceding stage
-Subject-Commit; REV-FINAL deliberately uses the implementation baseline again
-so its base-to-subject diff covers the whole feature. Remediation rounds retain
+Subject-Commit; v1 REV-FINAL uses the implementation baseline again. V2
+REV-FINAL uses the unchanged Original-Implementation-Baseline and hashes the
+raw NUL-delimited diff-tree stream as Final-Delta-SHA256, while Subject still
+descends from Implementation Baseline. Remediation rounds retain
 their checkpoint's Base-Commit.
 
 The checkpoint task stays unchecked throughout request and review. On BLOCKED
@@ -326,7 +371,10 @@ REV-FINAL enforce both all-tasks-checked during candidate validation and a clean
 committed final receipt. Every next round/phase starts clean, and none of these
 commits is pushed. REV-FINAL independently reviews the full final subject and
 runs Final Validation. The fixed `after_implement` hook defaults to REV-FINAL
-and withholds the native completion report until its current final check passes.
+and withholds completion until its current final check passes. Non-final PASS
+continues automatically with no user question. A second after hook presents
+one ≤20-line whole-delivery summary; explicit acceptance alone writes the
+self-hashed `.gatespec/acceptance.md` metadata-only local commit.
 
 ## Safe reruns
 
@@ -336,8 +384,10 @@ and withholds the native completion report until its current final check passes.
 | Valid Approved artifact, Schema 1, and current review contract | Read-only; hand off. |
 | Approved plan missing review contract or Schema 1 | Archive downstream work once, reopen via revise, enrich, diff re-approve. |
 | Plan declares an unknown design-evidence schema | Stop; never downgrade or guess a rewrite. |
-| `--revise` | Archive tasks/current reviews, reopen Draft, preserve baseline, diff re-approve. |
-| `--restart` | Archive phase/downstream artifacts and current reviews, rebuild template. |
+| First Source enable | Before code only; archive stale tasks/REV-TASKS and regenerate. |
+| Source revise after code | Preserve patch, compensate to safe Subject, archive, fresh review/approval/revalidation; keep Original Baseline. |
+| `--revise` | Archive Source/tasks/reviews/revalidations/execution/IA/acceptance, reopen Draft, preserve baseline, diff re-approve. |
+| `--restart` | Archive phase/downstream Source/execution/review/acceptance artifacts, rebuild template. |
 | `--refresh-constraints` | Recompute spec basis and enter revision flow. |
 
 Invalid approval or review metadata is never auto-repaired. Archives include
@@ -365,7 +415,7 @@ every digest is lowercase 64-hex. The deterministic chain is request → verdict
 approved bases and review subject. A syntactically valid digest never converts
 a BLOCKED verdict into PASS.
 
-The ordered request fields are `Protocol-Version`, `Review-ID`, `Round`,
+The legacy v1 ordered request fields are `Protocol-Version`, `Review-ID`, `Round`,
 `Scope`, `Spec-Content-SHA256`, `Plan-Content-SHA256`,
 `Design-Attachments-SHA256`, `Tasks-Definition-SHA256`,
 `Implementation-Baseline`, `Base-Commit`, `Subject-Commit`, `Task-IDs`,
@@ -378,6 +428,14 @@ Implementation Task-IDs is the exact tasks.md-order list of non-checkpoint rows
 in that phase (all pre-story setup/foundational rows for FOUNDATION); REV-FINAL
 lists every feature non-checkpoint T###.
 
+Protocol v2 inserts `Execution-Epoch`, `Source-Design-Content-SHA256`,
+`Implementation-Adjustments-SHA256`, `Task-Handoff-Commit`, and
+`Preserved-Reviews-SHA256` after Tasks Definition, plus
+`Final-Delta-SHA256` after Changed Paths. Non-final scopes use
+`not-applicable` for Final Delta. SOURCE has a separate minimal schema with
+`Design-Basis-SHA256`, `Source-Design-Reviewed-SHA256`, and
+`Source-Baseline-Commit`; it is not a Plan checkpoint.
+
 The ordered verdict fields are `Protocol-Version`, `Review-ID`, `Round`,
 `Request-SHA256`, `Reviewer-Platform`, `Reviewer-Context-ID`, `Isolation`, and
 `Status`; exact H2 sections `Tests Run`, `Blockers`, `Observations`, and
@@ -386,16 +444,24 @@ The ordered verdict fields are `Protocol-Version`, `Review-ID`, `Round`,
 at least one `- BLOCKER: ...` item. Implementation Tests Run covers every
 approved Required Tests string and adds non-empty result text.
 
-The ordered seal fields are `Protocol-Version`, `Review-ID`, `Round`, `Status`,
+The ordered v1 seal fields are `Protocol-Version`, `Review-ID`, `Round`, `Status`,
 `Request-SHA256`, `Verdict-SHA256`, the four artifact hashes,
 `Implementation-Baseline`, `Base-Commit`, `Subject-Commit`, `Sealed-At`, and
 final `Seal-SHA256`. Each self-hash covers all raw bytes before its own final
 hash-field line. The design-attachments digest hashes the C-sorted
 `relative-path<TAB>file-SHA256<LF>` manifest of research.md, data-model.md,
-quickstart.md, and files under contracts/. The tasks digest first normalizes
+quickstart.md, and files under contracts/; v2 excludes the Source bundle. V2
+seals copy all added request bindings. The tasks digest first normalizes
 CRLF to LF and only valid T### checkbox progress `[xX]` to `[ ]`. Changed paths
 hash the C-sorted output of
 `git diff --no-renames --name-only <base> <subject>`.
+Final Delta hashes the exact output of
+`git diff-tree --raw -z --no-abbrev --no-renames <original> <subject>`.
+
+Acceptance binds current Spec/Plan/attachments/tasks, epoch, Source/IA,
+Original Baseline, Final Subject, REV-FINAL seal, Final Review Commit, and raw
+Final Delta. Its self-hash is final; its direct local commit changes only
+acceptance.md and requires a clean worktree.
 
 ## Machine-check boundary
 
@@ -421,6 +487,11 @@ PASS-only sealing, and current-scope freshness. Its internal
 `implementation-candidate` variant permits only the uncommitted candidate seal
 and current checkpoint checkmark; final `implementation-review` additionally
 requires the accepted seal/checkmark to be clean and tracked.
+Source modes validate marker, Plan basis, schema/IDs, dual manifests,
+REV-SOURCE and orphan behavior. V2 additionally validates execution/IA blobs,
+Task Handoff, preserved reviews, Original Baseline ancestry, Source/IA path
+reconciliation and raw final delta. Acceptance validates explicit record,
+parent/metadata-only commit, clean tree, and every final binding.
 
 Semantic sufficiency, review judgment, reviewer isolation, and test truth remain
 prompt/operator responsibilities. An external runner is needed for signed
@@ -437,14 +508,17 @@ bypass.
 | Event | GateSpec command | Purpose |
 |---|---|---|
 | `before_plan` | `check-requirements` | Approved Requirements required |
-| `before_tasks` | `check-design` | Approved Design/contract required |
+| `before_tasks` priority 10 | `check-design` | Approved Design/contract required |
+| `before_tasks` priority 20 | `check-source-design` | Conditional approved Source + REV-SOURCE |
 | `after_tasks` | `check-tasks` | Native task/checkpoint structure |
 | `after_analyze` | `review-tasks` | Fresh-context REV-TASKS verdict |
 | `before_implement` | `check-task-review` | Current REV-TASKS PASS seal |
-| `after_implement` | `check-implementation-review` | Current REV-FINAL PASS seal |
+| `after_implement` priority 10 | `check-implementation-review` | Current REV-FINAL PASS seal |
+| `after_implement` priority 20 | `accept-implementation` | Explicit whole-delivery acceptance |
 
-Manual check modes are `spec`, `design`, `tasks-structure`, `task-review`, and
-`implementation-review [REV-ID]`. Only spec/design retain interactive default
+Manual check modes are `spec`, `design`, `source`, `tasks-structure`,
+`task-review`, `implementation-review [REV-ID]`, and `acceptance`. Only
+spec/design retain interactive default
 inference. Gated specify/plan execute peer extensions' same-phase hooks while
 excluding `speckit.gatespec.*`, preventing recursion. Unmarked upstream
 features remain silent in all GateSpec hooks.

@@ -61,7 +61,10 @@ complete in manual mode.
    verify the requested REV-ID occurs exactly once in the approved Required
    Checkpoints and Checkpoint Test Mapping. A silent zero result for an unmarked
    upstream feature returns immediately with no writes or report. Stop on every
-   failure.
+   failure. Select the active protocol deterministically: an approved Plan
+   declaring 1 with no Source entry is legacy v1; Plan 2 or any
+   `contracts/source-design.md` is v2. Never downgrade v2. Validate v2 execution
+   state, epoch, original baseline, task handoff, preserved reviews, and IA.
 2. Verify the matching native task is the current phase-final, non-`[P]`
    `GateSpec review checkpoint <REV-ID>:` row. All earlier work must be complete,
    all same-phase workers joined, and no later work started. Keep this checkpoint
@@ -74,12 +77,14 @@ complete in manual mode.
    do not dispatch or open another round. Revalidate every binding and recreate
    only the candidate seal; if any binding drifted, fail closed and require the
    bound state to be restored or an explicit upstream revise/restart.
-4. Run the exact mapped checkpoint tests. REV-FINAL also runs the non-empty
+4. Run the exact mapped checkpoint tests automatically. REV-FINAL also runs the non-empty
    Final Validation and reviews the complete baseline-to-final feature subject,
    never an aggregation of earlier PASS seals.
 5. On the feature branch, create a local subject commit containing only
-   intended implementation and completed pre-checkpoint task progress, then
-   require a clean worktree. Never push.
+   intended implementation, completed pre-checkpoint task progress, and—for
+   source-enabled v2—the complete IA snapshot. Every IA<n> records Source refs,
+   Task ID, actual paths/symbols, reason, `Boundary Impact: none`, and
+   verification. Require a clean worktree. Never push.
 6. Run `check-gate.sh task-review <feature-dir>` only after that clean subject
    commit; stop if the approved artifacts/tasks or REV-TASKS receipt are stale.
    Resolve Git fields as follows:
@@ -92,26 +97,33 @@ complete in manual mode.
    - REV-FOUNDATION Base-Commit equals Implementation-Baseline.
    - Each REV-US<n> Base-Commit equals the preceding stage checkpoint's sealed
      Subject-Commit.
-   - REV-FINAL Base-Commit returns to Implementation-Baseline so the final
-     reviewer receives the complete feature diff, not only the last increment.
+   - REV-FINAL Base-Commit returns to Implementation-Baseline for v1. For v2 it
+     is the unchanged Original-Implementation-Baseline, while Subject still
+     descends from Implementation-Baseline; final review covers every epoch.
    - All remediation rounds for one REV-ID retain that same Base-Commit while
      Subject-Commit advances to the newly committed fix.
    - Changed-Paths-SHA256 hashes the C-sorted output of
      `git diff --no-renames --name-only <base> <subject>`.
+   - V2 Final-Delta-SHA256 is `not-applicable` before REV-FINAL. REV-FINAL
+     hashes the exact raw NUL-delimited stream from
+     `git diff-tree --raw -z --no-abbrev --no-renames <original> <subject>`.
 7. Derive Scope as `FOUNDATION`, `US<n>`, or `FINAL`. Task-IDs is the exact,
    non-empty, canonical comma-only list of all and only non-checkpoint T### rows
    assigned to the reviewed scope: FOUNDATION includes its pre-story
    setup/foundational work, each US<n> includes that story phase, and REV-FINAL
    lists every non-checkpoint T### in the feature. Preserve tasks.md order; do
    not include a GateSpec review-checkpoint task. Compute the current scoped
-   spec/plan, design-attachments, and normalized tasks-definition hashes using
-   the checker formulas.
+   spec/plan, non-Source design-attachments, and normalized tasks-definition
+   hashes. V2 additionally binds Execution-Epoch, Source content or
+   `not-applicable`, the Subject's IA snapshot or `not-applicable`,
+   Task-Handoff-Commit, and Preserved-Reviews-SHA256.
 8. Atomically write
    `.gatespec/reviews/<REV-ID>/round-<NN>-request.md` with this exact order and
    exactly one Required Tests bullet whose text equals that REV-ID's mapping
    cell. For REV-FINAL, append one bullet equal to Final Validation when its
    text differs from the mapping cell; do not duplicate an identical value.
-   Hash every raw byte before Request-SHA256:
+   Hash every raw byte before Request-SHA256. Use this exact schema only for
+   legacy Protocol v1:
 
 ```markdown
 - **Protocol-Version**: `1`
@@ -136,6 +148,37 @@ complete in manual mode.
 - **Request-SHA256**: `<lowercase 64-hex>`
 ```
 
+For Protocol v2 use this exact schema:
+
+```markdown
+- **Protocol-Version**: `2`
+- **Review-ID**: `<REV-ID>`
+- **Round**: `<00|01|02>`
+- **Scope**: `<FOUNDATION|US<n>|FINAL>`
+- **Spec-Content-SHA256**: `<lowercase 64-hex>`
+- **Plan-Content-SHA256**: `<lowercase 64-hex>`
+- **Design-Attachments-SHA256**: `<lowercase 64-hex; Source excluded>`
+- **Tasks-Definition-SHA256**: `<lowercase 64-hex>`
+- **Execution-Epoch**: `<E1|E2|...>`
+- **Source-Design-Content-SHA256**: `<lowercase 64-hex|not-applicable>`
+- **Implementation-Adjustments-SHA256**: `<Subject IA hash|not-applicable>`
+- **Task-Handoff-Commit**: `<execution-state commit OID>`
+- **Preserved-Reviews-SHA256**: `<lowercase 64-hex|not-applicable>`
+- **Implementation-Baseline**: `<REV-TASKS seal commit OID>`
+- **Base-Commit**: `<stage base; Original Baseline for REV-FINAL>`
+- **Subject-Commit**: `<lowercase commit OID>`
+- **Task-IDs**: `<T###|T###,T###>`
+- **Changed-Paths-SHA256**: `<lowercase 64-hex>`
+- **Final-Delta-SHA256**: `<lowercase 64-hex for REV-FINAL|not-applicable>`
+- **Previous-Verdict-SHA256**: `<none|prior Verdict-SHA256>`
+
+## Required Tests
+
+- `<exact Checkpoint Test Mapping cell>`
+
+- **Request-SHA256**: `<lowercase 64-hex>`
+```
+
 9. Dispatch only the absolute request path with the appended platform adapter.
    Send no executor transcript, rationale, summary, findings, or proposed
    verdict.
@@ -150,11 +193,21 @@ external behavior, and lifecycle—task completion, error/failure behavior,
 regressions, scope, and material test gaps. Run the Required Tests in the
 adapter's isolated temporary checkout when safe. A changed primary worktree,
 unsafe/unavailable mandatory test, stale hash, unclosed prior blocker, or
-material uncertainty is BLOCKED. Tests Run contains evidence for every Required
+material uncertainty is BLOCKED. For source-enabled v2, compare code—not only
+names/tests—to SD-U declarations, SD-FLOW/SD-ALG/SD-FAIL semantics,
+ownership/concurrency/invariants, and SD-TEST obligations. Actual product paths
+must equal Source Change Manifest + IA Changed Paths. Only private helpers,
+internal naming, equivalent local algorithms, test organization, and necessary
+adjacent internal paths are bounded IA. External behavior, compatibility,
+security/performance promises, module/dependency boundaries, cross-module API,
+state ownership, concurrency/error semantics, schema, or key invariants are
+material; a material or uncertain departure is BLOCKED and exits normal
+implement for Source revision. Tests Run contains evidence for every Required
 Tests bullet: include that exact approved string plus non-empty result text.
 
 The adapter, or a manual fresh session whose returned text is supplied back to
-the original `--scope` coordinator, returns exactly:
+the original `--scope` coordinator, returns exactly the request's protocol
+(`1` shown for legacy; use `2` for a v2 request):
 
 ```markdown
 - **Protocol-Version**: `1`
@@ -226,6 +279,20 @@ and PASS/BLOCKED blocker semantics. Persist exact returned bytes as
 - **Seal-SHA256**: `<lowercase 64-hex>`
 ```
 
+For a v2 seal, set Protocol-Version to `2`, insert these copied request fields
+after Tasks-Definition-SHA256, and insert Final-Delta-SHA256 after
+Subject-Commit:
+
+```markdown
+- **Execution-Epoch**: `<request value>`
+- **Source-Design-Content-SHA256**: `<request value>`
+- **Implementation-Adjustments-SHA256**: `<request value>`
+- **Task-Handoff-Commit**: `<request value>`
+- **Preserved-Reviews-SHA256**: `<request value>`
+...
+- **Final-Delta-SHA256**: `<request value>`
+```
+
 Run `check-gate.sh implementation-candidate <feature-dir> <REV-ID>` with that
 one temporary checkpoint checkmark and the candidate seal in place. On failure,
 immediately restore the checkbox to `[ ]`, delete only the uncommitted candidate
@@ -239,7 +306,9 @@ a clean worktree, then run
 `check-gate.sh implementation-review <feature-dir> <REV-ID>`. Only this clean,
 tracked final check permits continuation. Never push. REV-FINAL is checked
 again by the fixed `after_implement` hook; do not report native implementation
-completion early.
+completion early. A non-final PASS continues automatically without asking the
+user. After REV-FINAL, the acceptance hook is the one normal implementation
+question.
 
 The integration-specific fresh dispatcher is appended when this command is
 rendered as a Claude/Codex skill. In command mode, use the matching packaged

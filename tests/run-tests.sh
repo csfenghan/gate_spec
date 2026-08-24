@@ -134,6 +134,12 @@ changed_paths_digest() {
     | LC_ALL=C sort | sha_stream | awk '{print $1}'
 }
 
+final_delta_digest() {
+  local repo="$1" original="$2" subject="$3"
+  git -C "$repo" diff-tree --raw -z --no-abbrev --no-renames "$original" "$subject" \
+    | sha_stream | awk '{print $1}'
+}
+
 write_pass_review() {
   local feature="$1" id="$2" scope="$3" baseline="$4" base="$5" subject="$6" task_ids="$7"
   local request_tests="$8" verdict_tests="$9" limitations="${10-- None}"
@@ -1070,6 +1076,39 @@ git -C "$implementation_repo" add -- specs/001-hot-reload/tasks.md \
   specs/001-hot-reload/.gatespec/reviews/REV-FINAL
 git -C "$implementation_repo" commit -qm 'Commit final review metadata and progress'
 expect_review pass implementation-review "$implementation_feature" REV-FINAL "clean tracked final review passes after_implement"
+
+legacy_acceptance_repo="$TEST_TMP/legacy-acceptance-repo"
+git clone -q "$implementation_repo" "$legacy_acceptance_repo"
+git -C "$legacy_acceptance_repo" config user.name 'GateSpec Fixture'
+git -C "$legacy_acceptance_repo" config user.email 'fixture@example.invalid'
+legacy_acceptance_feature="$legacy_acceptance_repo/specs/001-hot-reload"
+legacy_final_review_commit=$(git -C "$legacy_acceptance_repo" rev-parse HEAD)
+legacy_final_delta=$(final_delta_digest "$legacy_acceptance_repo" "$implementation_baseline" "$final_subject")
+legacy_acceptance="$legacy_acceptance_feature/.gatespec/acceptance.md"
+cat > "$legacy_acceptance" <<EOF
+# GateSpec Implementation Acceptance
+
+- **Protocol-Version**: \`1\`
+- **Status**: \`Accepted\`
+- **Accepted-At**: \`2026-08-24T12:00:00Z\`
+- **Spec-Content-SHA256**: \`$(hash_of "$legacy_acceptance_feature/spec.md")\`
+- **Plan-Content-SHA256**: \`$(hash_of "$legacy_acceptance_feature/plan.md")\`
+- **Design-Attachments-SHA256**: \`$(attachments_digest "$legacy_acceptance_feature")\`
+- **Tasks-Definition-SHA256**: \`$(normalized_tasks_digest "$legacy_acceptance_feature/tasks.md")\`
+- **Execution-Epoch**: \`not-applicable\`
+- **Source-Design-Content-SHA256**: \`not-applicable\`
+- **Implementation-Adjustments-SHA256**: \`not-applicable\`
+- **Original-Implementation-Baseline**: \`$implementation_baseline\`
+- **Final-Subject-Commit**: \`$final_subject\`
+- **REV-FINAL-Seal-SHA256**: \`$(receipt_field "$legacy_acceptance_feature/.gatespec/reviews/REV-FINAL/seal.md" 'Seal-SHA256')\`
+- **Final-Review-Commit**: \`$legacy_final_review_commit\`
+- **Final-Delta-SHA256**: \`$legacy_final_delta\`
+- **Acceptance-SHA256**: \`pending\`
+EOF
+seal_self_hash "$legacy_acceptance" 'Acceptance-SHA256'
+git -C "$legacy_acceptance_repo" add -- specs/001-hot-reload/.gatespec/acceptance.md
+git -C "$legacy_acceptance_repo" commit -qm 'Accept final GateSpec implementation'
+expect pass acceptance "$legacy_acceptance_feature" "legacy Protocol v1 also requires and validates final acceptance"
 
 printf '%s\n' 'specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/seal.md' \
   >> "$implementation_repo/.git/info/exclude"

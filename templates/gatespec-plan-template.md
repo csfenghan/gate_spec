@@ -152,6 +152,9 @@ explicit Decision Log approval.]
 <!--
   GATESPEC: This contract is approved as Design content and is consumed by
   native speckit.tasks / speckit.implement plus GateSpec hook checks.
+  Protocol 2 supports optional Source Design, execution epochs, IA snapshots,
+  raw final delta, and final delivery acceptance. A legacy approved Protocol 1
+  Plan remains valid only while Source Design is not enabled.
   - Replace REV-US<n> with one checkpoint per actual user-story phase.
   - Each Required Checkpoint has exactly one mapping row.
   - A mapping cell is one line and cannot contain a raw `|`; put pipelines or
@@ -165,7 +168,7 @@ explicit Decision Log approval.]
     aggregating earlier stage receipts.
 -->
 
-- **Protocol Version**: `1`
+- **Protocol Version**: `2`
 - **Required Checkpoints**: `[REV-FOUNDATION, REV-US<n>..., REV-FINAL — replace with actual IDs]`
 - **Review Root**: `.gatespec/reviews`
 - **Task Review**: `REV-TASKS after speckit.analyze; PASS required before speckit.implement`
@@ -195,9 +198,15 @@ specs/[###-feature]/
 ├── data-model.md        # Phase 1 output
 ├── quickstart.md        # Phase 1 output
 ├── contracts/           # Phase 1 output
+│   ├── source-design.md # Optional authoritative Source Design entry
+│   └── source-design/   # Optional Source Design shards
 ├── tasks.md             # Phase 2 output (speckit.tasks - NOT created by plan)
 └── .gatespec/
-    └── reviews/          # REV-TASKS and implementation request/verdict/seal snapshots
+    ├── reviews/          # REV-SOURCE/TASKS/implementation receipts
+    ├── execution-state.md
+    ├── implementation-adjustments.md
+    ├── revalidations/    # Source revision preservation evidence
+    └── acceptance.md     # Explicit final delivery acceptance
 ```
 
 ### Source Code (repository root)

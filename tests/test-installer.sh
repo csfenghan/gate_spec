@@ -120,9 +120,15 @@ codex_plan="$RENDER_HOME/.agents/skills/speckit-gatespec-plan/SKILL.md"
 claude_spec="$RENDER_HOME/.claude/skills/speckit-gatespec-specify/SKILL.md"
 codex_spec="$RENDER_HOME/.agents/skills/speckit-gatespec-specify/SKILL.md"
 claude_review_tasks="$RENDER_HOME/.claude/skills/speckit-gatespec-review-tasks/SKILL.md"
+claude_review_source="$RENDER_HOME/.claude/skills/speckit-gatespec-review-source-design/SKILL.md"
 claude_review_implementation="$RENDER_HOME/.claude/skills/speckit-gatespec-review-implementation/SKILL.md"
 codex_review_tasks="$RENDER_HOME/.agents/skills/speckit-gatespec-review-tasks/SKILL.md"
+codex_review_source="$RENDER_HOME/.agents/skills/speckit-gatespec-review-source-design/SKILL.md"
 codex_review_implementation="$RENDER_HOME/.agents/skills/speckit-gatespec-review-implementation/SKILL.md"
+claude_source="$RENDER_HOME/.claude/skills/speckit-gatespec-source-design/SKILL.md"
+codex_source="$RENDER_HOME/.agents/skills/speckit-gatespec-source-design/SKILL.md"
+claude_accept="$RENDER_HOME/.claude/skills/speckit-gatespec-accept-implementation/SKILL.md"
+codex_accept="$RENDER_HOME/.agents/skills/speckit-gatespec-accept-implementation/SKILL.md"
 claude_reviewer="$RENDER_HOME/.claude/agents/gatespec-reviewer.md"
 codex_reviewer="$RENDER_HOME/.codex/agents/gatespec-reviewer.toml"
 dollar='$'
@@ -242,6 +248,43 @@ else
   not_ok "structured design-evidence contract"
 fi
 
+source_protocol_ok=1
+for skill in "$claude_source" "$codex_source"; do
+  for rule in \
+    'contracts/source-design.md' \
+    'Any completed implementation task' \
+    'refuses first enable' \
+    'Source-Design-Reviewed-SHA256' \
+    'Original-Implementation-Baseline' \
+    'binary patch' \
+    'compensating commit' \
+    'revalidations/E<n>' \
+    'every previously preserved PASS Subject' \
+    'at most 20 lines'; do
+    grep -F "$rule" "$skill" >/dev/null || source_protocol_ok=0
+  done
+done
+for skill in "$claude_accept" "$codex_accept"; do
+  for rule in \
+    'acceptance-candidate' \
+    'Final-Delta-SHA256' \
+    'metadata-only commit' \
+    'A rejection writes nothing' \
+    'what I am least confident about'; do
+    grep -F "$rule" "$skill" >/dev/null || source_protocol_ok=0
+  done
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  for rule in 'REV-SOURCE' 'Source-Design-Reviewed-SHA256' 'Implementation-Adjustments-SHA256' 'Final-Delta-SHA256'; do
+    grep -F "$rule" "$reviewer" >/dev/null || source_protocol_ok=0
+  done
+done
+if [[ "$source_protocol_ok" -eq 1 ]]; then
+  ok "rendered Source Design, Protocol v2, IA, and final acceptance contracts are complete"
+else
+  not_ok "Source Design / Protocol v2 / acceptance rendered contract"
+fi
+
 if grep -F 'Only approval-eligible human decisions belong here' "$REPO/templates/gatespec-spec-template.md" >/dev/null &&
    grep -F -- '- **Scenario**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
    grep -F -- '- **Fixed boundary**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
@@ -255,8 +298,13 @@ else
 fi
 
 if grep -F '/speckit-tasks' "$claude_plan" >/dev/null &&
+   grep -F '/speckit-gatespec-source-design' "$claude_plan" >/dev/null &&
+   grep -F '/speckit-gatespec-review-source-design' "$claude_source" >/dev/null &&
    grep -F '/speckit-gatespec-plan' "$claude_spec" >/dev/null &&
    grep -F "${dollar}speckit-tasks" "$codex_plan" >/dev/null &&
+   grep -F "${dollar}speckit-gatespec-source-design" "$codex_plan" >/dev/null &&
+   grep -F "${dollar}speckit-gatespec-review-source-design" "$codex_source" >/dev/null &&
+   grep -F "${dollar}speckit-gatespec-accept-implementation" "$codex_plan" >/dev/null &&
    grep -F "${dollar}speckit-gatespec-plan" "$codex_spec" >/dev/null; then
   ok "Claude and Codex receive their own command-reference syntax"
 else
@@ -350,11 +398,13 @@ fi
 # Literal Markdown backticks must not be interpreted by the shell.
 # shellcheck disable=SC2016
 if grep -F 'dispatch `gatespec-reviewer` as' "$claude_review_tasks" >/dev/null &&
+   grep -F 'dispatch `gatespec-reviewer` as' "$claude_review_source" >/dev/null &&
    grep -F 'new top-level Claude Code session' "$claude_review_implementation" >/dev/null &&
    grep -F 'do not carry `--scope` into manual mode' "$claude_review_implementation" >/dev/null &&
    grep -F 'In manual `--request` mode, this command is reviewer-only' "$claude_review_implementation" >/dev/null &&
    grep -F 'set `Reviewer-Platform` to `manual-claude`' "$claude_review_tasks" >/dev/null &&
    grep -F 'spawn the custom agent' "$codex_review_tasks" >/dev/null &&
+   grep -F 'spawn the custom agent' "$codex_review_source" >/dev/null &&
    grep -F '`gatespec_reviewer` with `fork_turns="none"`' "$codex_review_tasks" >/dev/null &&
    grep -F 'new top-level Codex session' "$codex_review_implementation" >/dev/null &&
    grep -F 'do not carry `--scope` into manual mode' "$codex_review_implementation" >/dev/null &&
@@ -375,20 +425,24 @@ else
   ok "atomic renderer and reviewer installer leave zero temporary files"
 fi
 
-if ! grep -F 'version: "0.5.1"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.6.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.implement"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-requirements"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-design"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.check-source-design"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
-   ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null; then
-  not_ok "0.5.1 manifest requirements and fixed hook entries"
+   ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.accept-implementation"' extension.yml >/dev/null ||
+   [[ $(grep -c 'priority: 10' extension.yml || true) -ne 2 ]] ||
+   [[ $(grep -c 'priority: 20' extension.yml || true) -ne 2 ]]; then
+  not_ok "0.6.0 manifest requirements and eight ordered hook entries"
 else
-  ok "0.5.1 manifest requires the native sequence and registers all six fixed hooks"
+  ok "0.6.0 manifest preserves six events and registers eight ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,
@@ -404,12 +458,15 @@ if command -v specify >/dev/null 2>&1; then
     after_status=$(git status --porcelain)
     if [[ -d "$package" ]] &&
        [[ ! -e "$package/.git" ]] && [[ ! -e "$package/.agents" ]] && [[ ! -e "$package/.codex" ]] &&
+       [[ ! -e "$package/specs" ]] &&
+       [[ -f "$package/templates/gatespec-source-design-template.md" ]] &&
+       [[ -f "$package/templates/gatespec-implementation-adjustments-template.md" ]] &&
        cmp -s "$REPO/reviewers/claude/gatespec-reviewer.md" "$package/reviewers/claude/gatespec-reviewer.md" &&
        cmp -s "$REPO/reviewers/claude/dispatcher.md" "$package/reviewers/claude/dispatcher.md" &&
        cmp -s "$REPO/reviewers/codex/gatespec-reviewer.toml" "$package/reviewers/codex/gatespec-reviewer.toml" &&
        cmp -s "$REPO/reviewers/codex/dispatcher.md" "$package/reviewers/codex/dispatcher.md" &&
        [[ "$before_status" == "$after_status" ]]; then
-      ok "scratch extension install includes reviewer sources, excludes agent state, and leaves the source tree untouched"
+      ok "scratch install includes Source templates/reviewers, excludes specs/agent state, and leaves source untouched"
     else
       not_ok "scratch package contents or source-tree cleanliness"
     fi

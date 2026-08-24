@@ -1,9 +1,10 @@
 # GateSpec
 
-GateSpec 0.5.1 is a lightweight [spec-kit](https://github.com/github/spec-kit)
-extension that puts explicit human approval gates on requirements and design,
-then requires task and implementation review receipts around the unchanged
-native execution path. It does not fork or modify upstream commands.
+GateSpec 0.6.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+extension with explicit Requirements/Design gates, optional reviewed Source
+Design, fresh task/implementation receipts, and one final whole-delivery user
+acceptance around the unchanged native execution path. It does not fork or
+modify upstream commands.
 
 Its operating principles are human-led constraints, low auto-inference,
 discussion before execution, bounded review artifacts, and scenario-first
@@ -14,7 +15,7 @@ human decisions.
 | Path | Workflow |
 |---|---|
 | Upstream auto path | `speckit.specify → speckit.plan → speckit.tasks → speckit.analyze → speckit.implement` |
-| GateSpec path | `gatespec.specify → gatespec.plan → speckit.tasks → speckit.analyze → speckit.implement` plus fixed review hooks |
+| GateSpec path | `gatespec.specify → gatespec.plan → [optional gatespec.source-design] → speckit.tasks → speckit.analyze → speckit.implement → final acceptance` |
 
 The paths converge at native `speckit.tasks`; GateSpec adds no task generator
 or implement replacement. A gated spec is identified only by
@@ -44,6 +45,11 @@ Task and implementation review PASS verdicts are not additional human approval
 mechanisms. A reviewer cannot introduce a requirement, design choice, waiver,
 or scope change; such a finding returns to the existing Requirements or Design
 diff-approval flow.
+Source Design reuses decision answers and one final summary/diff approval; its
+fresh REV-SOURCE PASS is engineering evidence. Implementation checkpoints do
+not ask the user. After REV-FINAL, the user explicitly accepts the complete
+delivered implementation once; rejection records nothing and does not infer a
+remediation choice.
 
 ## Scenario-first decision triage
 
@@ -120,9 +126,38 @@ its fixed child fields, while a genuinely irrelevant dimension uses one
 reasoned N/A. The portable checker validates that structure; the plan
 walkthrough and fresh reviewer remain responsible for semantic sufficiency.
 
+## Optional Source Design
+
+After Design approval, the user may go directly to native tasks or enable
+`contracts/source-design.md`. Its existence alone enables the sub-contract;
+line 1 is `<!-- gatespec: source-design -->`, and optional shards are direct
+regular `.md` files under `contracts/source-design/`. First enable is allowed
+only before product implementation. Existing tasks/REV-TASKS may be archived and regenerated when
+no code work began; implementation progress, product diff, IA, or implementation
+receipt blocks retrospective enablement.
+
+Source Design records a maintainer scenario, before/after and success/failure
+flows, complete SD-F file operations, SD-U declarations, SD-FLOW lifecycle/data
+paths, SD-ALG algorithms/invariants/complexity, SD-FAIL recovery/observability,
+SD-TEST Requirement-to-file/symbol/test traceability, cross-cutting design,
+bounded freedoms, and prohibited material boundaries. Fresh REV-SOURCE binds a
+reviewed manifest hash that excludes only entry Status/Gate Approval. User
+approval then binds a content manifest hash that includes approved entry
+content; both include raw shard hashes, so approval-only edits preserve review
+while body/shard drift invalidates it.
+
+Source-enabled tasks record the content hash and map every non-checkpoint task
+to SD-* refs and precise paths. Bounded private/internal changes are logged as
+IA<n> in the reviewed Subject commit. External behavior, compatibility,
+security/performance promises, responsibilities/dependencies, cross-module API,
+state/concurrency/error semantics, schema, and key invariants are material;
+they block normal implement and require the archived compensating-commit/source
+revision/revalidation flow.
+
 ## Task and implementation review
 
-The approved plan contains one exact `Implementation Review Contract`. It lists
+The approved plan contains one exact `Implementation Review Contract`. New
+Plans use Protocol v2; legacy v1 stays valid only without Source. It lists
 `REV-FOUNDATION`, one `REV-US<n>` for each implemented user-story phase, and
 `REV-FINAL`, maps every checkpoint to exact tests, requires local checkpoint
 commits without pushing, and permits at most two remediation rounds.
@@ -153,14 +188,21 @@ contract, not cryptographic reviewer identity attestation.
 The local commit that writes the current REV-TASKS seal is the fixed
 implementation baseline (the seal path's latest-touch commit, with an identical
 blob). REV-FOUNDATION reviews baseline-to-foundation, each REV-US<n> reviews the
-preceding stage subject-to-current subject, and REV-FINAL returns to the
-baseline so it independently covers the complete feature diff. No review
-command pushes.
+preceding stage subject-to-current subject, and legacy v1 REV-FINAL returns to
+that baseline. No review command pushes.
+
+Protocol v2 additionally binds execution epoch, unchanged Original Baseline,
+Task-Handoff commit, Source/IA snapshots, preserved Source-revision reviews,
+and a raw NUL-delimited Final Delta. REV-FINAL uses Original Baseline rather
+than only the task handoff. The raw delta changes for content/mode changes even
+when the old name-only path hash is unchanged.
 
 An implementation PASS first validates an uncommitted candidate seal plus the
 temporary checkpoint checkmark. Only then are receipt/checkmark metadata
 committed locally and rechecked as clean, tracked final state; normal execution
-continues only after both checks pass.
+continues automatically only after both checks pass. REV-FINAL is followed by
+a ≤20-line delivery summary and explicit acceptance recorded in
+`.gatespec/acceptance.md`; its local commit may change only that metadata file.
 
 ## Constraints
 
@@ -192,7 +234,8 @@ constraints into the constitution.
 - an old Approved-Design plan without Implementation Review Contract or Design
   Evidence Schema 1 is archived downstream, reopened as Draft, enriched, and
   diff re-approved before tasks;
-- `--revise`: reopen as Draft, archive tasks and current review receipts, and
+- `--revise`: reopen as Draft, archive Source/tasks, reviews/revalidations,
+  execution state, IA, and acceptance, and
   use diff re-approval;
 - `--restart`: archive current phase/downstream artifacts, then rebuild from
   the GateSpec template;
@@ -243,17 +286,19 @@ Skill-mode invocation is `/speckit-gatespec-specify` for Claude and
 
 ## Machine gates and hooks
 
-The public manual entry accepts `spec`, `design`, `tasks-structure`,
-`task-review`, and `implementation-review [REV-ID]`.
+The public manual entry accepts `spec`, `design`, `source`, `tasks-structure`,
+`task-review`, `implementation-review [REV-ID]`, and `acceptance`.
 Hooks never infer mode:
 
 - `before_plan` → `speckit.gatespec.check-requirements`;
-- `before_tasks` → `speckit.gatespec.check-design`;
+- `before_tasks` priority 10 → `speckit.gatespec.check-design`;
+- `before_tasks` priority 20 → conditional `speckit.gatespec.check-source-design`;
 - `after_tasks` → `speckit.gatespec.check-tasks`;
 - `after_analyze` → `speckit.gatespec.review-tasks`;
 - `before_implement` → `speckit.gatespec.check-task-review`;
-- `after_implement` → `speckit.gatespec.check-implementation-review`
-  (fixed to REV-FINAL).
+- `after_implement` priority 10 → `speckit.gatespec.check-implementation-review`
+  (fixed to REV-FINAL);
+- `after_implement` priority 20 → `speckit.gatespec.accept-implementation`.
 
 The portable checker validates structure, hash chains, freshness, and PASS
 seals. Semantic review quality and fresh-context behavior remain prompt and
@@ -274,7 +319,7 @@ skipping GateSpec's own entries to avoid recursion.
 bash tests/run-all.sh
 ```
 
-This runs Bash syntax checks, ShellCheck, deterministic checker fixtures,
+This runs Bash syntax checks, ShellCheck, legacy and Source/v2/acceptance checker fixtures,
 Claude/Codex renderer checks, manifest checks, and an extension-install smoke
 test when the `specify` CLI is available. Ubuntu and macOS CI run the same
 suite and assert that it leaves the worktree clean.

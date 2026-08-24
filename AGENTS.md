@@ -1,9 +1,9 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.5.1 is a personal spec-kit extension that adds human approval gates
-to Requirements and Design plus independent-context review checkpoints around
-native task generation and implementation. Read this file before changing the
-repository.
+GateSpec 0.6.0 is a personal spec-kit extension with human approval gates for
+Requirements and Design, optional reviewed Source Design, independent-context
+task/implementation reviews, and one final whole-delivery acceptance. Read this
+file before changing the repository.
 
 ## Product invariants
 
@@ -15,7 +15,8 @@ repository.
    question, proposed default, or technical matter deferred to Design. Design
    forks become a human decision, engineering determination, or bounded
    Implementation Freedom. Every classification has a cheap user veto.
-3. **Discuss before execute**: Requirements blocks plan; Design blocks tasks.
+3. **Discuss before execute**: Requirements blocks plan; Design blocks tasks;
+   enabled Source Design blocks tasks until fresh REV-SOURCE and user approval.
 4. **Bounded presentation**: a round contains at most four total cards—simple
    pairwise-independent decisions plus at most one independent defaults card;
    complex or high-risk decisions are presented alone. Progress counts only
@@ -35,11 +36,18 @@ defaults batch, and final summary/diff approval. “Proceed” cannot seal unres
 blocking work; a complete clarification set writes a Draft automatically.
 Reviewer PASS/BLOCKED verdicts are engineering evidence, never a fourth human
 approval mechanism.
+Normal implementation checkpoints are automatic. After REV-FINAL, the user
+accepts the complete delivery once; Source boundary violations are exceptional
+blocks, not routine implementation approvals.
 
 ## Architecture invariants
 
 - Upstream `speckit.*` is never modified. Both paths converge at the unchanged
   `speckit.tasks → speckit.analyze → speckit.implement` sequence.
+- `contracts/source-design.md` alone enables the optional Source sub-contract;
+  its line 1 is exactly `<!-- gatespec: source-design -->`. Shards are direct
+  regular `.md` files under `contracts/source-design/` and never enable Source
+  by themselves.
 - Line 1 of gated spec.md is exactly `<!-- path: gatespec -->`. No marker means
   a true zero-output pass; a marker on any later line is corruption and fails.
 - Keep upstream mandatory sections: spec User Scenarios & Testing,
@@ -49,6 +57,9 @@ approval mechanism.
   Content-SHA256. Status and approval dates agree.
 - plan.md records the approved Requirements content hash. A re-approved spec
   invalidates an old plan and its tasks.
+- REV-SOURCE binds the reviewed manifest hash that excludes entry Status/Gate
+  Approval; downstream binds the approved content manifest hash. Both include
+  raw shard hashes. Design Attachments always exclude the Source bundle.
 - Enforcement remains prompt rules plus one thin portable Bash checker. Do not
   introduce orchestration/state machines.
 - GateSpec review tasks are cooperative checkpoints inside native implement;
@@ -61,6 +72,12 @@ approval mechanism.
 - Implementation checkpoints use local commits and isolated review checkouts
   (a Claude worktree or Codex temporary clone). GateSpec never pushes or
   performs any other remote VCS write.
+- Protocol v1 remains valid only for a legacy Plan without Source. New Plans
+  use v2, binding execution epoch, Source/IA, Task Handoff, preserved reviews,
+  and raw Final Delta. Original Baseline never changes across Source revision.
+- IA is limited to bounded internal adjustments and belongs in each Subject;
+  material or uncertain Source departure blocks. Final acceptance is a
+  metadata-only local commit after REV-FINAL and never substitutes for CI.
 - The repository is the source of truth. Edit `commands/`, never rendered
   global skills.
 
@@ -88,13 +105,14 @@ after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.5.1 manifest, fixed hooks, verified version range |
+| `extension.yml` | 0.6.0 manifest, 6 hook events / 8 ordered entries |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
-| `templates/gatespec-{spec,plan}-template.md` | upstream-compatible artifacts |
+| `templates/` | spec/plan plus Source Design and IA templates |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |
 | `scripts/bash/check-gate.sh` | deterministic machine gate |
 | `install.sh` | atomic global renderer + optional project registration |
 | `tests/run-tests.sh` | checker fixtures |
+| `tests/run-source-design-tests.sh` | Source/v2/IA/final acceptance fixtures |
 | `tests/test-installer.sh` | renderer/manifest/install smoke |
 | `tests/run-all.sh` | syntax, ShellCheck, and all tests |
 | `docs/` | full protocol and upstream sync ritual |
@@ -109,9 +127,10 @@ Windows uses WSL/Git Bash.
 - Aliases render only in commands mode. Skill invocations are
   `/speckit-gatespec-*` (Claude) and `$speckit-gatespec-*` (Codex).
 - `before_plan` and `before_tasks` retain the Requirements/Design gates.
-  Review hooks occupy `after_tasks`, `after_analyze`, `before_implement`, and
-  `after_implement`. Manual check accepts `spec`, `design`, `tasks-structure`,
-  `task-review`, or `implementation-review [REV-ID]`.
+  Source adds the second `before_tasks` entry; final acceptance adds the second
+  `after_implement` entry. Manual check accepts `spec`, `design`, `source`,
+  `tasks-structure`, `task-review`, `implementation-review [REV-ID]`, or
+  `acceptance`.
 - Core hooks fire on core commands. Gated commands run their inline gate plus
   peer same-phase before/after hooks and skip every `speckit.gatespec.*` hook.
 - Core hooks ask the current agent/session to invoke a command; independent

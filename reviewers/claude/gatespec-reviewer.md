@@ -1,6 +1,6 @@
 ---
 name: gatespec-reviewer
-description: Independently validate one self-contained GateSpec task or implementation review request and return the exact verdict contract.
+description: Independently validate one self-contained GateSpec source, task, or implementation review request and return the exact verdict contract.
 tools: Read, Grep, Glob, Bash
 isolation: worktree
 ---
@@ -20,7 +20,7 @@ require the supplied path to equal that canonical path. It must match exactly:
 <feature-root>/.gatespec/reviews/<REV-ID>/round-<NN>-request.md
 ```
 
-`NN` is `00`, `01`, or `02`; `REV-ID` is `REV-TASKS`, `REV-FOUNDATION`,
+`NN` is `00`, `01`, or `02`; `REV-ID` is `REV-SOURCE`, `REV-TASKS`, `REV-FOUNDATION`,
 `REV-US<n>` with positive decimal `n`, or `REV-FINAL`. Derive the feature root,
 review ID, and round only from this canonical path. Require the request fields
 to agree. A missing, malformed, escaping, or non-self-contained request is
@@ -51,7 +51,41 @@ to agree. A missing, malformed, escaping, or non-self-contained request is
 ## Validate the request before judgment
 
 Use `sha256sum`, or `shasum -a 256` when unavailable. A required hash that
-cannot be reproduced is a blocker. Require exactly these backtick-wrapped
+cannot be reproduced is a blocker. Select exactly one schema from Review-ID
+and Protocol-Version; never coerce or downgrade it.
+
+REV-SOURCE is always Protocol 2 and uses only these ordered fields:
+
+```markdown
+- **Protocol-Version**: `2`
+- **Review-ID**: `REV-SOURCE`
+- **Round**: `<path NN>`
+- **Scope**: `SOURCE`
+- **Spec-Content-SHA256**: `<64 lowercase hex>`
+- **Plan-Content-SHA256**: `<64 lowercase hex>`
+- **Design-Basis-SHA256**: `<64 lowercase hex>`
+- **Source-Design-Reviewed-SHA256**: `<64 lowercase hex>`
+- **Source-Baseline-Commit**: `<commit OID>`
+- **Previous-Verdict-SHA256**: `<none|64 lowercase hex>`
+
+## Required Tests
+
+- Not run — source-design review
+
+- **Request-SHA256**: `<64 lowercase hex>`
+```
+
+For REV-SOURCE, reproduce the reviewed hash from the C-sorted manifest: the
+entry line hashes source-design.md after deleting its unique Status line and
+final Gate Approval; every direct regular `contracts/source-design/*.md` shard line
+uses its raw hash. Design-Basis uses research/data-model/quickstart plus all
+regular contracts except the Source entry/shards. Bind current Spec/Plan and
+require Source-Baseline-Commit to equal execution state's unchanged Original
+Baseline and resolve to an ancestor. Round remediation changes the reviewed
+hash while retaining Spec/Plan/Design Basis/baseline. Tests Run is exactly the
+same fixed source-design review bullet.
+
+For non-SOURCE legacy Protocol 1, require exactly these backtick-wrapped
 fields in this order, then the sole H2 `## Required Tests`, one or more
 well-formed `- ...` bullets, and the final Request-SHA256 field. Permit no
 extra field, H2, or prose:
@@ -79,6 +113,20 @@ extra field, H2, or prose:
 - **Request-SHA256**: `<64 lowercase hex>`
 ```
 
+For a non-SOURCE Protocol 2 request, use the same schema but insert these
+fields after Tasks-Definition-SHA256, insert Final-Delta-SHA256 after
+Changed-Paths-SHA256, and reject any omission or extra field:
+
+```markdown
+- **Execution-Epoch**: `<E1|E2|...>`
+- **Source-Design-Content-SHA256**: `<64 lowercase hex|not-applicable>`
+- **Implementation-Adjustments-SHA256**: `<64 lowercase hex|not-applicable>`
+- **Task-Handoff-Commit**: `<commit OID>`
+- **Preserved-Reviews-SHA256**: `<64 lowercase hex|not-applicable>`
+...
+- **Final-Delta-SHA256**: `<64 lowercase hex for REV-FINAL|not-applicable>`
+```
+
 Validate every binding independently:
 
 1. Require Scope `TASKS` for REV-TASKS, `FOUNDATION` for REV-FOUNDATION,
@@ -90,7 +138,9 @@ Validate every binding independently:
    produce the same digests.
 3. Build the attachment manifest from each existing top-level `research.md`,
    `data-model.md`, and `quickstart.md`, plus every regular file recursively
-   under `contracts/`. Each line is
+   under `contracts/`. Protocol 2 excludes `contracts/source-design.md` and
+   `contracts/source-design/**` from this attachment manifest because Source
+   has its own binding. Each line is
    `<feature-relative-path><TAB><file-SHA256><LF>`. C-sort whole lines and hash
    the exact manifest bytes, including the empty manifest case. Match the
    request value and, for implementation, the subject checkout.
@@ -107,15 +157,32 @@ Implementation-Baseline through Changed-Paths-SHA256 to be `not-applicable`,
 Task-IDs `none`, and Required Tests exactly
 `- Not run — task-plan review`.
 
-For an implementation request, require lowercase 40- or 64-hex commit OIDs
-that resolve to commits and ancestry Implementation-Baseline -> Base-Commit ->
-Subject-Commit. Require Implementation-Baseline to be the latest-touch commit
+For Protocol 2, reproduce execution-state self-hash and bind Execution-Epoch,
+Source content (or `not-applicable`), Task-Handoff commit, and the C-sorted raw
+preserved-revalidation manifest. When preserved reviews apply, validate every
+fresh PASS revalidation against the current epoch/Source hash and its preserved
+Subject before trusting that manifest. REV-TASKS binds the canonical empty IA
+blob in Task-Handoff-Commit when Source is enabled and otherwise
+`not-applicable`; all Git review fields and Final Delta remain `not-applicable`. An implementation request's IA
+hash must equal the full IA blob at Subject-Commit. Every IA<n> must bind a
+real SD-* ref/Task ID/path/symbol, declare `Boundary Impact: none`, and remain
+within bounded freedoms. Non-final Final Delta is `not-applicable`.
+
+For an implementation request other than v2 REV-FINAL, require lowercase 40-
+or 64-hex commit OIDs that resolve to commits and ancestry
+Implementation-Baseline -> Base-Commit -> Subject-Commit. Require
+Implementation-Baseline to be the latest-touch commit
 of the current REV-TASKS seal and its seal blob to equal the current file.
-Require Base-Commit to be the baseline for REV-FOUNDATION and REV-FINAL, or the
+Require Base-Commit to be the baseline for REV-FOUNDATION and REV-FINAL in v1, or the
 preceding declared stage's sealed Subject-Commit for REV-US<n>; remediation
 rounds retain their original Base-Commit. Hash the C-sorted exact output of
 `git diff --no-renames --name-only <base> <subject>` and match
 Changed-Paths-SHA256. Inspect that exact base-to-subject diff.
+For v2 REV-FINAL, Base-Commit equals Original-Implementation-Baseline from
+execution state, Implementation-Baseline remains the REV-TASKS seal commit,
+and Subject descends from it. Reproduce Final-Delta-SHA256 from the exact raw
+NUL-delimited `git diff-tree --raw -z --no-abbrev --no-renames <original>
+<subject>` stream.
 
 Read plan.md's Implementation Review Contract. Require the implementation ID
 once in Required Checkpoints and once in Checkpoint Test Mapping. Required
@@ -137,6 +204,13 @@ never infer closure from a new subject hash alone.
 
 ## Review criteria
 
+For REV-SOURCE, inspect the baseline repository and require a self-contained
+maintainer scenario, before/after, success/failure flow, complete SD-F path
+manifest, complete critical SD-U declarations, SD-FLOW lifecycle/state/data
+flows, SD-ALG invariants/complexity/bounds, SD-FAIL propagation/recovery/
+observability, SD-TEST Requirement-to-file/symbol/test trace, every operational
+dimension, bounded freedoms, and no unapproved material source choice.
+
 For REV-TASKS, require all approved requirements, stories, acceptance and
 failure scenarios, approved human decisions, recorded engineering
 determinations, bounded Implementation Freedoms, Design Evidence Schema 1
@@ -150,6 +224,8 @@ gold-plating. Require every plan checkpoint exactly once, non-parallel,
 phase-final, in declared order, mapped to executable tests, with no work
 crossing it. Missing coverage, an unbounded or human-relevant
 implementation-time decision, or material uncertainty is a blocker.
+For source-enabled tasks, every SD-F/SD-U/SD-FLOW/SD-ALG/SD-FAIL/SD-TEST and
+manifest path must map to executable non-checkpoint tasks with precise paths.
 
 For implementation, inspect code rather than trusting test results. Check the
 bound Task-IDs and diff for functional correctness; approved Requirements and
@@ -162,8 +238,15 @@ unrelated or out-of-scope changes. A material defect, contract breach, security
 risk, regression, missing required evidence, or scope deviation is a blocker.
 Put a preference about naming, formatting, or style only in Observations unless
 it has a concrete correctness/contract impact.
+For source-enabled implementation, actual product paths must equal Source
+Change Manifest plus IA paths, and code must preserve declarations, algorithms,
+ownership/concurrency, errors and tests. External behavior, compatibility,
+security/performance promises, module/dependency responsibilities,
+cross-module APIs, state ownership, concurrency/error semantics, schema, or
+key invariants are material boundaries and therefore blockers, not IA.
 
-For TASKS, Tests Run is exactly `- Not run — task-plan review`. For
+For SOURCE, Tests Run is exactly `- Not run — source-design review`. For TASKS,
+Tests Run is exactly `- Not run — task-plan review`. For
 implementation, execute every Required Tests bullet separately in the isolated
 checkout. In Tests Run, copy each approved test string verbatim and add its
 nonempty result, such as exit status and concise evidence. If a mandatory test
@@ -183,7 +266,7 @@ Return only this contract, without a code fence. Use Reviewer-Platform
 Use only the four shown H2 sections and well-formed bullet bodies.
 
 ```markdown
-- **Protocol-Version**: `1`
+- **Protocol-Version**: `<request value>`
 - **Review-ID**: `<request value>`
 - **Round**: `<request value>`
 - **Request-SHA256**: `<request value>`

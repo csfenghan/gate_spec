@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.5.1 is verified against spec-kit `0.16.1.dev0` and declares
+0.6.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -19,7 +19,8 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 | tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows | tasks-structure fixtures |
 | `.specify/feature.json.feature_directory` | checker/commands | jq → python3 → restricted single-line parser tests |
 | `setup-plan.sh --json` fields | gated plan setup | renderer/install smoke + manual plan smoke |
-| `before_plan`, `before_tasks`, `after_tasks`, `after_analyze`, `before_implement`, `after_implement` | fixed gates/reviews | manifest assertions + manual hook smoke |
+| six hook events, ordered multiple entries, and priority | 8 fixed gate/review/acceptance entries | manifest assertions + manual hook smoke |
+| native tasks/implement read `contracts/` | optional Source Design context | Source trace fixtures + manual prompt smoke |
 | mandatory hook same-session invocation and invalid-YAML skip behavior | fresh-context/manual fallback boundary | Claude/Codex manual isolation smoke |
 | Claude/Codex custom-agent locations and fresh-spawn syntax | reviewer adapters/dispatcher | renderer + isolated-home install smoke |
 | native `tasks → analyze → implement` handoff | downstream convergence | command/template review |
@@ -35,7 +36,8 @@ design dimensions, or the Implementation Review Contract.
 In a scratch initialized project:
 
 1. `specify extension add --dev /path/to/gatespec --force` succeeds and the
-   installed package contains no `.git/`, `.agents/`, or `.codex/` state.
+   installed package contains Source/IA templates but no `.git/`, `.agents/`,
+   `.codex/`, or development `specs/` state.
 2. A Draft gated spec blocks core plan through fixed
    `speckit.gatespec.check-requirements`, even if plan.md already exists.
 3. An approved spec plus Draft plan blocks core tasks through fixed
@@ -90,9 +92,19 @@ In a scratch initialized project:
    and creates a PASS-only candidate seal, candidate validation precedes the
    receipt/checkmark commit, the clean tracked final check follows it, and
    rounds 03+ fail.
-15. Confirm `after_implement` rejects missing/stale REV-FINAL and accepts a
-    current full-feature PASS seal without replacing native implement.
-16. Resume an old Approved-Design plan without Implementation Review Contract
+15. Approve Design, exercise both explicit handoffs (skip Source and enable
+    Source), and confirm first enable after any product implementation is
+    refused. With Source, change only Status/Gate Approval after REV-SOURCE and
+    confirm the seal remains current; change body/shard and confirm it fails.
+16. Confirm Protocol v1 legacy, v2 without Source, and v2 with Source. In v2,
+    verify Task-Handoff, empty IA baseline, exact SD task coverage, IA Subject
+    snapshots, Original Baseline, preserved revalidations, and raw Final Delta.
+    A material Source departure must block rather than become IA.
+17. Confirm priority-10 `after_implement` rejects missing/stale REV-FINAL. Its
+    PASS automatically reaches priority-20 acceptance; rejection writes
+    nothing, acceptance makes one metadata-only local commit, and stale/
+    dirty/subject/seal/delta mismatches fail.
+18. Resume an old Approved-Design plan without Implementation Review Contract
     or Design Evidence Schema 1; confirm one migration archives tasks/reviews,
     reopens the plan as Draft, enriches structured evidence without rewriting
     unaffected decisions, and requires diff re-approval before task

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Literal Markdown backticks are intentionally single-quoted.
 # GateSpec deterministic artifact gate.
-# Usage: check-gate.sh <spec|design|tasks-structure|task-review|implementation-candidate|implementation-review> [feature-dir] [REV-ID]
+# Usage: check-gate.sh <mode> [feature-dir] [REV-ID]
 
 set -u
 
@@ -8,14 +9,16 @@ MODE="${1:-}"
 FEATURE_DIR="${2:-}"
 REVIEW_ID="${3:-}"
 MARKER='<!-- path: gatespec -->'
+SOURCE_MARKER='<!-- gatespec: source-design -->'
+USAGE='Usage: check-gate.sh <spec|design|source-candidate|source-review|source|tasks-structure|task-review|implementation-candidate|implementation-review|acceptance-candidate|acceptance> [feature-dir] [REV-ID]'
 
 if [[ "$#" -gt 3 ]]; then
-  echo "Usage: check-gate.sh <spec|design|tasks-structure|task-review|implementation-candidate|implementation-review> [feature-dir] [REV-ID]" >&2
+  echo "$USAGE" >&2
   exit 2
 fi
 
 case "$MODE" in
-  spec|design|tasks-structure)
+  spec|design|source-candidate|source-review|source|tasks-structure|acceptance-candidate|acceptance)
     if [[ -n "$REVIEW_ID" ]]; then
       echo "GATE ERROR: $MODE does not accept a REV-ID." >&2
       exit 2
@@ -36,7 +39,7 @@ case "$MODE" in
     fi
     ;;
   *)
-    echo "Usage: check-gate.sh <spec|design|tasks-structure|task-review|implementation-candidate|implementation-review> [feature-dir] [REV-ID]" >&2
+    echo "$USAGE" >&2
     exit 2
     ;;
 esac
@@ -70,6 +73,11 @@ fi
 SPEC="$FEATURE_DIR/spec.md"
 PLAN="$FEATURE_DIR/plan.md"
 TASKS="$FEATURE_DIR/tasks.md"
+SOURCE_ENTRY="$FEATURE_DIR/contracts/source-design.md"
+SOURCE_SHARDS="$FEATURE_DIR/contracts/source-design"
+IA_FILE="$FEATURE_DIR/.gatespec/implementation-adjustments.md"
+EXECUTION_STATE="$FEATURE_DIR/.gatespec/execution-state.md"
+ACCEPTANCE="$FEATURE_DIR/.gatespec/acceptance.md"
 
 if [[ ! -f "$SPEC" ]]; then
   echo "GATE FAILED: spec.md not found in $FEATURE_DIR." >&2
@@ -86,6 +94,36 @@ if [[ "$FIRST_LINE" != "$MARKER" ]]; then
   fi
   exit 0
 fi
+
+# The optional Source Design sub-contract is enabled only by its authoritative
+# entry file. Its fixed hook is a true silent pass when disabled. Stray shards
+# or REV-SOURCE receipts cannot silently enable a partial contract.
+case "$MODE" in
+  source-candidate|source-review|source)
+    if [[ ! -f "$SOURCE_ENTRY" ]]; then
+      orphan=''
+      if [[ -d "$SOURCE_SHARDS" ]] && find "$SOURCE_SHARDS" -type f -print -quit | grep -q .; then
+        orphan='contracts/source-design/'
+      elif [[ -e "$FEATURE_DIR/.gatespec/reviews/REV-SOURCE" ]]; then
+        orphan='.gatespec/reviews/REV-SOURCE/'
+      elif [[ -f "$TASKS" ]] && awk '
+        /^\*\*Source-Design-Content-SHA256\*\*: `[^`]+`$/ && $0 !~ /`not-applicable`$/ {found=1}
+        END {exit !found}
+      ' "$TASKS" 2>/dev/null; then
+        orphan='tasks.md Source-Design-Content-SHA256'
+      elif [[ -f "$EXECUTION_STATE" ]] &&
+           grep -E '^\- \*\*Source-Design-Content-SHA256\*\*: `[^`]+`$' "$EXECUTION_STATE" |
+             grep -Fv '`not-applicable`' >/dev/null 2>&1; then
+        orphan='.gatespec/execution-state.md source binding'
+      fi
+      if [[ -n "$orphan" ]]; then
+        echo "GATE FAILED: orphan Source Design artifact '$orphan' exists without contracts/source-design.md." >&2
+        exit 1
+      fi
+      exit 0
+    fi
+    ;;
+esac
 
 FAILURES=0
 WARNINGS=0
@@ -109,6 +147,42 @@ portable_sha256() {
 
 content_hash() {
   sed '/^## Gate Approval/,$d' "$1" | portable_sha256 | awk '{print $1}'
+}
+
+source_design_manifest_hash() {
+  local kind="$1" entry_digest source rel digest manifest
+  manifest="$TMP_DIR/source-design-${kind}-manifest"
+  : > "$manifest"
+  case "$kind" in
+    reviewed)
+      sed -e '/^\*\*Status\*\*:/d' -e '/^## Gate Approval/,$d' "$SOURCE_ENTRY" \
+        | portable_sha256 | awk '{print $1}' > "$TMP_DIR/source-entry-digest"
+      ;;
+    content)
+      sed '/^## Gate Approval/,$d' "$SOURCE_ENTRY" \
+        | portable_sha256 | awk '{print $1}' > "$TMP_DIR/source-entry-digest"
+      ;;
+    *) return 1 ;;
+  esac
+  entry_digest=$(awk 'NR == 1 {print}' "$TMP_DIR/source-entry-digest")
+  printf '%s\t%s\n' 'contracts/source-design.md' "$entry_digest" >> "$manifest"
+  if [[ -d "$SOURCE_SHARDS" ]]; then
+    while IFS= read -r source; do
+      [[ -f "$source" ]] || continue
+      rel=${source#"$FEATURE_DIR"/}
+      digest=$(file_hash "$source") || return 1
+      printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+    done < <(find "$SOURCE_SHARDS" -type f -print)
+  fi
+  LC_ALL=C sort "$manifest" | portable_sha256 | awk '{print $1}'
+}
+
+source_design_reviewed_hash() {
+  source_design_manifest_hash reviewed
+}
+
+source_design_content_hash() {
+  source_design_manifest_hash content
 }
 
 file_hash() {
@@ -142,6 +216,9 @@ design_attachments_hash() {
     while IFS= read -r source; do
       [[ -f "$source" ]] || continue
       rel=${source#"$FEATURE_DIR"/}
+      case "$rel" in
+        contracts/source-design.md|contracts/source-design/*) continue ;;
+      esac
       digest=$(file_hash "$source") || return 1
       printf '%s\t%s\n' "$rel" "$digest" >> "$list"
     done < <(find "$FEATURE_DIR/contracts" -type f -print)
@@ -858,6 +935,679 @@ check_requirements_basis() {
   fi
 }
 
+source_bundle_concat() {
+  local source
+  printf '%s\n' "<!-- bundle-file: contracts/source-design.md -->"
+  sed '/^## Gate Approval/,$d' "$SOURCE_ENTRY"
+  if [[ -d "$SOURCE_SHARDS" ]]; then
+    while IFS= read -r source; do
+      [[ -f "$source" ]] || continue
+      printf '\n<!-- bundle-file: %s -->\n' "${source#"$FEATURE_DIR"/}"
+      sed -e '/^<!-- gatespec: source-design -->$/d' -e '/^## Gate Approval/,$d' "$source"
+    done < <(find "$SOURCE_SHARDS" -type f -print | LC_ALL=C sort)
+  fi
+}
+
+source_block() {
+  local id="$1" bundle="$2"
+  awk -v heading="### ${id}:" '
+    index($0, heading) == 1 {inside=1; print; next}
+    inside && /^### / {exit}
+    inside {print}
+  ' "$bundle"
+}
+
+source_plain_field() {
+  local block="$1" label="$2"
+  awk -v prefix="- **${label}**: " '
+    index($0, prefix) == 1 {print substr($0, length(prefix) + 1); exit}
+  ' "$block"
+}
+
+valid_repo_path() {
+  local path="$1"
+  [[ -n "$path" && "$path" != 'not-applicable' && "$path" != /* && "$path" != *'..'* && "$path" != *$'\t'* ]]
+}
+
+check_source_decisions() {
+  local bundle="$1" body="$TMP_DIR/source-decisions" ids="$TMP_DIR/source-decision-ids"
+  local id block approved bad=0
+  section_body "$SOURCE_ENTRY" 'Source Decisions' > "$body"
+  grep -hE '^### SD[1-9][0-9]*:' "$SOURCE_ENTRY" > "$ids" || true
+  if [[ -d "$SOURCE_SHARDS" ]]; then
+    while IFS= read -r source; do
+      grep -hE '^### SD[1-9][0-9]*:' "$source" >> "$ids" || true
+    done < <(find "$SOURCE_SHARDS" -type f -print)
+  fi
+  sed -n 's/^### \(SD[1-9][0-9]*\):.*/\1/p' "$ids" | LC_ALL=C sort | uniq -d > "$TMP_DIR/source-duplicate-decisions"
+  if [[ -s "$TMP_DIR/source-duplicate-decisions" ]]; then
+    fail "source-design: Source Decision IDs must be unique"
+    bad=1
+  fi
+  if [[ ! -s "$ids" ]]; then
+    if [[ $(grep -cE '^- (None|无) —[[:space:]]*[^[:space:]].*$' "$body" || true) -ne 1 ]]; then
+      fail "source-design: Source Decisions needs approved SD<n> blocks or one reasoned empty state"
+      return
+    fi
+    pass "source-design: no source-level human decision remains"
+    return
+  fi
+  while IFS= read -r id; do
+    id=${id#'### '}; id=${id%%:*}
+    source_block "$id" "$bundle" > "$TMP_DIR/source-decision-block"
+    approved=$(source_plain_field "$TMP_DIR/source-decision-block" 'Approved')
+    if [[ -z "$approved" || "$approved" == \[* ]] ||
+       ! printf '%s\n' "$approved" | grep -Eq '.+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$'; then
+      fail "source-design: $id requires an explicit approved choice and date"
+      bad=1
+    fi
+  done < "$ids"
+  [[ "$bad" -eq 0 ]] && pass "source-design: every SD<n> decision records explicit user approval"
+}
+
+check_source_blocks() {
+  local bundle="$1" type id block value operation path destination bad=0 count
+  local headings="$TMP_DIR/source-headings" ids="$TMP_DIR/source-ids"
+  : > "$headings"
+  grep -E '^### SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*:' "$bundle" > "$headings" || true
+  sed -n 's/^### \(SD-\(F\|U\|FLOW\|ALG\|FAIL\|TEST\)[1-9][0-9]*\):.*/\1/p' "$headings" > "$ids"
+  LC_ALL=C sort "$ids" | uniq -d > "$TMP_DIR/source-duplicate-ids"
+  if [[ -s "$TMP_DIR/source-duplicate-ids" ]]; then
+    fail "source-design: SD-* identifiers must be unique across entry and shards"
+    bad=1
+  fi
+  for type in F U FLOW ALG FAIL TEST; do
+    count=$(grep -Ec "^SD-${type}[1-9][0-9]*$" "$ids" || true)
+    if [[ "$count" -lt 1 ]]; then
+      fail "source-design: at least one SD-${type}<n> block is required"
+      bad=1
+    fi
+  done
+
+  : > "$TMP_DIR/source-manifest-paths"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    source_block "$id" "$bundle" > "$TMP_DIR/source-block"
+    block="$TMP_DIR/source-block"
+    case "$id" in
+      SD-FLOW*) fields='Trigger and owner|Ordered flow|Success result|Failure / cancellation|Backpressure / ordering' ;;
+      SD-FAIL*) fields='Classification|Detection|Propagation|Retry / recovery|Logging / alerting' ;;
+      SD-F[1-9]*)
+        operation=$(markdown_field_value "$block" 'Operation')
+        path=$(markdown_field_value "$block" 'Path')
+        destination=$(markdown_field_value "$block" 'Destination Path')
+        case "$operation" in ADD|MODIFY|DELETE|RENAME) ;; *) fail "source-design: $id Operation must be ADD, MODIFY, DELETE, or RENAME"; bad=1 ;; esac
+        if ! valid_repo_path "$path"; then fail "source-design: $id Path must be a precise repository-relative path"; bad=1
+        else printf '%s\n' "$path" >> "$TMP_DIR/source-manifest-paths"; fi
+        if [[ "$operation" == 'RENAME' ]]; then
+          if ! valid_repo_path "$destination"; then fail "source-design: $id RENAME requires Destination Path"; bad=1
+          else printf '%s\n' "$destination" >> "$TMP_DIR/source-manifest-paths"; fi
+        elif [[ "$destination" != 'not-applicable' ]]; then
+          fail "source-design: $id Destination Path must be not-applicable unless Operation is RENAME"
+          bad=1
+        fi
+        for field in Responsibility 'Source refs'; do
+          value=$(source_plain_field "$block" "$field")
+          if [[ -z "$value" || "$value" == \[* ]]; then fail "source-design: $id field '$field' must be substantive"; bad=1; fi
+        done
+        ;;
+      SD-U*)
+        for field in File 'Visibility / role' 'Inputs / outputs / errors' 'Ownership / concurrency' Compatibility; do
+          value=$(source_plain_field "$block" "$field")
+          if [[ -z "$value" || "$value" == \[* ]]; then fail "source-design: $id field '$field' must be substantive"; bad=1; fi
+        done
+        if ! grep -Eq '^```[^[:space:]`]+' "$block" || ! awk '
+          /^```[^[:space:]`]+/ {inside=1; next} inside && /^```/ {exit} inside && NF {content=1} END {exit !content}
+        ' "$block"; then
+          fail "source-design: $id requires a language-tagged complete declaration"
+          bad=1
+        fi
+        ;;
+      SD-ALG*) fields='Inputs / outputs|Steps|Data structures|Invariants|Complexity|Boundary cases' ;;
+      SD-TEST*) fields='Requirement refs|Source refs|Test path|Test symbol / scenario|Evidence' ;;
+    esac
+    case "$id" in
+      SD-FLOW*|SD-ALG*|SD-FAIL*|SD-TEST*)
+        old_ifs=$IFS; IFS='|'
+        for field in $fields; do
+          value=$(source_plain_field "$block" "$field")
+          if [[ -z "$value" || "$value" == \[* ]]; then fail "source-design: $id field '$field' must be substantive"; bad=1; fi
+        done
+        IFS=$old_ifs
+        ;;
+    esac
+  done < "$ids"
+  LC_ALL=C sort "$TMP_DIR/source-manifest-paths" | uniq -d > "$TMP_DIR/source-duplicate-manifest-paths"
+  if [[ -s "$TMP_DIR/source-duplicate-manifest-paths" ]]; then
+    fail "source-design: each Source Change Manifest path may appear in only one SD-F block"
+    bad=1
+  fi
+  LC_ALL=C sort -u -o "$TMP_DIR/source-manifest-paths" "$TMP_DIR/source-manifest-paths"
+  [[ "$bad" -eq 0 ]] && pass "source-design: manifests, declarations, flows, algorithms, failures, and tests are structurally complete"
+}
+
+check_source_cross_cutting() {
+  local body="$TMP_DIR/source-cross-cutting" label line value bad=0
+  section_body "$SOURCE_ENTRY" 'Operational and Cross-Cutting Design' > "$body"
+  for label in 'Build registration' Dependencies Configuration 'Persistence / transactions / migration' Security Performance Compatibility Observability; do
+    if [[ $(grep -Fc -- "- **${label}**:" "$body" || true) -ne 1 ]]; then
+      fail "source-design: Operational design requires exactly one '$label' field"
+      bad=1
+      continue
+    fi
+    line=$(grep -F -- "- **${label}**:" "$body")
+    value=${line#*: }
+    if [[ -z "$value" || "$value" == \[* ]] || printf '%s\n' "$value" | grep -Eq '^(N/A|None|无)$'; then
+      fail "source-design: '$label' must be substantive or use N/A — <reason>"
+      bad=1
+    fi
+  done
+  [[ "$bad" -eq 0 ]] && pass "source-design: cross-cutting build/runtime concerns are explicit"
+}
+
+check_source_approval() {
+  local expectation="$1" status_count status date approved_date recorded actual body="$TMP_DIR/source-approval" bad=0
+  status_count=$(grep -c '^\*\*Status\*\*:' "$SOURCE_ENTRY" || true)
+  status=$(sed -n 's/^\*\*Status\*\*: //p' "$SOURCE_ENTRY")
+  if [[ "$status_count" -ne 1 ]]; then
+    fail "source-design.md: expected exactly one Status"
+    return
+  fi
+  case "$expectation" in
+    candidate) [[ "$status" == 'Draft' ]] || { fail "source-design.md: source candidate Status must be Draft"; bad=1; } ;;
+    reviewed)
+      if [[ "$status" != 'Draft' ]] && ! printf '%s\n' "$status" | grep -Eq '^Approved-Source-Design \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$'; then
+        fail "source-design.md: reviewed candidate Status must be Draft or Approved-Source-Design (YYYY-MM-DD)"; bad=1
+      fi
+      ;;
+    approved)
+      if ! printf '%s\n' "$status" | grep -Eq '^Approved-Source-Design \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$'; then
+        fail "source-design.md: expected Approved-Source-Design (YYYY-MM-DD)"; bad=1
+      fi
+      ;;
+  esac
+  if [[ $(h2_count "$SOURCE_ENTRY" 'Gate Approval') -ne 1 ]] ||
+     [[ $(grep -c '^## Gate Approval$' "$SOURCE_ENTRY" || true) -ne 1 ]] ||
+     [[ -n $(awk '/^## Gate Approval$/ {inside=1; next} inside && /^## / {print; exit}' "$SOURCE_ENTRY") ]]; then
+    fail "source-design.md: Gate Approval must be the unique final H2"
+    return
+  fi
+  section_body "$SOURCE_ENTRY" 'Gate Approval' > "$body"
+  if [[ "$status" == 'Draft' ]]; then
+    if [[ $(awk 'NF {n++} END {print n+0}' "$body") -ne 2 ]] ||
+       ! grep -Fqx -- '- **Approved by user**: pending' "$body" ||
+       ! grep -Fqx -- '- **Content-SHA256**: `pending`' "$body"; then
+      fail "source-design.md: Draft Gate Approval must contain only pending approval fields"
+      bad=1
+    else
+      pass "source-design.md: Draft approval fields remain unsealed"
+    fi
+  else
+    date=$(printf '%s\n' "$status" | sed -n 's/^Approved-Source-Design (\([0-9-]*\))$/\1/p')
+    approved_date=$(sed -n 's/^- \*\*Approved by user\*\*: \([0-9-]*\)$/\1/p' "$body")
+    recorded=$(markdown_field_value "$body" 'Content-SHA256')
+    actual=$(source_design_content_hash) || actual=''
+    if [[ $(awk 'NF {n++} END {print n+0}' "$body") -ne 2 || "$approved_date" != "$date" ]]; then
+      fail "source-design.md: approval date and Status date must agree"
+      bad=1
+    fi
+    if ! is_lower_hex64 "$recorded" || [[ "$recorded" != "$actual" ]]; then
+      fail "source-design.md: Content-SHA256 does not match the approved Source bundle"
+      bad=1
+    else
+      pass "source-design.md: approved content manifest matches entry and shards"
+    fi
+  fi
+  [[ "$bad" -eq 0 ]] && pass "source-design.md: source approval state is valid"
+}
+
+check_source_structure() {
+  local expectation="$1" first plan_basis current_plan section bundle="$TMP_DIR/source-bundle" bad=0
+  local shard relative nested
+  echo ""
+  echo "Source Design Gate: $SOURCE_ENTRY"
+  first=$(sed -n '1p' "$SOURCE_ENTRY")
+  if [[ "$first" != "$SOURCE_MARKER" ]]; then
+    if grep -Fqx "$SOURCE_MARKER" "$SOURCE_ENTRY"; then
+      fail "source-design.md: Source Design marker exists but is not line 1"
+    else
+      fail "source-design.md: fixed Source Design marker is missing from line 1"
+    fi
+    return
+  fi
+  plan_basis=$(sed -n 's/^\*\*Plan Content-SHA256\*\*: `\([0-9a-f]*\)`$/\1/p' "$SOURCE_ENTRY")
+  current_plan=$(content_hash "$PLAN") || current_plan=''
+  if ! is_lower_hex64 "$plan_basis" || [[ "$plan_basis" != "$current_plan" ]]; then
+    fail "source-design.md: Plan Content-SHA256 is missing or stale"
+    bad=1
+  else
+    pass "source-design.md: approved Plan basis matches"
+  fi
+  for section in 'Maintainer Scenario' 'Source Decisions' 'Source Change Manifest' 'Symbols and Contracts' \
+    'Calls, Data, State, and Lifecycle' 'Algorithms and Invariants' 'Failure Model' 'Test Traceability' \
+    'Operational and Cross-Cutting Design' 'Implementation Boundaries' 'Gate Approval'; do
+    if [[ $(h2_count "$SOURCE_ENTRY" "$section") -ne 1 ]]; then
+      fail "source-design.md: expected exactly one '## $section' section"
+      bad=1
+    fi
+  done
+  if [[ -d "$SOURCE_SHARDS" ]]; then
+    nested=$(find "$SOURCE_SHARDS" -type d -print | awk 'NR > 1 {print; exit}')
+    if [[ -n "$nested" ]] || find "$SOURCE_SHARDS" -type l -print -quit | grep -q .; then
+      fail "source-design: shards must be direct regular Markdown files; nested directories and symlinks are forbidden"
+      bad=1
+    fi
+    while IFS= read -r shard; do
+      [[ -f "$shard" ]] || continue
+      relative=${shard#"$SOURCE_SHARDS"/}
+      if [[ "$relative" == */* || "$relative" != *.md ]]; then
+        fail "source-design: shard '$relative' must be a direct .md file"
+        bad=1
+      fi
+      if grep -Eq '^<!-- gatespec: source-design -->$|^\*\*Status\*\*:|^## Gate Approval$' "$shard"; then
+        fail "source-design: shard '$relative' cannot define the entry marker, Status, or Gate Approval"
+        bad=1
+      fi
+    done < <(find "$SOURCE_SHARDS" -type f -print)
+  fi
+  source_bundle_concat > "$bundle"
+  if grep -nE '\[FEATURE\]|\[Describe |\[plain-language|\[change summary|\[symbol or contract|\[flow name|\[algorithm name|\[failure family|\[test obligation|\[repository/relative|\[complete type|\[exact target|\[externally equivalent' "$bundle" >/dev/null 2>&1; then
+    fail "source-design: template placeholders remain in the entry or shards"
+    bad=1
+  fi
+  check_source_decisions "$bundle"
+  check_source_blocks "$bundle"
+  check_source_cross_cutting
+  check_source_approval "$expectation"
+  CURRENT_SOURCE_REVIEWED_HASH=$(source_design_reviewed_hash) || CURRENT_SOURCE_REVIEWED_HASH=''
+  [[ "$bad" -eq 0 ]] && pass "source-design: marker, Plan basis, required sections, and bundle hashes are structurally valid"
+}
+
+check_source_receipt_whitelist() {
+  local file="$1" kind="$2" context="$3" invalid="$TMP_DIR/source-receipt-invalid"
+  awk -v kind="$kind" '
+    /^[[:space:]]*$/ {next}
+    kind == "request" {
+      if (state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Previous-Verdict-SHA256)\*\*: `[^`]+`$/) next
+      if (state == 0 && $0 == "## Required Tests") {state=1; next}
+      if (state == 1 && $0 == "- Not run — source-design review") next
+      if (state == 1 && $0 ~ /^- \*\*Request-SHA256\*\*: `[0-9a-f]+`$/) {state=2; next}
+      print NR ":" $0; next
+    }
+    kind == "verdict" {
+      if (state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Request-SHA256|Reviewer-Platform|Reviewer-Context-ID|Isolation|Status)\*\*: `[^`]+`$/) next
+      if ($0 == "## Tests Run" || $0 == "## Blockers" || $0 == "## Observations" || $0 == "## Limitations") {state=1; next}
+      if (state == 1 && $0 ~ /^- [^[:space:]](.*[^[:space:]])?$/ && $0 !~ /^- \*\*Verdict-SHA256\*\*:/) next
+      if (state == 1 && $0 ~ /^- \*\*Verdict-SHA256\*\*: `[0-9a-f]+`$/) {state=2; next}
+      print NR ":" $0; next
+    }
+    kind == "seal" {
+      if ($0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/) next
+      print NR ":" $0
+    }
+  ' "$file" > "$invalid"
+  if [[ -s "$invalid" ]]; then
+    fail "$context: SOURCE receipt contains non-canonical heading, field, or prose"
+  else
+    pass "$context: SOURCE receipt uses only its canonical schema"
+  fi
+}
+
+check_source_request_file() {
+  local file="$1" round="$2" previous="$3" bind_current="$4" context request_hash
+  local protocol id scope spec_hash plan_hash basis_hash reviewed_hash baseline bad=0
+  context=$(basename "$file")
+  if [[ ! -f "$file" ]]; then fail "$context: SOURCE request file not found"; return; fi
+  check_source_receipt_whitelist "$file" request "$context"
+  check_ordered_fields "$file" "$context" \
+    'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+    'Plan-Content-SHA256' 'Design-Basis-SHA256' 'Source-Design-Reviewed-SHA256' \
+    'Source-Baseline-Commit' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  check_exact_h2_order "$file" "$context" 'Required Tests'
+  protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  id=$(markdown_field_value "$file" 'Review-ID')
+  scope=$(markdown_field_value "$file" 'Scope')
+  spec_hash=$(markdown_field_value "$file" 'Spec-Content-SHA256')
+  plan_hash=$(markdown_field_value "$file" 'Plan-Content-SHA256')
+  basis_hash=$(markdown_field_value "$file" 'Design-Basis-SHA256')
+  reviewed_hash=$(markdown_field_value "$file" 'Source-Design-Reviewed-SHA256')
+  baseline=$(markdown_field_value "$file" 'Source-Baseline-Commit')
+  [[ "$protocol" == '2' ]] || { fail "$context: SOURCE Protocol-Version must be '2'"; bad=1; }
+  [[ "$id" == 'REV-SOURCE' && "$scope" == 'SOURCE' ]] || { fail "$context: SOURCE request must bind REV-SOURCE/SOURCE"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Round') == "$round" ]] || { fail "$context: Round must be $round"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Previous-Verdict-SHA256') == "$previous" ]] || { fail "$context: prior SOURCE verdict chain mismatch"; bad=1; }
+  for digest in "$spec_hash" "$plan_hash" "$basis_hash" "$reviewed_hash"; do
+    if ! is_lower_hex64 "$digest"; then fail "$context: SOURCE artifact hashes must be lowercase 64-hex"; bad=1; break; fi
+  done
+  if [[ "$bind_current" == yes ]]; then
+    [[ "$spec_hash" == "$CURRENT_SPEC_HASH" ]] || { fail "$context: spec content hash is stale"; bad=1; }
+    [[ "$plan_hash" == "$CURRENT_PLAN_HASH" ]] || { fail "$context: plan content hash is stale"; bad=1; }
+    [[ "$basis_hash" == "$CURRENT_ATTACHMENTS_HASH" ]] || { fail "$context: original Design Basis hash is stale"; bad=1; }
+    [[ "$reviewed_hash" == "$CURRENT_SOURCE_REVIEWED_HASH" ]] || { fail "$context: Source-Design-Reviewed-SHA256 is stale"; bad=1; }
+  fi
+  if ! is_git_oid "$baseline" || [[ -z "$GIT_ROOT" ]] ||
+     ! git -C "$GIT_ROOT" cat-file -e "${baseline}^{commit}" 2>/dev/null ||
+     ! git -C "$GIT_ROOT" merge-base --is-ancestor "$baseline" HEAD 2>/dev/null; then
+    fail "$context: Source-Baseline-Commit must be an existing ancestor commit"
+    bad=1
+  fi
+  if [[ -f "$EXECUTION_STATE" ]]; then
+    state_original=$(markdown_field_value "$EXECUTION_STATE" 'Original-Implementation-Baseline')
+    if [[ -n "$state_original" && "$state_original" != "$baseline" ]]; then
+      fail "$context: Source-Baseline-Commit must equal execution state's original baseline"
+      bad=1
+    fi
+  fi
+  if [[ $(receipt_section_body "$file" 'Required Tests' 'Request-SHA256' | awk 'NF {n++} END {print n+0}') -ne 1 ]] ||
+     ! receipt_section_body "$file" 'Required Tests' 'Request-SHA256' | grep -Fqx -- '- Not run — source-design review'; then
+    fail "$context: SOURCE Required Tests must be the fixed review-only exception"
+    bad=1
+  fi
+  check_self_hash "$file" 'Request-SHA256' "$context"
+  request_hash=$(markdown_field_value "$file" 'Request-SHA256')
+  is_lower_hex64 "$request_hash" || bad=1
+  [[ "$bad" -eq 0 ]] && pass "$context: SOURCE request binds Spec, Plan, original Design Basis, reviewed bundle, and source baseline"
+}
+
+check_source_verdict_file() {
+  local file="$1" round="$2" request_hash="$3" context protocol status platform context_id isolation
+  local body blockers nonblank bad=0
+  context=$(basename "$file")
+  CHECKED_VERDICT_STATUS=''; CHECKED_VERDICT_HASH=''
+  if [[ ! -f "$file" ]]; then fail "$context: SOURCE verdict file not found"; return; fi
+  check_source_receipt_whitelist "$file" verdict "$context"
+  check_ordered_fields "$file" "$context" \
+    'Protocol-Version' 'Review-ID' 'Round' 'Request-SHA256' 'Reviewer-Platform' \
+    'Reviewer-Context-ID' 'Isolation' 'Status' 'Verdict-SHA256'
+  check_exact_h2_order "$file" "$context" 'Tests Run' 'Blockers' 'Observations' 'Limitations'
+  protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  status=$(markdown_field_value "$file" 'Status')
+  platform=$(markdown_field_value "$file" 'Reviewer-Platform')
+  context_id=$(markdown_field_value "$file" 'Reviewer-Context-ID')
+  isolation=$(markdown_field_value "$file" 'Isolation')
+  [[ "$protocol" == '2' ]] || { fail "$context: SOURCE Protocol-Version must be '2'"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Review-ID') == 'REV-SOURCE' ]] || { fail "$context: Review-ID must be REV-SOURCE"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Round') == "$round" ]] || { fail "$context: Round mismatch"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Request-SHA256') == "$request_hash" ]] || { fail "$context: Request-SHA256 mismatch"; bad=1; }
+  case "$platform" in codex|claude|manual-codex|manual-claude) ;; *) fail "$context: Reviewer-Platform is not allowed"; bad=1 ;; esac
+  [[ -n "$context_id" && "$context_id" != \[* ]] || { fail "$context: Reviewer-Context-ID must be nonempty"; bad=1; }
+  [[ "$isolation" == fresh ]] || { fail "$context: Isolation must declare fresh"; bad=1; }
+  case "$status" in PASS|BLOCKED) ;; *) fail "$context: Status must be PASS or BLOCKED"; bad=1 ;; esac
+  receipt_section_body "$file" 'Tests Run' 'Verdict-SHA256' > "$TMP_DIR/source-verdict-tests"
+  if [[ $(awk 'NF {n++} END {print n+0}' "$TMP_DIR/source-verdict-tests") -ne 1 ]] ||
+     ! grep -Fqx -- '- Not run — source-design review' "$TMP_DIR/source-verdict-tests"; then
+    fail "$context: SOURCE Tests Run must be the fixed review-only exception"; bad=1
+  fi
+  receipt_section_body "$file" 'Blockers' 'Verdict-SHA256' > "$TMP_DIR/source-verdict-blockers"
+  nonblank=$(awk 'NF {n++} END {print n+0}' "$TMP_DIR/source-verdict-blockers")
+  blockers=$(grep -cE '^- BLOCKER:[[:space:]]+.+[^[:space:]]$' "$TMP_DIR/source-verdict-blockers" || true)
+  if [[ "$status" == PASS ]]; then
+    if [[ "$nonblank" -ne 1 ]] || ! grep -Fqx -- '- None' "$TMP_DIR/source-verdict-blockers"; then
+      fail "$context: PASS Blockers must be exactly '- None'"
+      bad=1
+    fi
+  elif [[ "$blockers" -lt 1 ]] || grep -Fqx -- '- None' "$TMP_DIR/source-verdict-blockers"; then
+    fail "$context: BLOCKED requires at least one BLOCKER and no None"; bad=1
+  fi
+  for name in Observations Limitations; do
+    body="$TMP_DIR/source-verdict-${name}"
+    receipt_section_body "$file" "$name" 'Verdict-SHA256' > "$body"
+    [[ $(grep -cE '^- [^[:space:]]' "$body" || true) -ge 1 ]] || { fail "$context: ## $name needs a bullet"; bad=1; }
+  done
+  check_self_hash "$file" 'Verdict-SHA256' "$context"
+  CHECKED_VERDICT_STATUS=$status
+  CHECKED_VERDICT_HASH=$(markdown_field_value "$file" 'Verdict-SHA256')
+  [[ "$bad" -eq 0 ]] && pass "$context: fresh SOURCE verdict schema and blocker semantics are valid"
+}
+
+check_source_seal_file() {
+  local file="$1" request="$2" verdict="$3" round="$4" label expected actual bad=0
+  if [[ ! -f "$file" ]]; then fail "REV-SOURCE: PASS seal not found"; return; fi
+  check_source_receipt_whitelist "$file" seal 'REV-SOURCE seal'
+  check_ordered_fields "$file" 'REV-SOURCE seal' \
+    'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+    'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Basis-SHA256' \
+    'Source-Design-Reviewed-SHA256' 'Source-Baseline-Commit' 'Sealed-At' 'Seal-SHA256'
+  [[ $(markdown_field_value "$file" 'Protocol-Version') == 2 ]] || { fail "REV-SOURCE seal: Protocol-Version must be 2"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Review-ID') == REV-SOURCE ]] || { fail "REV-SOURCE seal: Review-ID mismatch"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Round') == "$round" && $(markdown_field_value "$file" 'Status') == PASS ]] || { fail "REV-SOURCE seal: round/status mismatch"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Request-SHA256') == $(markdown_field_value "$request" 'Request-SHA256') ]] || { fail "REV-SOURCE seal: request hash mismatch"; bad=1; }
+  [[ $(markdown_field_value "$file" 'Verdict-SHA256') == $(markdown_field_value "$verdict" 'Verdict-SHA256') ]] || { fail "REV-SOURCE seal: verdict hash mismatch"; bad=1; }
+  for label in Spec-Content-SHA256 Plan-Content-SHA256 Design-Basis-SHA256 Source-Design-Reviewed-SHA256 Source-Baseline-Commit; do
+    expected=$(markdown_field_value "$request" "$label"); actual=$(markdown_field_value "$file" "$label")
+    [[ "$actual" == "$expected" ]] || { fail "REV-SOURCE seal: $label mismatch"; bad=1; }
+  done
+  printf '%s\n' "$(markdown_field_value "$file" 'Sealed-At')" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || { fail "REV-SOURCE seal: Sealed-At must be UTC RFC3339"; bad=1; }
+  check_self_hash "$file" 'Seal-SHA256' 'REV-SOURCE seal'
+  [[ "$bad" -eq 0 ]] && pass "REV-SOURCE: PASS seal binds the reviewed hash without binding mutable approval fields"
+}
+
+check_source_review_chain() {
+  local directory="$FEATURE_DIR/.gatespec/reviews/REV-SOURCE" seal="$FEATURE_DIR/.gatespec/reviews/REV-SOURCE/seal.md"
+  local seal_round seal_number i round request verdict previous=none request_hash status
+  local previous_reviewed='' current_reviewed bad=0
+  echo ""
+  echo "Source Design Review Gate: REV-SOURCE"
+  CURRENT_SPEC_HASH=$(content_hash "$SPEC") || CURRENT_SPEC_HASH=''
+  CURRENT_PLAN_HASH=$(content_hash "$PLAN") || CURRENT_PLAN_HASH=''
+  CURRENT_ATTACHMENTS_HASH=$(design_attachments_hash) || CURRENT_ATTACHMENTS_HASH=''
+  CURRENT_SOURCE_REVIEWED_HASH=$(source_design_reviewed_hash) || CURRENT_SOURCE_REVIEWED_HASH=''
+  GIT_ROOT=$(git -C "$FEATURE_DIR" rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ ! -d "$directory" || ! -f "$seal" ]]; then fail "REV-SOURCE: review directory and PASS seal are required"; return; fi
+  invalid=$(find "$directory" -maxdepth 1 -type f \( -name 'round-*-request.md' -o -name 'round-*-verdict.md' \) -print | sed 's|.*/||' | grep -Ev '^round-(00|01|02)-(request|verdict)\.md$' || true)
+  [[ -z "$invalid" ]] || { fail "REV-SOURCE: only rounds 00, 01, and 02 are allowed"; bad=1; }
+  seal_round=$(markdown_field_value "$seal" 'Round')
+  printf '%s\n' "$seal_round" | grep -Eq '^(00|01|02)$' || { fail "REV-SOURCE seal: invalid round"; return; }
+  seal_number=$((10#$seal_round))
+  i=0
+  while [[ "$i" -le "$seal_number" ]]; do
+    printf -v round '%02d' "$i"
+    request="$directory/round-${round}-request.md"; verdict="$directory/round-${round}-verdict.md"
+    bind_current=no; [[ "$i" -eq "$seal_number" ]] && bind_current=yes
+    check_source_request_file "$request" "$round" "$previous" "$bind_current"
+    current_reviewed=$(markdown_field_value "$request" 'Source-Design-Reviewed-SHA256')
+    if [[ "$i" -gt 0 && "$current_reviewed" == "$previous_reviewed" ]]; then
+      fail "REV-SOURCE round $round: remediation must change Source-Design-Reviewed-SHA256"; bad=1
+    fi
+    request_hash=$(markdown_field_value "$request" 'Request-SHA256')
+    check_source_verdict_file "$verdict" "$round" "$request_hash"
+    status=$CHECKED_VERDICT_STATUS
+    if [[ "$i" -lt "$seal_number" && "$status" != BLOCKED ]]; then fail "REV-SOURCE: every pre-seal round must be BLOCKED"; bad=1; fi
+    if [[ "$i" -eq "$seal_number" && "$status" != PASS ]]; then fail "REV-SOURCE: sealed round must be PASS"; bad=1; fi
+    previous=$CHECKED_VERDICT_HASH; previous_reviewed=$current_reviewed
+    i=$((i + 1))
+  done
+  i=$((seal_number + 1))
+  while [[ "$i" -le 2 ]]; do
+    printf -v round '%02d' "$i"
+    if [[ -e "$directory/round-${round}-request.md" || -e "$directory/round-${round}-verdict.md" ]]; then fail "REV-SOURCE: receipt files exist after sealed PASS"; bad=1; fi
+    i=$((i + 1))
+  done
+  request="$directory/round-${seal_round}-request.md"; verdict="$directory/round-${seal_round}-verdict.md"
+  check_source_seal_file "$seal" "$request" "$verdict" "$seal_round"
+  [[ "$bad" -eq 0 ]] && pass "REV-SOURCE: bounded fresh review chain is current"
+}
+
+preserved_reviews_hash() {
+  local root="$FEATURE_DIR/.gatespec/revalidations" file rel digest manifest="$TMP_DIR/preserved-reviews-manifest"
+  : > "$manifest"
+  if [[ -d "$root" ]]; then
+    while IFS= read -r file; do
+      [[ -f "$file" ]] || continue
+      rel=${file#"$FEATURE_DIR"/}
+      digest=$(file_hash "$file") || return 1
+      printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+    done < <(find "$root" -type f -print)
+  fi
+  if [[ ! -s "$manifest" ]]; then
+    printf '%s' 'not-applicable'
+  else
+    LC_ALL=C sort "$manifest" | portable_sha256 | awk '{print $1}'
+  fi
+}
+
+check_execution_state() {
+  local phase="$1" context='execution-state.md' protocol epoch original handoff source_hash preserved
+  local current_source current_preserved invalid bad=0
+  if [[ ! -f "$EXECUTION_STATE" ]]; then fail "$context: Review Protocol v2 requires .gatespec/execution-state.md"; return; fi
+  invalid=$(awk '
+    /^[[:space:]]*$/ {next}
+    NR == 1 && $0 == "# GateSpec Execution State" {next}
+    /^- \*\*(Protocol-Version|Execution-Epoch|Original-Implementation-Baseline|Task-Handoff-Commit|Source-Design-Content-SHA256|Preserved-Reviews-SHA256|Execution-State-SHA256)\*\*: `[^`]+`$/ {next}
+    {print NR ":" $0}
+  ' "$EXECUTION_STATE")
+  [[ -z "$invalid" ]] || { fail "$context: only the canonical v2 execution fields are allowed"; bad=1; }
+  check_ordered_fields "$EXECUTION_STATE" "$context" \
+    'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
+    'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
+  protocol=$(markdown_field_value "$EXECUTION_STATE" 'Protocol-Version')
+  epoch=$(markdown_field_value "$EXECUTION_STATE" 'Execution-Epoch')
+  original=$(markdown_field_value "$EXECUTION_STATE" 'Original-Implementation-Baseline')
+  handoff=$(markdown_field_value "$EXECUTION_STATE" 'Task-Handoff-Commit')
+  source_hash=$(markdown_field_value "$EXECUTION_STATE" 'Source-Design-Content-SHA256')
+  preserved=$(markdown_field_value "$EXECUTION_STATE" 'Preserved-Reviews-SHA256')
+  [[ "$protocol" == 2 ]] || { fail "$context: Protocol-Version must be 2"; bad=1; }
+  printf '%s\n' "$epoch" | grep -Eq '^E[1-9][0-9]*$' || { fail "$context: Execution-Epoch must be E<n>"; bad=1; }
+  GIT_ROOT=${GIT_ROOT:-$(git -C "$FEATURE_DIR" rev-parse --show-toplevel 2>/dev/null || true)}
+  if ! is_git_oid "$original" || [[ -z "$GIT_ROOT" ]] || ! git -C "$GIT_ROOT" cat-file -e "${original}^{commit}" 2>/dev/null; then
+    fail "$context: Original-Implementation-Baseline must resolve to a commit"; bad=1
+  fi
+  if [[ "$phase" == source-candidate || "$phase" == source-review || "$phase" == source-approved || "$phase" == tasks ]]; then
+    if [[ "$handoff" != pending ]] && { ! is_git_oid "$handoff" || ! git -C "$GIT_ROOT" cat-file -e "${handoff}^{commit}" 2>/dev/null; }; then
+      fail "$context: Task-Handoff-Commit must be pending or a valid commit before tasks"; bad=1
+    fi
+  elif ! is_git_oid "$handoff" || ! git -C "$GIT_ROOT" cat-file -e "${handoff}^{commit}" 2>/dev/null; then
+    fail "$context: downstream Protocol v2 requires a committed Task-Handoff-Commit"; bad=1
+  fi
+  if is_git_oid "$original" && is_git_oid "$handoff" &&
+     ! git -C "$GIT_ROOT" merge-base --is-ancestor "$original" "$handoff" 2>/dev/null; then
+    fail "$context: Original Baseline must be an ancestor of Task Handoff"; bad=1
+  fi
+  if [[ -f "$SOURCE_ENTRY" ]]; then
+    if [[ "$phase" == source-candidate || "$phase" == source-review ]] && [[ "$source_hash" == pending ]]; then
+      current_source=pending
+    else
+      current_source=$(source_design_content_hash) || current_source=''
+    fi
+  else
+    current_source=not-applicable
+  fi
+  [[ "$source_hash" == "$current_source" ]] || { fail "$context: Source Design content binding is stale"; bad=1; }
+  current_preserved=$(preserved_reviews_hash) || current_preserved=''
+  [[ "$preserved" == "$current_preserved" ]] || { fail "$context: Preserved-Reviews-SHA256 is stale"; bad=1; }
+  if [[ "$preserved" != not-applicable ]] && ! is_lower_hex64 "$preserved"; then fail "$context: Preserved-Reviews-SHA256 must be not-applicable or 64-hex"; bad=1; fi
+  check_self_hash "$EXECUTION_STATE" 'Execution-State-SHA256' "$context"
+  CURRENT_EXECUTION_EPOCH=$epoch
+  CURRENT_ORIGINAL_BASELINE=$original
+  CURRENT_TASK_HANDOFF=$handoff
+  CURRENT_PRESERVED_HASH=$preserved
+  [[ "$bad" -eq 0 ]] && pass "$context: v2 epoch, original baseline, handoff, Source, and preserved reviews are current"
+}
+
+check_implementation_adjustments() {
+  local require_empty="$1" context='implementation-adjustments.md' epoch source_hash expected_source
+  local headings="$TMP_DIR/ia-headings" id block value expected=1 bad=0 source_bundle="$TMP_DIR/ia-source-bundle"
+  : > "$TMP_DIR/ia-changed-paths"
+  if [[ ! -f "$SOURCE_ENTRY" ]]; then
+    [[ ! -e "$IA_FILE" ]] || { fail "$context: IA is not applicable when Source Design is disabled"; return; }
+    return
+  fi
+  if [[ ! -f "$IA_FILE" ]]; then fail "$context: source-enabled execution requires the IA log"; return; fi
+  epoch=$(markdown_field_value "$IA_FILE" 'Execution-Epoch')
+  source_hash=$(markdown_field_value "$IA_FILE" 'Source-Design-Content-SHA256')
+  expected_source=$(source_design_content_hash) || expected_source=''
+  [[ "$epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution-Epoch does not match execution-state.md"; bad=1; }
+  [[ "$source_hash" == "$expected_source" ]] || { fail "$context: Source Design hash is stale"; bad=1; }
+  grep -E '^### IA[1-9][0-9]*:' "$IA_FILE" > "$headings" || true
+  if [[ "$require_empty" == yes ]]; then
+    if [[ -s "$headings" ]] || [[ $(grep -cE '^- None —[[:space:]]*[^[:space:]].*$' "$IA_FILE" || true) -ne 1 ]]; then
+      fail "$context: REV-TASKS baseline requires an empty IA log"; bad=1
+    fi
+  elif [[ -s "$headings" ]] && grep -E '^- None —' "$IA_FILE" >/dev/null 2>&1; then
+    fail "$context: adjustment blocks cannot coexist with the empty state"; bad=1
+  fi
+  while IFS= read -r heading; do
+    id=${heading#'### IA'}; id=${id%%:*}
+    if [[ "$id" -ne "$expected" ]]; then fail "$context: IA IDs must be continuous from IA1"; bad=1; fi
+    source_block "IA${id}" "$IA_FILE" > "$TMP_DIR/ia-block"
+    block="$TMP_DIR/ia-block"
+    for field in 'Source refs' 'Task ID' 'Changed Paths' 'Changed Symbols' 'Boundary Impact'; do
+      value=$(markdown_field_value "$block" "$field")
+      [[ -n "$value" && "$value" != \[* ]] || { fail "$context: IA$id field '$field' must be backtick-wrapped and substantive"; bad=1; }
+    done
+    for field in Reason Verification; do
+      value=$(source_plain_field "$block" "$field")
+      [[ -n "$value" && "$value" != \[* ]] || { fail "$context: IA$id field '$field' must be substantive"; bad=1; }
+    done
+    [[ $(markdown_field_value "$block" 'Boundary Impact') == none ]] || { fail "$context: IA$id must declare Boundary Impact 'none'; material or uncertain change is forbidden"; bad=1; }
+    value=$(markdown_field_value "$block" 'Task ID')
+    printf '%s\n' "$value" | grep -Eq '^T[0-9]{3}$' || { fail "$context: IA$id Task ID must be one T###"; bad=1; }
+    value=$(markdown_field_value "$block" 'Source refs')
+    printf '%s\n' "$value" | grep -Eq 'SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*' || { fail "$context: IA$id needs an existing Source ref"; bad=1; }
+    source_bundle_concat > "$source_bundle"
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] || continue
+      grep -Eq "^### ${ref}:" "$source_bundle" || { fail "$context: IA$id references unknown $ref"; bad=1; }
+    done < <(printf '%s\n' "$value" | grep -oE 'SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*' | LC_ALL=C sort -u)
+    value=$(markdown_field_value "$block" 'Changed Paths')
+    printf '%s\n' "$value" | awk -F ', ' '{for (i=1;i<=NF;i++) print $i}' > "$TMP_DIR/ia-path-list"
+    if [[ $(awk 'BEGIN {s=""} {s=s (s=="" ? "" : ", ") $0} END {print s}' "$TMP_DIR/ia-path-list") != "$value" ]]; then
+      fail "$context: IA$id Changed Paths must be a canonical comma+space list"; bad=1
+    fi
+    while IFS= read -r path; do
+      if ! valid_repo_path "$path"; then fail "$context: IA$id contains invalid changed path '$path'"; bad=1
+      else printf '%s\n' "$path" >> "$TMP_DIR/ia-changed-paths"; fi
+    done < "$TMP_DIR/ia-path-list"
+    expected=$((expected + 1))
+  done < "$headings"
+  LC_ALL=C sort -u -o "$TMP_DIR/ia-changed-paths" "$TMP_DIR/ia-changed-paths"
+  [[ "$bad" -eq 0 ]] && pass "$context: IA log is epoch-bound, bounded, ordered, and path-complete"
+}
+
+git_final_delta_hash() {
+  local repo="$1" original="$2" subject="$3"
+  git -C "$repo" diff-tree --raw -z --no-abbrev --no-renames "$original" "$subject" 2>/dev/null \
+    | portable_sha256 | awk '{print $1}'
+}
+
+check_source_final_paths() {
+  local subject="$1" actual="$TMP_DIR/final-product-paths" expected="$TMP_DIR/final-allowed-paths"
+  local path bad=0 bundle="$TMP_DIR/final-source-bundle"
+  [[ -f "$SOURCE_ENTRY" ]] || return
+  if ! resolve_git_feature_paths; then fail "REV-FINAL: cannot resolve feature path for Source reconciliation"; return; fi
+  git -C "$GIT_ROOT" -c core.quotepath=false diff --no-renames --name-only \
+    "$CURRENT_ORIGINAL_BASELINE" "$subject" > "$TMP_DIR/final-all-paths" 2>/dev/null || {
+      fail "REV-FINAL: cannot enumerate Original-Baseline..Subject paths"; return;
+    }
+  : > "$actual"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    case "$path" in "$GIT_FEATURE_REL"/*) ;; *) printf '%s\n' "$path" >> "$actual" ;; esac
+  done < "$TMP_DIR/final-all-paths"
+  source_bundle_concat > "$bundle"
+  check_source_blocks "$bundle"
+  : > "$expected"
+  cat "$TMP_DIR/source-manifest-paths" >> "$expected"
+  [[ -s "$TMP_DIR/ia-changed-paths" ]] && cat "$TMP_DIR/ia-changed-paths" >> "$expected"
+  LC_ALL=C sort -u -o "$actual" "$actual"
+  LC_ALL=C sort -u -o "$expected" "$expected"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! grep -Fqx -- "$path" "$expected"; then
+      fail "REV-FINAL: product path '$path' is absent from Source Change Manifest + IA Changed Paths"
+      bad=1
+    fi
+  done < "$actual"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! grep -Fqx -- "$path" "$actual"; then
+      fail "REV-FINAL: declared Source/IA path '$path' is absent from the actual implementation delta"
+      bad=1
+    fi
+  done < "$expected"
+  [[ "$bad" -eq 0 ]] && pass "REV-FINAL: actual product paths equal Source Change Manifest + bounded IA paths"
+}
+
 check_implementation_review_contract() {
   local body="$TMP_DIR/implementation-review-contract" required protocol review_root
   local task_review isolation parallel git_policy limit final_validation
@@ -885,7 +1635,14 @@ check_implementation_review_contract() {
   final_validation=$(markdown_field_value "$body" 'Final Validation')
   printf '%s\n' "$final_validation" > "$TMP_DIR/final-validation"
 
-  [[ "$protocol" == '1' ]] || { fail "plan.md: review Protocol Version must be '1'"; bad=1; }
+  case "$protocol" in
+    1|2) ;;
+    *) fail "plan.md: review Protocol Version must be '1' (legacy) or '2'"; bad=1 ;;
+  esac
+  ACTIVE_REVIEW_PROTOCOL=$protocol
+  # An approved legacy Plan stays byte-for-byte immutable. Enabling the
+  # independent Source Design sub-contract activates receipt protocol v2.
+  [[ -f "$SOURCE_ENTRY" ]] && ACTIVE_REVIEW_PROTOCOL=2
   [[ "$review_root" == '.gatespec/reviews' ]] || { fail "plan.md: Review Root must be '.gatespec/reviews'"; bad=1; }
   [[ "$task_review" == 'REV-TASKS after speckit.analyze; PASS required before speckit.implement' ]] || {
     fail "plan.md: Task Review contract is not the fixed REV-TASKS handoff"; bad=1;
@@ -1151,6 +1908,58 @@ check_tasks_structure() {
   fi
 
   [[ "$bad" -eq 0 ]] && pass "tasks.md: review checkpoints are declared once, serial, and phase-final"
+  if [[ -f "$SOURCE_ENTRY" ]]; then
+    check_source_task_trace
+  fi
+}
+
+check_source_task_trace() {
+  local recorded actual bundle="$TMP_DIR/source-task-bundle" ids="$TMP_DIR/source-task-required-ids"
+  local id path line bad=0 noncheckpoint="$TMP_DIR/source-noncheckpoint-tasks"
+  recorded=$(sed -n 's/^\*\*Source-Design-Content-SHA256\*\*: `\([0-9a-f]*\)`$/\1/p' "$TASKS")
+  actual=$(source_design_content_hash) || actual=''
+  if [[ $(grep -c '^\*\*Source-Design-Content-SHA256\*\*:' "$TASKS" || true) -ne 1 ]] ||
+     ! is_lower_hex64 "$recorded" || [[ "$recorded" != "$actual" ]]; then
+    fail "tasks.md: source-enabled tasks require the current Source-Design-Content-SHA256"
+    bad=1
+  else
+    pass "tasks.md: Source Design content hash is current"
+  fi
+  awk '
+    /^- \[[ xX]\] T[0-9][0-9][0-9]([[:space:]]|$)/ &&
+    $0 !~ /GateSpec review checkpoint REV-(FOUNDATION|US[1-9][0-9]*|FINAL):/ {print}
+  ' "$TASKS" > "$noncheckpoint"
+  while IFS= read -r line; do
+    if ! printf '%s\n' "$line" | grep -Eq 'SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*'; then
+      fail "tasks.md: every non-checkpoint task needs at least one SD-* reference"
+      bad=1
+    fi
+    if ! printf '%s\n' "$line" | grep -Eq '(^|[[:space:]`(])([[:alnum:]_.-]+/)+[[:alnum:]_.-]+([[:space:]`),;:]|$)'; then
+      fail "tasks.md: every source-enabled non-checkpoint task needs a precise repository-relative path"
+      bad=1
+    fi
+  done < "$noncheckpoint"
+  source_bundle_concat > "$bundle"
+  grep -E '^### SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*:' "$bundle" \
+    | sed -n 's/^### \(SD-[A-Z]*[1-9][0-9]*\):.*/\1/p' > "$ids" || true
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if ! grep -E "^- \[[ xX]\] T[0-9][0-9][0-9].*${id}([^0-9]|$)" "$noncheckpoint" >/dev/null 2>&1; then
+      fail "tasks.md: no executable non-checkpoint task covers $id"
+      bad=1
+    fi
+  done < "$ids"
+  if [[ ! -s "$TMP_DIR/source-manifest-paths" ]]; then
+    check_source_blocks "$bundle"
+  fi
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! grep -F -- "$path" "$noncheckpoint" >/dev/null 2>&1; then
+      fail "tasks.md: Source Change Manifest path '$path' has no task coverage"
+      bad=1
+    fi
+  done < "$TMP_DIR/source-manifest-paths"
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: every Source item and changed path maps to executable work"
 }
 
 review_scope_for_id() {
@@ -1193,13 +2002,13 @@ check_receipt_line_whitelist() {
   local file="$1" kind="$2" context="$3" invalid="$TMP_DIR/receipt-invalid-lines"
   awk -v kind="$kind" '
     function request_pre(line) {
-      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Task-IDs|Changed-Paths-SHA256|Previous-Verdict-SHA256)\*\*: `[^`]+`$/
+      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Task-IDs|Changed-Paths-SHA256|Final-Delta-SHA256|Previous-Verdict-SHA256)\*\*: `[^`]+`$/
     }
     function verdict_pre(line) {
       return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Request-SHA256|Reviewer-Platform|Reviewer-Context-ID|Isolation|Status)\*\*: `[^`]+`$/
     }
     function seal_field(line) {
-      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/
+      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Final-Delta-SHA256|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/
     }
     /^[[:space:]]*$/ {next}
     kind == "request" {
@@ -1375,7 +2184,8 @@ check_request_file() {
   local file="$1" expected_id="$2" expected_round="$3" expected_scope="$4"
   local bind_current="$5" previous_hash="$6" context
   local protocol id round scope spec_hash plan_hash attachments_hash tasks_hash
-  local baseline base subject task_ids changed previous actual_changed expected_task_ids bad=0
+  local baseline base subject task_ids changed final_delta previous actual_changed actual_final expected_task_ids bad=0
+  local execution_epoch source_hash ia_hash task_handoff preserved request_protocol expected_protocol
   local previous_line tests_line hash_line
   context=$(basename "$file")
 
@@ -1384,11 +2194,22 @@ check_request_file() {
     return
   fi
   check_receipt_line_whitelist "$file" request "$context"
-  check_ordered_fields "$file" "$context" \
-    'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
-    'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
-    'Implementation-Baseline' 'Base-Commit' 'Subject-Commit' 'Task-IDs' \
-    'Changed-Paths-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  request_protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  if [[ "$request_protocol" == 2 ]]; then
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Execution-Epoch' 'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' 'Implementation-Baseline' \
+      'Base-Commit' 'Subject-Commit' 'Task-IDs' 'Changed-Paths-SHA256' \
+      'Final-Delta-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  else
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Implementation-Baseline' 'Base-Commit' 'Subject-Commit' 'Task-IDs' \
+      'Changed-Paths-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  fi
   check_exact_h2_order "$file" "$context" 'Required Tests'
 
   previous_line=$(markdown_field_line_numbers "$file" 'Previous-Verdict-SHA256')
@@ -1408,14 +2229,21 @@ check_request_file() {
   plan_hash=$(markdown_field_value "$file" 'Plan-Content-SHA256')
   attachments_hash=$(markdown_field_value "$file" 'Design-Attachments-SHA256')
   tasks_hash=$(markdown_field_value "$file" 'Tasks-Definition-SHA256')
+  execution_epoch=$(markdown_field_value "$file" 'Execution-Epoch')
+  source_hash=$(markdown_field_value "$file" 'Source-Design-Content-SHA256')
+  ia_hash=$(markdown_field_value "$file" 'Implementation-Adjustments-SHA256')
+  task_handoff=$(markdown_field_value "$file" 'Task-Handoff-Commit')
+  preserved=$(markdown_field_value "$file" 'Preserved-Reviews-SHA256')
   baseline=$(markdown_field_value "$file" 'Implementation-Baseline')
   base=$(markdown_field_value "$file" 'Base-Commit')
   subject=$(markdown_field_value "$file" 'Subject-Commit')
   task_ids=$(markdown_field_value "$file" 'Task-IDs')
   changed=$(markdown_field_value "$file" 'Changed-Paths-SHA256')
+  final_delta=$(markdown_field_value "$file" 'Final-Delta-SHA256')
   previous=$(markdown_field_value "$file" 'Previous-Verdict-SHA256')
 
-  [[ "$protocol" == '1' ]] || { fail "$context: Protocol-Version must be '1'"; bad=1; }
+  expected_protocol=${ACTIVE_REVIEW_PROTOCOL:-1}
+  [[ "$protocol" == "$expected_protocol" ]] || { fail "$context: Protocol-Version must match active protocol '$expected_protocol'"; bad=1; }
   [[ "$id" == "$expected_id" ]] || { fail "$context: Review-ID must be $expected_id"; bad=1; }
   [[ "$round" == "$expected_round" ]] || { fail "$context: Round must be $expected_round"; bad=1; }
   [[ "$scope" == "$expected_scope" ]] || { fail "$context: Scope must be $expected_scope"; bad=1; }
@@ -1435,11 +2263,53 @@ check_request_file() {
     [[ "$tasks_hash" == "$CURRENT_TASKS_HASH" ]] || { fail "$context: normalized tasks definition hash is stale"; bad=1; }
   fi
 
+  if [[ "$protocol" == 2 ]]; then
+    [[ "$execution_epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution-Epoch is stale"; bad=1; }
+    [[ "$task_handoff" == "$CURRENT_TASK_HANDOFF" ]] || { fail "$context: Task-Handoff-Commit is stale"; bad=1; }
+    [[ "$preserved" == "$CURRENT_PRESERVED_HASH" ]] || { fail "$context: Preserved-Reviews-SHA256 is stale"; bad=1; }
+    if [[ -f "$SOURCE_ENTRY" ]]; then expected_source=$(source_design_content_hash) || expected_source=''
+    else expected_source=not-applicable; fi
+    [[ "$source_hash" == "$expected_source" ]] || { fail "$context: Source-Design-Content-SHA256 is stale"; bad=1; }
+    if [[ "$expected_scope" == TASKS ]]; then
+      if [[ -f "$SOURCE_ENTRY" ]]; then
+        if [[ -z "$GIT_ROOT" ]] || ! resolve_git_feature_paths ||
+           ! git -C "$GIT_ROOT" show "$task_handoff:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" \
+             > "$TMP_DIR/task-handoff-ia" 2>/dev/null; then
+          fail "$context: Task-Handoff-Commit must contain the empty IA baseline"
+          bad=1
+        elif [[ "$ia_hash" != $(file_hash "$TMP_DIR/task-handoff-ia") ]]; then
+          fail "$context: task handoff IA snapshot hash is stale"
+          bad=1
+        elif [[ $(markdown_field_value "$TMP_DIR/task-handoff-ia" 'Execution-Epoch') != "$execution_epoch" ]] ||
+             [[ $(markdown_field_value "$TMP_DIR/task-handoff-ia" 'Source-Design-Content-SHA256') != "$source_hash" ]] ||
+             grep -Eq '^### IA[1-9][0-9]*:' "$TMP_DIR/task-handoff-ia" ||
+             [[ $(grep -cE '^- None —[[:space:]]*[^[:space:]].*$' "$TMP_DIR/task-handoff-ia" || true) -ne 1 ]]; then
+          fail "$context: Task-Handoff-Commit IA baseline must be empty and bind the receipt epoch and Source hash"
+          bad=1
+        else
+          pass "$context: task review binds the empty IA snapshot in Task-Handoff-Commit"
+        fi
+      elif [[ "$ia_hash" != not-applicable ]]; then
+        fail "$context: IA must be not-applicable without Source Design"
+        bad=1
+      fi
+    elif [[ "$ia_hash" != not-applicable ]] && ! is_lower_hex64 "$ia_hash"; then
+      fail "$context: Implementation-Adjustments-SHA256 must be not-applicable or lowercase 64-hex"; bad=1
+    fi
+  elif [[ -n "$execution_epoch$source_hash$ia_hash$task_handoff$preserved$final_delta" ]]; then
+    fail "$context: Protocol v1 must not contain Protocol v2 fields"
+    bad=1
+  fi
+
   check_task_ids_field "$task_ids" "$context"
   if [[ "$expected_scope" == 'TASKS' ]]; then
     if [[ "$baseline" != 'not-applicable' || "$base" != 'not-applicable' ||
           "$subject" != 'not-applicable' || "$changed" != 'not-applicable' ]]; then
       fail "$context: TASKS review Git fields must be 'not-applicable'"
+      bad=1
+    fi
+    if [[ "$protocol" == 2 && "$final_delta" != not-applicable ]]; then
+      fail "$context: TASKS Final-Delta-SHA256 must be not-applicable"
       bad=1
     fi
   else
@@ -1465,6 +2335,21 @@ check_request_file() {
          ! git -C "$GIT_ROOT" cat-file -e "${subject}^{commit}" 2>/dev/null; then
       fail "$context: baseline/base/subject must resolve to commits"
       bad=1
+    elif [[ "$protocol" == 2 && "$expected_id" == REV-FINAL ]]; then
+      if [[ "$base" != "$CURRENT_ORIGINAL_BASELINE" ]] ||
+         ! git -C "$GIT_ROOT" merge-base --is-ancestor "$base" "$baseline" 2>/dev/null ||
+         ! git -C "$GIT_ROOT" merge-base --is-ancestor "$baseline" "$subject" 2>/dev/null; then
+        fail "$context: v2 FINAL must use Original Baseline and preserve original -> handoff baseline -> subject ancestry"
+        bad=1
+      else
+        actual_changed=$(git_changed_paths_hash "$GIT_ROOT" "$base" "$subject") || actual_changed=''
+        if [[ "$changed" != "$actual_changed" ]]; then
+          fail "$context: Changed-Paths-SHA256 does not match base..subject"
+          bad=1
+        else
+          pass "$context: Git commits, ancestry, and changed-path hash agree"
+        fi
+      fi
     elif ! git -C "$GIT_ROOT" merge-base --is-ancestor "$baseline" "$base" 2>/dev/null ||
          ! git -C "$GIT_ROOT" merge-base --is-ancestor "$base" "$subject" 2>/dev/null; then
       fail "$context: Git ancestry must be baseline -> base -> subject"
@@ -1478,6 +2363,32 @@ check_request_file() {
         pass "$context: Git commits, ancestry, and changed-path hash agree"
       fi
     fi
+    if [[ "$protocol" == 2 ]]; then
+      if [[ -f "$SOURCE_ENTRY" ]]; then
+        if ! resolve_git_feature_paths || ! git -C "$GIT_ROOT" show "$subject:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" > "$TMP_DIR/request-subject-ia" 2>/dev/null; then
+          fail "$context: Subject-Commit must contain the complete IA snapshot"
+          bad=1
+        elif [[ "$ia_hash" != $(file_hash "$TMP_DIR/request-subject-ia") ]]; then
+          fail "$context: Implementation-Adjustments-SHA256 does not match Subject-Commit"
+          bad=1
+        fi
+      elif [[ "$ia_hash" != not-applicable ]]; then
+        fail "$context: IA must be not-applicable without Source Design"
+        bad=1
+      fi
+      if [[ "$expected_id" == REV-FINAL ]]; then
+        actual_final=$(git_final_delta_hash "$GIT_ROOT" "$CURRENT_ORIGINAL_BASELINE" "$subject") || actual_final=''
+        if ! is_lower_hex64 "$final_delta" || [[ "$final_delta" != "$actual_final" ]]; then
+          fail "$context: Final-Delta-SHA256 does not match the raw Original-Baseline..Subject tree delta"
+          bad=1
+        else
+          pass "$context: raw Final-Delta-SHA256 binds content/mode changes, not only path names"
+        fi
+      elif [[ "$final_delta" != not-applicable ]]; then
+        fail "$context: Final-Delta-SHA256 is only applicable to REV-FINAL"
+        bad=1
+      fi
+    fi
   fi
 
   check_request_tests "$file" "$expected_scope" "$context" "$expected_id"
@@ -1487,6 +2398,7 @@ check_request_file() {
 
 check_verdict_file() {
   local file="$1" expected_id="$2" expected_round="$3" expected_request_hash="$4" expected_scope="$5"
+  local expected_protocol="${6:-1}"
   local context protocol id round request_hash platform context_id isolation status
   local body nonblank blockers malformed bad=0 status_line tests_line hash_line
   context=$(basename "$file")
@@ -1522,7 +2434,7 @@ check_verdict_file() {
   CHECKED_VERDICT_HASH=$(markdown_field_value "$file" 'Verdict-SHA256')
   CHECKED_VERDICT_STATUS=$status
 
-  [[ "$protocol" == '1' ]] || { fail "$context: Protocol-Version must be '1'"; bad=1; }
+  [[ "$protocol" == "$expected_protocol" ]] || { fail "$context: Protocol-Version must match request protocol '$expected_protocol'"; bad=1; }
   [[ "$id" == "$expected_id" ]] || { fail "$context: Review-ID must be $expected_id"; bad=1; }
   [[ "$round" == "$expected_round" ]] || { fail "$context: Round must be $expected_round"; bad=1; }
   [[ "$request_hash" == "$expected_request_hash" ]] || { fail "$context: Request-SHA256 does not match its request"; bad=1; }
@@ -1590,18 +2502,29 @@ check_verdict_file() {
 
 check_seal_file() {
   local file="$1" request="$2" verdict="$3" expected_id="$4" expected_round="$5"
-  local context protocol id round status request_hash verdict_hash sealed_at bad=0 label expected actual
+  local context protocol id round status request_hash verdict_hash sealed_at bad=0 label expected actual request_protocol
   context=$(basename "$file")
   if [[ ! -f "$file" ]]; then
     fail "$expected_id: PASS seal not found"
     return
   fi
   check_receipt_line_whitelist "$file" seal "$expected_id seal"
-  check_ordered_fields "$file" "$expected_id seal" \
-    'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
-    'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Attachments-SHA256' \
-    'Tasks-Definition-SHA256' 'Implementation-Baseline' 'Base-Commit' \
-    'Subject-Commit' 'Sealed-At' 'Seal-SHA256'
+  request_protocol=$(markdown_field_value "$request" 'Protocol-Version')
+  if [[ "$request_protocol" == 2 ]]; then
+    check_ordered_fields "$file" "$expected_id seal" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+      'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Attachments-SHA256' \
+      'Tasks-Definition-SHA256' 'Execution-Epoch' 'Source-Design-Content-SHA256' \
+      'Implementation-Adjustments-SHA256' 'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' \
+      'Implementation-Baseline' 'Base-Commit' 'Subject-Commit' 'Final-Delta-SHA256' \
+      'Sealed-At' 'Seal-SHA256'
+  else
+    check_ordered_fields "$file" "$expected_id seal" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+      'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Attachments-SHA256' \
+      'Tasks-Definition-SHA256' 'Implementation-Baseline' 'Base-Commit' \
+      'Subject-Commit' 'Sealed-At' 'Seal-SHA256'
+  fi
   protocol=$(markdown_field_value "$file" 'Protocol-Version')
   id=$(markdown_field_value "$file" 'Review-ID')
   round=$(markdown_field_value "$file" 'Round')
@@ -1609,7 +2532,7 @@ check_seal_file() {
   request_hash=$(markdown_field_value "$file" 'Request-SHA256')
   verdict_hash=$(markdown_field_value "$file" 'Verdict-SHA256')
   sealed_at=$(markdown_field_value "$file" 'Sealed-At')
-  [[ "$protocol" == '1' ]] || { fail "$expected_id seal: Protocol-Version must be '1'"; bad=1; }
+  [[ "$protocol" == "$request_protocol" ]] || { fail "$expected_id seal: Protocol-Version must match its request"; bad=1; }
   [[ "$id" == "$expected_id" ]] || { fail "$expected_id seal: Review-ID mismatch"; bad=1; }
   [[ "$round" == "$expected_round" ]] || { fail "$expected_id seal: Round mismatch"; bad=1; }
   [[ "$status" == 'PASS' ]] || { fail "$expected_id seal: Status must be PASS"; bad=1; }
@@ -1628,6 +2551,17 @@ check_seal_file() {
       bad=1
     fi
   done
+  if [[ "$request_protocol" == 2 ]]; then
+    for label in Execution-Epoch Source-Design-Content-SHA256 Implementation-Adjustments-SHA256 \
+      Task-Handoff-Commit Preserved-Reviews-SHA256 Final-Delta-SHA256; do
+      expected=$(markdown_field_value "$request" "$label")
+      actual=$(markdown_field_value "$file" "$label")
+      if [[ "$actual" != "$expected" ]]; then
+        fail "$expected_id seal: $label does not match the sealed request"
+        bad=1
+      fi
+    done
+  fi
   if ! printf '%s\n' "$sealed_at" | grep -Eq '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'; then
     fail "$expected_id seal: Sealed-At must be UTC RFC3339"
     bad=1
@@ -1700,8 +2634,10 @@ check_review_chain() {
   local previous='none' request_hash status invalid bad=0 bind_current
   local request_tasks request_baseline request_base request_subject
   local request_spec request_plan request_attachments
+  local request_protocol request_epoch request_source request_handoff request_preserved
   local previous_tasks='' previous_baseline='' previous_base='' previous_subject=''
   local previous_spec='' previous_plan='' previous_attachments='' previous_round='' previous_verdict_file=''
+  local previous_epoch='' previous_source='' previous_handoff='' previous_preserved=''
   CHAIN_BASELINE=''
   CHAIN_BASE=''
   CHAIN_SUBJECT=''
@@ -1743,6 +2679,17 @@ check_review_chain() {
       request_baseline=$(markdown_field_value "$request" 'Implementation-Baseline')
       request_base=$(markdown_field_value "$request" 'Base-Commit')
       request_subject=$(markdown_field_value "$request" 'Subject-Commit')
+      request_protocol=$(markdown_field_value "$request" 'Protocol-Version')
+      request_epoch=$(markdown_field_value "$request" 'Execution-Epoch')
+      request_source=$(markdown_field_value "$request" 'Source-Design-Content-SHA256')
+      request_handoff=$(markdown_field_value "$request" 'Task-Handoff-Commit')
+      request_preserved=$(markdown_field_value "$request" 'Preserved-Reviews-SHA256')
+      if [[ "$i" -gt 0 && "$request_protocol" == 2 ]] &&
+         [[ "$request_epoch" != "$previous_epoch" || "$request_source" != "$previous_source" ||
+            "$request_handoff" != "$previous_handoff" || "$request_preserved" != "$previous_preserved" ]]; then
+        fail "$id round $round: remediation must retain execution epoch, Source, task handoff, and preserved-review bindings"
+        bad=1
+      fi
       if [[ "$i" -gt 0 && "$scope" == 'TASKS' ]]; then
         if [[ "$request_tasks" == "$previous_tasks" ]]; then
           fail "$id round $round: remediation must change Tasks-Definition-SHA256"
@@ -1773,7 +2720,7 @@ check_review_chain() {
         check_implementation_remediation_commit "$id" "$previous_round" "$previous_verdict_file" \
           "$previous_subject" "$request_subject"
       fi
-      check_verdict_file "$verdict" "$id" "$round" "$request_hash" "$scope"
+      check_verdict_file "$verdict" "$id" "$round" "$request_hash" "$scope" "$request_protocol"
       status=$CHECKED_VERDICT_STATUS
       if [[ "$i" -lt "$seal_number" && "$status" != 'BLOCKED' ]]; then
         fail "$id: every pre-seal review round must be BLOCKED"
@@ -1790,6 +2737,10 @@ check_review_chain() {
       previous_baseline=$request_baseline
       previous_base=$request_base
       previous_subject=$request_subject
+      previous_epoch=$request_epoch
+      previous_source=$request_source
+      previous_handoff=$request_handoff
+      previous_preserved=$request_preserved
       previous_round=$round
       previous_verdict_file=$verdict
     elif [[ -e "$request" || -e "$verdict" ]]; then
@@ -1841,6 +2792,17 @@ append_current_artifact_files() {
       [[ -f "$path" ]] || continue
       printf '%s\t%s\n' "$GIT_FEATURE_REL/${path#"$FEATURE_DIR"/}" "$path" >> "$manifest"
     done < <(find "$FEATURE_DIR/contracts" -type f -print)
+  fi
+  [[ -f "$EXECUTION_STATE" ]] && printf '%s\t%s\n' "$GIT_FEATURE_REL/.gatespec/execution-state.md" "$EXECUTION_STATE" >> "$manifest"
+  [[ -f "$IA_FILE" ]] && printf '%s\t%s\n' "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" "$IA_FILE" >> "$manifest"
+  if [[ -d "$FEATURE_DIR/.gatespec/revalidations" ]]; then
+    while IFS= read -r path; do
+      [[ -f "$path" ]] || continue
+      printf '%s\t%s\n' "$GIT_FEATURE_REL/${path#"$FEATURE_DIR"/}" "$path" >> "$manifest"
+    done < <(find "$FEATURE_DIR/.gatespec/revalidations" -type f -print)
+  fi
+  if [[ -f "$SOURCE_ENTRY" ]]; then
+    append_review_chain_files 'REV-SOURCE' "$manifest" || return 1
   fi
 }
 
@@ -1912,7 +2874,7 @@ check_task_review_git_state() {
 check_baseline_task_seal() {
   local baseline="$1" seal_rel latest path parent_fields bad=0
   local changed="$TMP_DIR/baseline-changed-paths" allowed="$TMP_DIR/baseline-allowed-paths"
-  local manifest="$TMP_DIR/baseline-required-files" rel current baseline_tasks_hash
+  local manifest="$TMP_DIR/baseline-required-files" rel current baseline_tasks_hash task_ia_hash
   if [[ -z "$GIT_ROOT" ]] || ! resolve_git_feature_paths; then
     fail "implementation baseline: feature directory is outside its Git worktree"
     return
@@ -1940,6 +2902,8 @@ check_baseline_task_seal() {
   printf '%s\n' \
     "$GIT_FEATURE_REL/spec.md" "$GIT_FEATURE_REL/plan.md" "$GIT_FEATURE_REL/tasks.md" \
     >> "$allowed"
+  [[ -f "$EXECUTION_STATE" ]] && printf '%s\n' "$GIT_FEATURE_REL/.gatespec/execution-state.md" >> "$allowed"
+  [[ -f "$IA_FILE" ]] && printf '%s\n' "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" >> "$allowed"
   for path in research.md data-model.md quickstart.md; do
     [[ -f "$FEATURE_DIR/$path" ]] && printf '%s\n' "$GIT_FEATURE_REL/$path" >> "$allowed"
   done
@@ -1957,6 +2921,8 @@ check_baseline_task_seal() {
     [[ -n "$path" ]] || continue
     case "$path" in
       "$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/"*) ;;
+      "$GIT_FEATURE_REL/.gatespec/reviews/REV-SOURCE/"*) ;;
+      "$GIT_FEATURE_REL/.gatespec/revalidations/"*) ;;
       *)
         if ! grep -Fqx -- "$path" "$allowed"; then
           fail "implementation baseline: checkpoint commit contains disallowed path '$path'"
@@ -1984,6 +2950,14 @@ check_baseline_task_seal() {
         fail "implementation baseline: tasks.md normalized definition differs from the current sealed definition"
         bad=1
       fi
+    elif [[ "$rel" == "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" ]]; then
+      task_ia_hash=$(markdown_field_value \
+        "$FEATURE_DIR/.gatespec/reviews/REV-TASKS/round-$(markdown_field_value "$FEATURE_DIR/.gatespec/reviews/REV-TASKS/seal.md" 'Round')-request.md" \
+        'Implementation-Adjustments-SHA256')
+      if [[ "$task_ia_hash" != $(file_hash "$TMP_DIR/baseline-required-blob") ]]; then
+        fail "implementation baseline: IA snapshot differs from the empty REV-TASKS baseline"
+        bad=1
+      fi
     elif ! cmp -s "$TMP_DIR/baseline-required-blob" "$current"; then
       fail "implementation baseline: current '$rel' differs from its baseline blob"
       bad=1
@@ -2009,7 +2983,7 @@ checkpoint_checkbox_normalized() {
 }
 
 check_post_subject_delta() {
-  local subject="$1" id="$2" repo_abs feature_abs feature_rel review_prefix tasks_rel
+  local subject="$1" id="$2" repo_abs feature_abs feature_rel review_prefix tasks_rel acceptance_rel
   local path bad=0 list="$TMP_DIR/post-subject-paths"
   if [[ -z "$GIT_ROOT" ]]; then
     fail "$id: cannot validate post-subject delta outside a Git worktree"
@@ -2023,6 +2997,7 @@ check_post_subject_delta() {
   esac
   review_prefix="$feature_rel/.gatespec/reviews/"
   tasks_rel="$feature_rel/tasks.md"
+  acceptance_rel="$feature_rel/.gatespec/acceptance.md"
   : > "$list"
   git -C "$GIT_ROOT" -c core.quotepath=false diff --no-renames --name-only "$subject" >> "$list" 2>/dev/null || {
     fail "$id: cannot inspect worktree delta after subject commit"
@@ -2035,6 +3010,12 @@ check_post_subject_delta() {
     case "$path" in
       "$review_prefix"*) ;;
       "$tasks_rel") ;;
+      "$acceptance_rel")
+        if [[ "$MODE" != acceptance ]]; then
+          fail "$id: acceptance metadata exists before the acceptance phase"
+          bad=1
+        fi
+        ;;
       *)
         fail "$id: post-subject path '$path' is neither review metadata nor tasks.md"
         bad=1
@@ -2129,8 +3110,11 @@ check_implementation_review_gate() {
         fail "$id: all implementation seals must share one Implementation-Baseline"
         bad=1
       fi
-      if [[ "$id" == 'REV-FINAL' && "$CHAIN_BASE" != "$baseline" ]]; then
-        fail "$id: Base-Commit must equal Implementation-Baseline for cumulative final review"
+      if [[ "$id" == 'REV-FINAL' && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && "$CHAIN_BASE" != "$CURRENT_ORIGINAL_BASELINE" ]]; then
+        fail "$id: Protocol v2 Base-Commit must equal Original-Implementation-Baseline"
+        bad=1
+      elif [[ "$id" == 'REV-FINAL' && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 && "$CHAIN_BASE" != "$baseline" ]]; then
+        fail "$id: Protocol v1 Base-Commit must equal Implementation-Baseline for cumulative final review"
         bad=1
       elif [[ "$id" == 'REV-FINAL' && -n "$previous_subject" ]] &&
            ! git -C "$GIT_ROOT" merge-base --is-ancestor "$previous_subject" "$CHAIN_SUBJECT" 2>/dev/null; then
@@ -2155,11 +3139,14 @@ check_implementation_review_gate() {
   fi
   if [[ -n "$selected_subject" ]]; then
     check_post_subject_delta "$selected_subject" "$REVIEW_ID"
-    if [[ "$MODE" == 'implementation-review' ]]; then
+    if [[ "$MODE" == 'implementation-review' || "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ]]; then
       check_committed_implementation_state "$selected_subject" "$REVIEW_ID"
     fi
   fi
   if [[ "$REVIEW_ID" == 'REV-FINAL' ]]; then
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && -f "$SOURCE_ENTRY" && -n "$selected_subject" ]]; then
+      check_source_final_paths "$selected_subject"
+    fi
     unchecked=$(grep -cE '^- \[ \] T[0-9][0-9][0-9]([[:space:]]|$)' "$TASKS" || true)
     if [[ "$unchecked" -ne 0 ]]; then
       fail "tasks.md: REV-FINAL requires every valid task checkbox to be complete"
@@ -2169,6 +3156,92 @@ check_implementation_review_gate() {
     fi
   fi
   [[ "$bad" -eq 0 ]] && pass "$REVIEW_ID: implementation seal chain is continuous through the requested checkpoint"
+}
+
+check_acceptance_gate() {
+  local context='acceptance.md' protocol status accepted_at spec_hash plan_hash attachments_hash tasks_hash
+  local epoch source_hash ia_hash original subject seal_hash review_commit final_delta actual_final
+  local final_dir="$FEATURE_DIR/.gatespec/reviews/REV-FINAL" seal="$FEATURE_DIR/.gatespec/reviews/REV-FINAL/seal.md"
+  local round request head parent latest seal_rel acceptance_rel changed parent_fields dirty invalid bad=0
+  echo ""
+  echo "Implementation Acceptance Gate: $ACCEPTANCE"
+  if [[ ! -f "$ACCEPTANCE" ]]; then fail "$context: explicit final user acceptance is missing"; return; fi
+  invalid=$(awk '
+    /^[[:space:]]*$/ {next}
+    NR == 1 && $0 == "# GateSpec Implementation Acceptance" {next}
+    /^- \*\*(Protocol-Version|Status|Accepted-At|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Original-Implementation-Baseline|Final-Subject-Commit|REV-FINAL-Seal-SHA256|Final-Review-Commit|Final-Delta-SHA256|Acceptance-SHA256)\*\*: `[^`]+`$/ {next}
+    {print NR ":" $0}
+  ' "$ACCEPTANCE")
+  [[ -z "$invalid" ]] || { fail "$context: only the canonical acceptance fields are allowed"; bad=1; }
+  check_ordered_fields "$ACCEPTANCE" "$context" \
+    'Protocol-Version' 'Status' 'Accepted-At' 'Spec-Content-SHA256' 'Plan-Content-SHA256' \
+    'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' 'Execution-Epoch' \
+    'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+    'Original-Implementation-Baseline' 'Final-Subject-Commit' 'REV-FINAL-Seal-SHA256' \
+    'Final-Review-Commit' 'Final-Delta-SHA256' 'Acceptance-SHA256'
+  protocol=$(markdown_field_value "$ACCEPTANCE" 'Protocol-Version')
+  status=$(markdown_field_value "$ACCEPTANCE" 'Status')
+  accepted_at=$(markdown_field_value "$ACCEPTANCE" 'Accepted-At')
+  spec_hash=$(markdown_field_value "$ACCEPTANCE" 'Spec-Content-SHA256')
+  plan_hash=$(markdown_field_value "$ACCEPTANCE" 'Plan-Content-SHA256')
+  attachments_hash=$(markdown_field_value "$ACCEPTANCE" 'Design-Attachments-SHA256')
+  tasks_hash=$(markdown_field_value "$ACCEPTANCE" 'Tasks-Definition-SHA256')
+  epoch=$(markdown_field_value "$ACCEPTANCE" 'Execution-Epoch')
+  source_hash=$(markdown_field_value "$ACCEPTANCE" 'Source-Design-Content-SHA256')
+  ia_hash=$(markdown_field_value "$ACCEPTANCE" 'Implementation-Adjustments-SHA256')
+  original=$(markdown_field_value "$ACCEPTANCE" 'Original-Implementation-Baseline')
+  subject=$(markdown_field_value "$ACCEPTANCE" 'Final-Subject-Commit')
+  seal_hash=$(markdown_field_value "$ACCEPTANCE" 'REV-FINAL-Seal-SHA256')
+  review_commit=$(markdown_field_value "$ACCEPTANCE" 'Final-Review-Commit')
+  final_delta=$(markdown_field_value "$ACCEPTANCE" 'Final-Delta-SHA256')
+  [[ "$protocol" == "${ACTIVE_REVIEW_PROTOCOL:-1}" ]] || { fail "$context: Protocol-Version must match the final review"; bad=1; }
+  [[ "$status" == Accepted ]] || { fail "$context: Status must be Accepted"; bad=1; }
+  printf '%s\n' "$accepted_at" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || { fail "$context: Accepted-At must be UTC RFC3339"; bad=1; }
+  [[ "$spec_hash" == "$CURRENT_SPEC_HASH" ]] || { fail "$context: Spec hash is stale"; bad=1; }
+  [[ "$plan_hash" == "$CURRENT_PLAN_HASH" ]] || { fail "$context: Plan hash is stale"; bad=1; }
+  [[ "$attachments_hash" == "$CURRENT_ATTACHMENTS_HASH" ]] || { fail "$context: Design Attachments hash is stale"; bad=1; }
+  [[ "$tasks_hash" == "$CURRENT_TASKS_HASH" ]] || { fail "$context: Tasks definition hash is stale"; bad=1; }
+  round=$(markdown_field_value "$seal" 'Round')
+  request="$final_dir/round-${round}-request.md"
+  [[ -f "$request" ]] || { fail "$context: sealed REV-FINAL request is missing"; return; }
+  [[ "$subject" == $(markdown_field_value "$request" 'Subject-Commit') ]] || { fail "$context: Final Subject does not match REV-FINAL"; bad=1; }
+  [[ "$seal_hash" == $(markdown_field_value "$seal" 'Seal-SHA256') ]] || { fail "$context: REV-FINAL seal hash mismatch"; bad=1; }
+  if [[ "$protocol" == 2 ]]; then
+    [[ "$epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution Epoch is stale"; bad=1; }
+    [[ "$original" == "$CURRENT_ORIGINAL_BASELINE" ]] || { fail "$context: Original Baseline is stale"; bad=1; }
+    [[ "$source_hash" == $(markdown_field_value "$request" 'Source-Design-Content-SHA256') ]] || { fail "$context: Source hash does not match REV-FINAL"; bad=1; }
+    [[ "$ia_hash" == $(markdown_field_value "$request" 'Implementation-Adjustments-SHA256') ]] || { fail "$context: IA hash does not match REV-FINAL"; bad=1; }
+  else
+    [[ "$epoch" == not-applicable && "$source_hash" == not-applicable && "$ia_hash" == not-applicable ]] || { fail "$context: Protocol v1 Source/IA/epoch fields must be not-applicable"; bad=1; }
+    [[ "$original" == $(markdown_field_value "$request" 'Implementation-Baseline') ]] || { fail "$context: legacy Original Baseline must equal Implementation Baseline"; bad=1; }
+  fi
+  if ! is_git_oid "$subject" || ! is_git_oid "$original" || ! is_git_oid "$review_commit"; then
+    fail "$context: baseline, subject, and final review commit must be Git OIDs"; bad=1
+  else
+    actual_final=$(git_final_delta_hash "$GIT_ROOT" "$original" "$subject") || actual_final=''
+    [[ "$final_delta" == "$actual_final" ]] || { fail "$context: Final-Delta-SHA256 is stale"; bad=1; }
+  fi
+  if ! resolve_git_feature_paths; then fail "$context: feature is outside its Git worktree"; return; fi
+  seal_rel="$GIT_FEATURE_REL/.gatespec/reviews/REV-FINAL/seal.md"
+  acceptance_rel="$GIT_FEATURE_REL/.gatespec/acceptance.md"
+  latest=$(git -C "$GIT_ROOT" log -1 --format=%H -- "$seal_rel" 2>/dev/null || true)
+  [[ "$review_commit" == "$latest" ]] || { fail "$context: Final-Review-Commit is not the latest commit that touched the final seal"; bad=1; }
+  head=$(git -C "$GIT_ROOT" rev-parse HEAD 2>/dev/null || true)
+  parent=$(git -C "$GIT_ROOT" rev-parse HEAD^ 2>/dev/null || true)
+  [[ "$parent" == "$review_commit" ]] || { fail "$context: acceptance commit must directly follow Final-Review-Commit"; bad=1; }
+  parent_fields=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$head" 2>/dev/null | awk '{print NF+0}')
+  [[ "$parent_fields" -eq 2 ]] || { fail "$context: acceptance metadata commit must not be a root or merge commit"; bad=1; }
+  changed=$(git -C "$GIT_ROOT" -c core.quotepath=false diff-tree --no-commit-id --name-only -r "$head" 2>/dev/null || true)
+  if [[ $(printf '%s\n' "$changed" | awk 'NF {n++} END {print n+0}') -ne 1 || "$changed" != "$acceptance_rel" ]]; then
+    fail "$context: acceptance commit must be metadata-only and change only acceptance.md"; bad=1
+  fi
+  if ! git -C "$GIT_ROOT" show "HEAD:$acceptance_rel" > "$TMP_DIR/head-acceptance" 2>/dev/null || ! cmp -s "$TMP_DIR/head-acceptance" "$ACCEPTANCE"; then
+    fail "$context: current acceptance.md must exactly match tracked HEAD"; bad=1
+  fi
+  dirty=$(git -C "$GIT_ROOT" -c core.quotepath=false status --porcelain=v1 --untracked-files=all 2>/dev/null || true)
+  [[ -z "$dirty" ]] || { fail "$context: acceptance requires a clean worktree with no untracked paths"; bad=1; }
+  check_self_hash "$ACCEPTANCE" 'Acceptance-SHA256' "$context"
+  [[ "$bad" -eq 0 ]] && pass "$context: explicit user acceptance binds all artifacts, REV-FINAL, commit chain, and raw tree delta"
 }
 
 check_design_gate() {
@@ -2196,17 +3269,66 @@ check_spec_gate
 if [[ "$MODE" != 'spec' && "$FAILURES" -eq 0 ]]; then
   check_design_gate
 fi
-if [[ "$MODE" != 'spec' && "$MODE" != 'design' && "$FAILURES" -eq 0 ]]; then
+if [[ "$FAILURES" -eq 0 ]]; then
+  case "$MODE" in
+    source-candidate)
+      check_source_structure candidate
+      [[ "$FAILURES" -eq 0 ]] && check_execution_state source-candidate
+      ;;
+    source-review)
+      check_source_structure reviewed
+      [[ "$FAILURES" -eq 0 ]] && check_execution_state source-review
+      [[ "$FAILURES" -eq 0 ]] && check_source_review_chain
+      ;;
+    source)
+      check_source_structure approved
+      [[ "$FAILURES" -eq 0 ]] && check_execution_state source-approved
+      [[ "$FAILURES" -eq 0 ]] && check_source_review_chain
+      ;;
+    tasks-structure|task-review|implementation-candidate|implementation-review|acceptance-candidate|acceptance)
+      if [[ -f "$SOURCE_ENTRY" ]]; then
+        check_source_structure approved
+        [[ "$FAILURES" -eq 0 ]] && check_source_review_chain
+      fi
+      ;;
+  esac
+fi
+if [[ ( "$MODE" == 'tasks-structure' || "$MODE" == 'task-review' ||
+        "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ||
+        "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ) && "$FAILURES" -eq 0 ]]; then
   check_tasks_structure
+fi
+if [[ "$MODE" == 'task-review' && "$FAILURES" -eq 0 ]]; then
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    check_execution_state downstream
+    [[ "$FAILURES" -eq 0 ]] && check_implementation_adjustments yes
+    if [[ -d "$FEATURE_DIR/checklists" ]] && grep -R -nE '^- \[ \]' "$FEATURE_DIR/checklists" >/dev/null 2>&1; then
+      fail "checklists: every checklist item must be complete before speckit.implement"
+    else
+      pass "checklists: no incomplete checklist item remains"
+    fi
+  fi
 fi
 if [[ "$MODE" == 'task-review' && "$FAILURES" -eq 0 ]]; then
   check_task_review_gate yes
 fi
-if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ) && "$FAILURES" -eq 0 ]]; then
+if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ||
+        "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ) && "$FAILURES" -eq 0 ]]; then
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    check_execution_state downstream
+    [[ "$FAILURES" -eq 0 ]] && check_implementation_adjustments no
+  fi
+fi
+if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ||
+        "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ) && "$FAILURES" -eq 0 ]]; then
   check_task_review_gate no
   if [[ "$FAILURES" -eq 0 ]]; then
+    case "$MODE" in acceptance-candidate|acceptance) REVIEW_ID='REV-FINAL' ;; esac
     check_implementation_review_gate
   fi
+fi
+if [[ "$MODE" == 'acceptance' && "$FAILURES" -eq 0 ]]; then
+  check_acceptance_gate
 fi
 
 echo ""

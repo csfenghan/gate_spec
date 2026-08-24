@@ -1,5 +1,6 @@
 # Development-only files excluded from `specify extension add` installs
 tests/
+specs/
 spec-kit/
 .github/
 .git/

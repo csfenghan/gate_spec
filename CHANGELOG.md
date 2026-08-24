@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 (2026-08-24)
+
+- Added optional `gatespec.source-design`, enabled solely by the authoritative
+  Source entry, with SD-F/U/FLOW/ALG/FAIL/TEST traceability, dual reviewed/
+  approved bundle hashes, fresh REV-SOURCE, and explicit whole-Source approval.
+- Added conditional Source `before_tasks` and final acceptance
+  `after_implement` entries while preserving six upstream hook events and the
+  unchanged native tasks → analyze → implement sequence.
+- Added Review Protocol v2 execution epochs, immutable Original Baseline,
+  Task-Handoff commits, preserved-review bindings, bounded IA snapshots, and
+  raw NUL-delimited Final-Delta-SHA256; legacy v1 remains valid without Source.
+- Made implementation checkpoint PASS continue automatically; material or
+  uncertain Source deviation blocks into the archive/compensating-commit/
+  revalidation revision flow.
+- Added explicit whole-delivery acceptance bound to artifacts, REV-FINAL,
+  final review commit, Subject, Source/IA, and raw tree delta in a metadata-only
+  local commit.
+- Added source/v2/acceptance checker fixtures, multi-hook installer coverage,
+  Source templates, dispatcher rendering, and `specs/` package exclusion.
+
 ## 0.5.1 (2026-08-19)
 
 - Replaced schema-like conversational R/D cards with concise, domain-native

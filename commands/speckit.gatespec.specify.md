@@ -61,13 +61,14 @@ If a current GateSpec spec exists:
   that it is approved (including any user-constraint drift warning and the
   `--refresh-constraints` option), and hand off to
   `__SPECKIT_COMMAND_GATESPEC_PLAN__`.
-- `--revise`: archive an existing `tasks.md` and non-archive contents of
-  `.gatespec/reviews/` before editing, change Status to Draft, clear Gate
-  Approval, preserve the prior approved snapshot for a diff, and use diff-only
-  re-approval.
+- `--revise`: archive Source Design, `tasks.md`, current reviews,
+  revalidations, execution state, IA, and acceptance before editing; change
+  Status to Draft, clear Gate Approval, preserve the prior approved snapshot
+  for a diff, and use diff-only re-approval.
 - `--restart`: archive spec.md plus existing plan/design/downstream artifacts
   (`plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`,
-  `tasks.md`, and non-archive contents of `.gatespec/reviews/`) under the
+  `tasks.md`, current reviews/revalidations, execution state, IA, and
+  acceptance) under the
   feature's `.gatespec/archive/<timestamp>-restart/`, then rebuild spec.md from
   the template. Never recursively archive an existing archive.
 
@@ -106,7 +107,8 @@ conflict and its resolution explicitly.
   change is warning-only; use `--refresh-constraints` to reopen and replace the
   snapshot. A project constitution change forces requirements re-approval.
   Treat a changed project constraints file as project policy and likewise
-  reopen approval. Archive stale tasks and current reviews before reopening.
+  reopen approval. Archive stale Source/tasks, reviews/revalidations,
+  execution state, IA, and acceptance before reopening.
 
 `--refresh-constraints` implies the `--revise` diff flow and recomputes all
 three sources. Never append personal constraints into the constitution.

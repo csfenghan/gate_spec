@@ -1,9 +1,13 @@
 ---
 description: "GateSpec gated plan: scenario-first human decisions, recorded engineering determinations, safe resume, and explicit design approval."
 handoffs:
-  - label: Create Tasks
+  - label: Add Source Design
+    agent: speckit.gatespec.source-design
+    prompt: Add the optional reviewed source-level sub-contract before native tasks.
+    send: true
+  - label: Skip to Native Tasks
     agent: speckit.tasks
-    prompt: Break the approved plan into tasks, then run analyze before implement.
+    prompt: Skip optional Source Design, create native tasks, then run analyze before implement.
     send: true
 scripts:
   sh: ../../scripts/bash/setup-plan.sh --json
@@ -67,7 +71,8 @@ Resume behavior:
   answer, and unaffected design statement.
 - Valid Approved-Design with a valid Implementation Review Contract and no
   flag, plus Design Evidence Schema 1: keep every design artifact read-only and
-  hand off to native tasks.
+  offer exactly two next steps—`__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__` or
+  native `__SPECKIT_COMMAND_TASKS__`. Do not select Source Design implicitly.
 - Approved-Design created before the Implementation Review Contract or Design
   Evidence Schema 1 existed must not hand off. There is no legacy bypass:
   automatically archive tasks and non-archive review contents, apply the
@@ -75,11 +80,12 @@ Resume behavior:
   baseline), add the missing contract/evidence without rewriting unaffected
   decisions, and require one diff-only Design re-approval before regenerating
   native tasks.
-- `--revise`: archive existing `tasks.md` and `.gatespec/reviews/`, change plan
-  Status to Draft, clear Gate Approval, retain a baseline, and use diff-only
-  re-approval.
+- `--revise`: archive existing Source bundle, `tasks.md`, current reviews,
+  revalidations, execution state, IA, and acceptance, change plan Status to
+  Draft, clear Gate Approval, retain a baseline, and use diff-only re-approval.
 - `--restart`: archive plan.md, research.md, data-model.md, contracts/,
-  quickstart.md, tasks.md, and the non-archive contents of `.gatespec/reviews/`
+  quickstart.md, tasks.md, reviews, revalidations, execution state, IA, and
+  acceptance
   under `.gatespec/archive/<timestamp>-restart/`, then initialize a fresh
   GateSpec plan. Do not alter the approved spec or recursively archive an
   existing archive.
@@ -308,7 +314,7 @@ bounded Implementation Freedom before approval. Never render an Implementation
 Freedom as if the contract skeleton had already fixed it.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
-version `1` and the fixed Review Root, task-review, isolation, parallel, Git,
+version `2` and the fixed Review Root, task-review, isolation, parallel, Git,
 and remediation values from the template. Select actual Required Checkpoints:
 `REV-FOUNDATION`, one `REV-US<n>` per implemented user-story phase, and exactly
 one final `REV-FINAL`. Give every ID exactly one non-empty Checkpoint Test
@@ -353,9 +359,12 @@ On explicit approval only:
    `shasum -a 256` fallback.
 4. Run `check-gate.sh design <feature-dir>` and resolve every structural error.
 
-Run peer `after_plan` hooks, report completion, then follow the unchanged native
-sequence: `__SPECKIT_COMMAND_TASKS__` → `__SPECKIT_COMMAND_ANALYZE__` →
-`__SPECKIT_COMMAND_IMPLEMENT__`. Required GateSpec hooks structurally check the
-native tasks, obtain a fresh-context task-review receipt after analyze, verify
-that receipt before implement, and require the explicit REV-FINAL receipt after
-implement. GateSpec adds no tasks or implement replacement.
+Run peer `after_plan` hooks and report completion. Offer
+`__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__` (optional source-level contract)
+and `__SPECKIT_COMMAND_TASKS__` (skip it) as explicit alternatives. Both paths
+converge unchanged at native `__SPECKIT_COMMAND_TASKS__` →
+`__SPECKIT_COMMAND_ANALYZE__` → `__SPECKIT_COMMAND_IMPLEMENT__`. Required
+GateSpec hooks check native tasks, obtain fresh REV-TASKS, automate fresh
+implementation checkpoints, require REV-FINAL, and finally invoke
+`__SPECKIT_COMMAND_GATESPEC_ACCEPT_IMPLEMENTATION__` for one whole-delivery
+user acceptance. GateSpec does not replace upstream tasks/analyze/implement.

@@ -24,3 +24,11 @@ checkpoint blocked even if its local checkbox is present; a REV-FINAL failure
 prevents the native implement completion report. Never create, revert, or
 repair request, verdict, seal, source, tasks, or approval content from this
 command. Candidate rollback belongs only to the precommit coordinator flow.
+
+For Protocol v2 this also verifies epoch, Task-Handoff, Source/IA/preserved
+bindings, the IA blob in Subject-Commit, Original-Baseline cumulative ancestry,
+raw Final-Delta-SHA256, and—when Source is enabled—the exact equality of actual
+product paths with Source Change Manifest plus IA paths. Semantic conformance
+still comes from the fresh reviewer. This priority-10 after hook is followed by
+the priority-20 whole-delivery acceptance hook; REV-FINAL PASS alone is not
+GateSpec completion.
