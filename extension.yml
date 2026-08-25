@@ -3,8 +3,8 @@ schema_version: "1.0"
 extension:
   id: "gatespec"
   name: "GateSpec"
-  version: "0.6.0"
-  description: "Scenario-first gated requirements/design, optional reviewed Source Design, fresh implementation reviews, and explicit final delivery acceptance"
+  version: "0.7.0"
+  description: "Scenario-first gated requirements/design, bounded task closure, fresh implementation reviews, and explicit final delivery acceptance"
   category: "process"
   effect: "read-write"
   author: "harry.feng"
@@ -58,6 +58,10 @@ provides:
       file: "commands/speckit.gatespec.check-tasks.md"
       description: "Internal fixed post-tasks structure hook entry"
 
+    - name: "speckit.gatespec.refine-tasks"
+      file: "commands/speckit.gatespec.refine-tasks.md"
+      description: "Internal fixed post-tasks closure audit and task-only refinement entry"
+
     - name: "speckit.gatespec.review-tasks"
       file: "commands/speckit.gatespec.review-tasks.md"
       description: "Fresh-context semantic review of native tasks after analyze"
@@ -102,12 +106,17 @@ hooks:
       optional: false
       description: "Conditional Source Design Gate: when enabled, Source and REV-SOURCE must be approved/current"
 
-  # Native tasks.md remains upstream-owned. This validates only the approved
-  # review contract and the explicit non-parallel checkpoint task rows.
+  # Native tasks.md remains upstream-generated. GateSpec first performs one
+  # bounded task-only closure pass, then validates the resulting contract.
   after_tasks:
-    command: "speckit.gatespec.check-tasks"
-    optional: false
-    description: "Task Structure Gate: native tasks must encode every approved review checkpoint"
+    - command: "speckit.gatespec.refine-tasks"
+      priority: 10
+      optional: false
+      description: "Task Refinement: close the fixed task audit and prior-review findings without changing approved artifacts"
+    - command: "speckit.gatespec.check-tasks"
+      priority: 20
+      optional: false
+      description: "Task Structure Gate: native tasks and closure matrices must encode the approved review contract"
 
   # Native analyze remains the cross-artifact analysis step. Its completion is
   # followed by a separate fresh-context GateSpec task verdict.

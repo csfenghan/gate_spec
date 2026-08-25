@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 (2026-08-24)
+
+- Added a bounded `after_tasks` refinement pass that may edit only native
+  `tasks.md`, followed by deterministic validation of exact Checkpoint Closure
+  and Prior Review Closure matrices.
+- Made task review exhaustive across fixed closure categories and preserved
+  every basis-matching current or `*-retask` archived BLOCKER as a raw-item
+  hash, source location, checkpoint deadline, and concrete remediation tasks.
+- Added `gatespec.plan --retask` for pre-implementation recovery after an
+  exhausted round-02 BLOCKED chain or an unused PASS handoff, with lossless
+  local archival, v1 compatibility, and v2 epoch/state reset.
+- Added legacy PASS grandfathering, strict retask eligibility checks, Closure
+  and historical-chain counterexamples, Source/v2 coverage, and rendered-hook
+  installer tests while retaining the native tasks → analyze → implement
+  sequence.
+- Made retask preflight fail closed over full committed task/IA history,
+  index-hidden drift, exact archived evidence trees, historical v2 handoff
+  snapshots, and Original/epoch continuity so a reported PASS remains
+  executable by the immediately following archive/reset step.
+
 ## 0.6.0 (2026-08-24)
 
 - Added optional `gatespec.source-design`, enabled solely by the authoritative

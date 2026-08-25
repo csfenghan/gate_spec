@@ -20,8 +20,9 @@ scripts:
 $ARGUMENTS
 ```
 
-Recognized workflow flags are `--revise` and `--restart`. Reject unknown flags,
-reject using both together, and consider remaining non-empty input.
+Recognized workflow flags are `--revise`, `--restart`, and `--retask`. Reject
+unknown flags and any combination of workflow flags. `--retask` accepts no
+remaining text; for the other paths, consider remaining non-empty input.
 
 ## Step 0: Requirements Gate and peer hooks
 
@@ -35,10 +36,241 @@ Failure blocks planning. A truly unmarked auto-track spec exits silently; in
 that case explain that gated plan requires a GateSpec spec and stop unless the
 user explicitly starts the gated requirements flow.
 
-Inspect `.specify/extensions.yml` and run other extensions' `before_plan`
-hooks in declared order, skipping every `speckit.gatespec.*` hook (the inline
-gate above already covers GateSpec). Respect required/optional failures. Run
-peer `after_plan` hooks only after successful Design approval.
+Inspect `.specify/extensions.yml`. On the ordinary plan paths, run other
+extensions' `before_plan` hooks in declared order, skipping every
+`speckit.gatespec.*` hook (the inline gate above already covers GateSpec). On
+`--retask`, discover the same peer hooks now but defer invoking them until the
+read-only eligibility proof in Step 0R succeeds; then revalidate the proof after
+they return. Respect required/optional failures. Run peer `after_plan` hooks
+only after successful Design approval or a successful retask archive/reset
+below.
+
+## Step 0R: bounded `--retask` recovery
+
+Skip this step when `--retask` is absent. This branch runs before `{SCRIPT}` or
+any planning write, keeps every approved artifact byte-for-byte read-only, and
+exits after recovery; it never enters Design clarification or approval.
+
+### Read-only eligibility preflight
+
+Resolve the current feature directly from `.specify/feature.json` without
+running setup-plan. Canonicalize it, require regular non-symlink spec.md,
+plan.md, and tasks.md beneath that directory, and identify the repository root
+and feature-relative path. Require an attached local branch: the exact result
+of `git symbolic-ref -q HEAD` must match `refs/heads/*`. Never run this path in
+detached HEAD and never fetch, pull, push, stash, reset, rebase, clean, switch,
+or rewrite history.
+
+First run:
+
+```bash
+bash .specify/extensions/gatespec/scripts/bash/check-gate.sh retask-eligible <feature-dir>
+```
+
+A silent zero is the unmarked upstream no-op. On nonzero, print every
+diagnostic verbatim and stop before creating or changing anything; do not
+reinterpret a mechanical failure as prompt-level permission. This dedicated
+mode validates the old checkpoint structure and permits a legacy retask
+candidate only when both Closure sections are absent; if either section exists,
+both must be complete and valid. For this branch, do not call ordinary `tasks-structure` here,
+because its normal post-refinement matrix requirement is not the retask entry
+contract. Run only the Design and conditional Source checks as defense in depth
+and apply the non-mechanical Git/archive checks below. Require current Approved
+Requirements and Approved Design; when Source is enabled, require current
+Approved Source Design, REV-SOURCE, and all current revalidations. Select the
+active downstream protocol without coercion: an approved Protocol 1 Plan with
+no Source entry remains v1; a Protocol 2 Plan or any Source entry is v2. Reject
+an unknown version, v1 plus Source, or any inconsistent mixed state.
+
+Validate the complete current REV-TASKS request/verdict/seal chain and permit
+exactly one terminal state:
+
+1. round 02 is a schema-valid, self-hash-valid `BLOCKED` verdict chained to
+   valid rounds 00 and 01, and no REV-TASKS seal exists; or
+2. one schema-valid, self-hash-valid current `PASS` verdict has a valid seal,
+   `check-gate.sh task-review <feature-dir>` accepts it, and implementation has
+   not begun.
+
+No review, an orphan/invalid chain, a PASS without its valid current seal, a
+seal for BLOCKED, or terminal round 00/01 BLOCKED is ineligible. Rounds 00 and
+01 still have the normal task-remediation path; round 02 requires this explicit
+recovery rather than an illegal fourth review round.
+
+Then prove all of the following before creating the archive directory:
+
+- Every T### checklist row, including checkpoints, is `[ ]`; there is no
+  completed task, implementation Subject, implementation request/verdict/seal,
+  acceptance.md, nonempty IA entry, or other evidence that product work began.
+  Direct entries under the current `.gatespec/reviews/` other than REV-TASKS
+  and, when enabled, approved REV-SOURCE are forbidden. Existing contents below
+  `.gatespec/archive/**` and current `.gatespec/revalidations/**` are not current
+  review directories and are inspected only by their own rules.
+- spec.md, plan.md, every current design attachment, and, when applicable, the
+  complete Source bundle, REV-SOURCE chain/seal, and revalidation files are
+  tracked at HEAD and their current bytes equal the HEAD blobs. Enumerate files
+  explicitly; a containing tracked directory is not evidence.
+- Repository status contains changes only at current tasks.md,
+  `.gatespec/reviews/REV-TASKS/**`, and, for v2, execution-state.md plus an
+  absent or canonical-empty implementation-adjustments.md. Any other staged,
+  unstaged, untracked, ignored-but-relevant, conflicted, symlink, or special
+  path blocks. For every allowed source that has an index entry, require its
+  raw index blob to equal its raw working-tree bytes even when Git status hides
+  it through `assume-unchanged` or `skip-worktree`; an `MM`, `AM`, staged
+  deletion, ancestor symlink, or any other independent index/worktree snapshot
+  blocks. An untracked regular source has no index snapshot. Do not discard
+  either byte set or silently choose one. An archive source carrying either
+  index flag blocks even when its bytes currently match, because its move/
+  deletion cannot be staged reproducibly. Validate every existing
+  `YYYYMMDDTHHMMSSZ-retask` archive now, including its complete review chain,
+  exact file tree, tracked raw HEAD bytes, unchecked task snapshot, v1/v2
+  payload shape, and canonical empty IA; legacy absence of Closure never
+  postpones this proof until refinement.
+- The pre-implementation baseline is reproducible. For v2, validate the
+  execution-state self-hash, unchanged resolvable Original Implementation
+  Baseline, current Source/preserved-review bindings, Task-Handoff commit, and
+  Original-to-handoff ancestry. The first committed execution state anchors E1
+  and Original Baseline; every later committed state keeps Original unchanged
+  and advances the epoch by at most one, and archived retask states must agree.
+  Require the Task-Handoff commit itself to be one-parent, contain current
+  immutable artifacts, the round-00 task definition, canonical pending state,
+  and canonical empty IA, and change only that closed handoff set. Inspect every
+  commit in `Original-Implementation-Baseline..HEAD`; allow only the closed v2
+  artifact/Source/review/archive/state set, reject every product/test/build/
+  runtime-config or unrelated path, and inspect each tasks/IA blob so a checked
+  task or nonempty IA cannot be committed and later restored. For v1, validate
+  the current round-00 first-add history (or a chain wholly absent from HEAD),
+  but start the product proof at the unique first Plan add: include that root
+  commit, or use its sole parent. Inspect it and every descendant through HEAD
+  against the closed legacy evidence set: spec.md, plan.md, tasks.md, standard
+  Design attachments, contracts/, checklists/, validation/, feature archive/,
+  `.gatespec/archive/`, and current REV-TASKS receipts. Inspect every historical
+  tasks blob for completed checkboxes. An unknown feature file or any outside
+  path blocks. For a v1 PASS, additionally require clean HEAD to be the seal
+  path's exact latest-touch Implementation Baseline. If any baseline proof is
+  non-unique, nonlinear, content-stale, or incomplete, block.
+  Every archived v2 cycle independently revalidates its one-parent historical
+  handoff and Original→handoff→HEAD ancestry, and recomputes its round-00 Spec,
+  Plan, Design Attachments, Source, preserved-review, tasks, pending state, and
+  exact empty-IA snapshots. V2 archive epochs strictly increase in timestamp
+  order and must occur in committed execution-state history; stale v1 archives
+  remain self-validated but do not become v2 Closure findings.
+
+After every proof above succeeds, invoke the deferred peer `before_plan` hooks
+in order. Snapshot status and immutable blobs before each hook. After all hooks
+return, rerun `retask-eligible` and every non-mechanical status, history,
+regular-file, and immutable-blob proof against the resulting repository bytes;
+never archive from the stale pre-hook inventory. A required hook failure or any
+new ineligible delta blocks before GateSpec creates the archive, and GateSpec
+does not try to undo a peer hook's own side effects.
+
+Only then read one UTC timestamp in exact `YYYYMMDDTHHMMSSZ` form and set the
+sole target to `.gatespec/archive/<timestamp>-retask/`. The target and every
+mapped destination must be absent. A collision blocks: never overwrite, merge,
+add a suffix, or wait/retry for a new timestamp.
+
+### Lossless archive and protocol reset
+
+Preserve the exact feature-relative layout under the new archive:
+
+```text
+.gatespec/archive/<UTC-YYYYMMDDTHHMMSSZ>-retask/
+├── tasks.md
+├── reviews/REV-TASKS/**
+├── execution-state.md                 # v2 only
+└── implementation-adjustments.md      # Source-enabled v2 only
+```
+
+The actual mappings are `tasks.md` to archive `tasks.md`, current
+`.gatespec/reviews/REV-TASKS/` to archive `reviews/REV-TASKS/`, and, for v2,
+current `.gatespec/execution-state.md` and an existing canonical-empty
+`.gatespec/implementation-adjustments.md` to `execution-state.md` and
+`implementation-adjustments.md` directly under the archive root. Do not retain
+an internal `.gatespec/` prefix and do not create a manifest or retask receipt.
+After its files are removed, remove the exact now-empty current
+`.gatespec/reviews/REV-TASKS/` leaf with a non-recursive empty-directory
+operation and require that path to be absent; an empty current review directory
+must not survive into regenerated tasks. Remove the parent `.gatespec/reviews/`
+only if it is then empty, and never remove REV-SOURCE or another entry.
+
+Reject symlinks and special files. First copy every source regular file to its
+one absent destination. In an ephemeral `/tmp` inventory, compare the exact
+C-sorted relative file set, file mode, and each raw file SHA-256 between source
+and archive. For an indexed source, also record and compare its already-proven
+identical index blob. Only after every byte is proven equal may the exact
+original files be removed; never recursively remove a broad or unresolved
+path. Preserve the archive on a later failure so recovery remains possible.
+
+Once any original source has been removed, never restart the initial
+`--retask` preflight, because current tasks may intentionally be absent. If a
+failure occurs before the archive commit, keep the reserved archive and exact
+staged/working state, reconstruct the source inventory from the archive plus
+Git index, resolve only the reported external blocker, repeat the byte/mode and
+closed-staged-path checks, and retry the same archive commit subject. If the
+commit exists but post-commit verification or a peer `after_plan` hook fails,
+keep it, verify its archive directly, rerun only the failed peer hook when safe,
+then continue to native tasks; do not create a second archive or increment v2
+again. A failure report must state whether the archive commit exists, its OID
+when present, the reserved archive path, exact remaining staged/unstaged paths,
+and this recovery boundary so a new top-level session does not rerun
+`--retask` or discard preserved bytes.
+
+For v1, create no execution state or IA and keep all downstream receipts v1.
+For v2, read the archived valid execution state, increment E<n> exactly once,
+and recreate current `.gatespec/execution-state.md` in the canonical field
+order used by Source Design:
+
+```markdown
+# GateSpec Execution State
+- **Protocol-Version**: `2`
+- **Execution-Epoch**: `E<n+1>`
+- **Original-Implementation-Baseline**: `<unchanged archived value>`
+- **Task-Handoff-Commit**: `pending`
+- **Source-Design-Content-SHA256**: `<current Source hash|not-applicable>`
+- **Preserved-Reviews-SHA256**: `<hash derived from current revalidations|not-applicable>`
+- **Execution-State-SHA256**: `<hash of all prior bytes>`
+```
+
+Recompute the preserved value from the current C-sorted raw revalidation
+manifest; never copy a stale value merely because it was archived. A retask
+does not revise Source or a preserved implementation Subject, so immutable
+revalidation evidence remains under the `E<m>` directory in which it was
+created. Each item continues to bind its own creation epoch, preserved Subject,
+and the unchanged current Source hash; it is not relabelled to the new task
+cycle's `E<n+1>`. The new execution state binds the complete raw manifest
+independently through Preserved-Reviews-SHA256. With Source enabled, recreate
+implementation-adjustments.md from the installed IA template as its exact
+canonical empty state bound to the new epoch and current Source hash. Without
+Source, IA remains absent and `not-applicable`. Reproduce both self/raw hashes
+before staging.
+
+### Independent local archive commit
+
+Stage only the exact removals, archive additions, and v2 reset files described
+above. Compare the staged path set to that closed allowlist and inspect the
+cached diff; any approved-artifact edit, product path, unrelated path, or
+additional deletion blocks the commit. Before committing, verify every staged
+archive blob and mode against the `/tmp` inventory. Create exactly one
+independent local commit with subject:
+
+```text
+gatespec: archive REV-TASKS cycle for retask
+```
+
+After committing, read each archive blob and mode back from the new commit,
+reproduce the same inventory, and fail closed if a filter, hook, or staging
+error changed or omitted a byte; do not remove the already-created archive
+commit on a later failure.
+
+Never amend or combine it with another change. Never push this or any GateSpec
+checkpoint commit. Require the archive commit to
+contain the verified archive plus reset as one atomic recovery boundary and
+require a clean worktree/index afterward. Run the already-discovered peer
+`after_plan` hooks in order, still skipping every `speckit.gatespec.*` hook;
+required failures block the completion report, and final repository status must
+remain clean. Then stop this command and direct the user to native
+`__SPECKIT_COMMAND_TASKS__` followed by `__SPECKIT_COMMAND_ANALYZE__`. New
+tasks must carry every basis-matching blocker from current `*-retask` archives
+in GateSpec Prior Review Closure; the new cycle starts at REV-TASKS round 00.
 
 ## Step 1: load context, constraints, and resume state
 

@@ -107,6 +107,18 @@ make_tasks() {
   cat > "$feature/tasks.md" <<'EOF'
 # Tasks: Config hot reload
 
+## GateSpec Checkpoint Closure *(gatespec: mandatory)*
+| Checkpoint | Contract refs | Production tasks | Verification tasks |
+|---|---|---|---|
+| REV-FOUNDATION | D1, FR-002 | T001 | T002 |
+| REV-US1 | FR-001 | none | T004 |
+| REV-FINAL | SC-001 | none | T006 |
+
+## GateSpec Prior Review Closure *(gatespec: mandatory)*
+| Finding-SHA256 | Source verdict | Required-before | Remediation tasks |
+|---|---|---|---|
+| none | none | none | none |
+
 ## Phase 1: Setup
 
 - [ ] T001 Create the feature scaffolding
@@ -126,6 +138,61 @@ make_tasks() {
 - [ ] T006 Run complete feature validation
 - [ ] T007 GateSpec review checkpoint REV-FINAL: run speckit.gatespec.review-implementation --scope REV-FINAL and require .gatespec/reviews/REV-FINAL/seal.md before continuing
 EOF
+}
+
+strip_task_closure() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^## GateSpec Checkpoint Closure \*\(gatespec: mandatory\)\*$/ {skip=1; next}
+    skip && /^## Phase / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+strip_prior_closure() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^## GateSpec Prior Review Closure \*\(gatespec: mandatory\)\*$/ {skip=1; next}
+    skip && /^## Phase / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+set_prior_finding() {
+  local file="$1" digest="$2" source="$3" required="$4" tasks="$5" tmp="$1.tmp"
+  awk -v row="| $digest | $source | $required | $tasks |" '
+    $0 == "| none | none | none | none |" {print row; next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+clear_prior_finding() {
+  local file="$1" digest="$2" tmp="$1.tmp"
+  awk -v prefix="| $digest |" '
+    index($0, prefix) == 1 {print "| none | none | none | none |"; next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+append_prior_finding() {
+  local file="$1" after_source="$2" digest="$3" source="$4" required="$5" tasks="$6" tmp="$1.tmp"
+  awk -v marker="| $digest | $after_source |" \
+      -v row="| $digest | $source | $required | $tasks |" '
+    {print}
+    index($0, marker) == 1 {print row}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+remove_prior_source() {
+  local file="$1" source="$2" tmp="$1.tmp"
+  awk -v needle="| $source |" '
+    index($0, needle) > 0 {next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+blocker_digest() {
+  printf '%s\n' "$@" | sha_stream | awk '{print $1}'
 }
 
 changed_paths_digest() {
@@ -443,6 +510,7 @@ expect_silent spec "$TEST_TMP/auto" "unmarked auto-track requirements are truly 
 expect_silent design "$TEST_TMP/auto" "unmarked auto-track design is truly silent"
 expect_silent tasks-structure "$TEST_TMP/auto" "unmarked auto-track tasks structure is truly silent"
 expect_silent task-review "$TEST_TMP/auto" "unmarked auto-track task review is truly silent"
+expect_silent retask-eligible "$TEST_TMP/auto" "unmarked auto-track retask eligibility is truly silent"
 expect_silent implementation-candidate "$TEST_TMP/auto" "unmarked auto-track implementation candidate is truly silent"
 expect_silent implementation-review "$TEST_TMP/auto" "unmarked auto-track implementation review is truly silent"
 
@@ -451,6 +519,7 @@ rewrite "$TEST_TMP/displaced-marker/spec.md" '1{h;d;};2{G;}'
 expect fail spec "$TEST_TMP/displaced-marker" "marker on a later line fails" "not line 1"
 expect fail tasks-structure "$TEST_TMP/displaced-marker" "displaced marker fails before tasks structure" "not line 1"
 expect fail task-review "$TEST_TMP/displaced-marker" "displaced marker fails before task review" "not line 1"
+expect fail retask-eligible "$TEST_TMP/displaced-marker" "displaced marker fails before retask eligibility" "not line 1"
 expect fail implementation-candidate "$TEST_TMP/displaced-marker" "displaced marker fails before implementation candidate" "not line 1"
 expect fail implementation-review "$TEST_TMP/displaced-marker" "displaced marker fails before implementation review" "not line 1"
 
@@ -792,6 +861,177 @@ clone_good tasks-good
 make_tasks "$TEST_TMP/tasks-good"
 expect pass tasks-structure "$TEST_TMP/tasks-good" "native task checkpoints pass structural validation"
 
+clone_good closure-missing
+make_tasks "$TEST_TMP/closure-missing"
+strip_task_closure "$TEST_TMP/closure-missing/tasks.md"
+expect fail tasks-structure "$TEST_TMP/closure-missing" "new tasks require both mandatory Closure sections"
+
+clone_good closure-half
+make_tasks "$TEST_TMP/closure-half"
+strip_prior_closure "$TEST_TMP/closure-half/tasks.md"
+expect fail tasks-structure "$TEST_TMP/closure-half" "one Closure section cannot use legacy grandfathering"
+
+clone_good closure-header
+make_tasks "$TEST_TMP/closure-header"
+rewrite "$TEST_TMP/closure-header/tasks.md" 's/| Contract refs |/| Contract references |/'
+expect fail tasks-structure "$TEST_TMP/closure-header" "Closure table headers are exact protocol tokens"
+
+clone_good closure-placement
+make_tasks "$TEST_TMP/closure-placement"
+awk '
+  /^## Phase 1/ {print "## Native Notes"; print ""}
+  {print}
+' "$TEST_TMP/closure-placement/tasks.md" > "$TEST_TMP/closure-placement/tasks.md.tmp"
+mv "$TEST_TMP/closure-placement/tasks.md.tmp" "$TEST_TMP/closure-placement/tasks.md"
+expect fail tasks-structure "$TEST_TMP/closure-placement" "Closure sections must be the final two H2 sections before phases"
+
+clone_good closure-checkpoint-order
+make_tasks "$TEST_TMP/closure-checkpoint-order"
+rewrite "$TEST_TMP/closure-checkpoint-order/tasks.md" 's/^| REV-FOUNDATION |/| REV-TEMP |/; s/^| REV-US1 |/| REV-FOUNDATION |/; s/^| REV-TEMP |/| REV-US1 |/'
+expect fail tasks-structure "$TEST_TMP/closure-checkpoint-order" "Closure checkpoint rows follow approved Plan order"
+
+clone_good closure-task-duplicate
+make_tasks "$TEST_TMP/closure-task-duplicate"
+rewrite "$TEST_TMP/closure-task-duplicate/tasks.md" 's/| REV-FOUNDATION | D1, FR-002 | T001 | T002 |/| REV-FOUNDATION | D1, FR-002 | T001 | T001, T002 |/'
+expect fail tasks-structure "$TEST_TMP/closure-task-duplicate" "each non-checkpoint task appears globally exactly once in Closure"
+
+clone_good closure-task-interval
+make_tasks "$TEST_TMP/closure-task-interval"
+rewrite "$TEST_TMP/closure-task-interval/tasks.md" 's/| REV-FOUNDATION | D1, FR-002 | T001 | T002 |/| REV-FOUNDATION | D1, FR-002 | T001 | T004 |/; s/| REV-US1 | FR-001 | none | T004 |/| REV-US1 | FR-001 | none | T002 |/'
+expect fail tasks-structure "$TEST_TMP/closure-task-interval" "Closure task assignments stay inside their strict checkpoint interval"
+
+clone_good closure-no-verification
+make_tasks "$TEST_TMP/closure-no-verification"
+rewrite "$TEST_TMP/closure-no-verification/tasks.md" 's/| REV-FINAL | SC-001 | none | T006 |/| REV-FINAL | SC-001 | T006 | none |/'
+expect fail tasks-structure "$TEST_TMP/closure-no-verification" "every checkpoint Closure row has verification work"
+
+clone_good closure-ref-coverage
+make_tasks "$TEST_TMP/closure-ref-coverage"
+rewrite "$TEST_TMP/closure-ref-coverage/tasks.md" 's/| REV-FINAL | SC-001 |/| REV-FINAL | D1 |/'
+expect fail tasks-structure "$TEST_TMP/closure-ref-coverage" "Closure refs cover every Requirements and approved Design ID"
+
+clone_good closure-ref-order
+make_tasks "$TEST_TMP/closure-ref-order"
+rewrite "$TEST_TMP/closure-ref-order/tasks.md" 's/| REV-FOUNDATION | D1, FR-002 |/| REV-FOUNDATION | FR-002, D1 |/'
+expect fail tasks-structure "$TEST_TMP/closure-ref-order" "Closure refs use C-sort and comma-space formatting"
+
+clone_good closure-ref-range
+make_tasks "$TEST_TMP/closure-ref-range"
+rewrite "$TEST_TMP/closure-ref-range/tasks.md" 's/| REV-FOUNDATION | D1, FR-002 |/| REV-FOUNDATION | D1-FR-002 |/'
+expect fail tasks-structure "$TEST_TMP/closure-ref-range" "Closure refs reject ranges and require original IDs"
+
+clone_good prior-multiline
+make_tasks "$TEST_TMP/prior-multiline"
+write_pass_review "$TEST_TMP/prior-multiline" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+awk '
+  $0 == "- BLOCKER: fixture remediation required" {
+    print "- BLOCKER: Add rollback verification before implementation."
+    print "  The verification must retain an active connection across reload."
+    next
+  }
+  {print}
+' "$TEST_TMP/prior-multiline/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  > "$TEST_TMP/prior-multiline/.gatespec/reviews/REV-TASKS/round-00-verdict.md.tmp"
+mv "$TEST_TMP/prior-multiline/.gatespec/reviews/REV-TASKS/round-00-verdict.md.tmp" \
+  "$TEST_TMP/prior-multiline/.gatespec/reviews/REV-TASKS/round-00-verdict.md"
+seal_self_hash "$TEST_TMP/prior-multiline/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256'
+multiline_finding=$(blocker_digest \
+  '- BLOCKER: Add rollback verification before implementation.' \
+  '  The verification must retain an active connection across reload.')
+set_prior_finding "$TEST_TMP/prior-multiline/tasks.md" "$multiline_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T002
+expect pass tasks-structure "$TEST_TMP/prior-multiline" \
+  "Prior Review Closure binds the full LF-delimited multiline BLOCKER item"
+
+clone_good prior-blank-continuation
+make_tasks "$TEST_TMP/prior-blank-continuation"
+write_pass_review "$TEST_TMP/prior-blank-continuation" REV-TASKS TASKS \
+  not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' \
+  '- Fixture limitation.' 00 none BLOCKED
+awk '
+  $0 == "- BLOCKER: fixture remediation required" {
+    print "- BLOCKER: Add rollback verification before implementation."
+    print ""
+    print "  This visually indented paragraph must not escape the blocker digest."
+    next
+  }
+  {print}
+' "$TEST_TMP/prior-blank-continuation/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  > "$TEST_TMP/prior-blank-continuation/.gatespec/reviews/REV-TASKS/round-00-verdict.md.tmp"
+mv "$TEST_TMP/prior-blank-continuation/.gatespec/reviews/REV-TASKS/round-00-verdict.md.tmp" \
+  "$TEST_TMP/prior-blank-continuation/.gatespec/reviews/REV-TASKS/round-00-verdict.md"
+seal_self_hash \
+  "$TEST_TMP/prior-blank-continuation/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  'Verdict-SHA256'
+blank_truncated_finding=$(blocker_digest \
+  '- BLOCKER: Add rollback verification before implementation.')
+set_prior_finding "$TEST_TMP/prior-blank-continuation/tasks.md" "$blank_truncated_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T002
+expect fail tasks-structure "$TEST_TMP/prior-blank-continuation" \
+  "a blank line cannot make an indented BLOCKER continuation disappear from Closure binding"
+
+clone_good prior-duplicate-text
+make_tasks "$TEST_TMP/prior-duplicate-text"
+write_pass_review "$TEST_TMP/prior-duplicate-text" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+duplicate_round00_hash=$(receipt_field \
+  "$TEST_TMP/prior-duplicate-text/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+rewrite "$TEST_TMP/prior-duplicate-text/tasks.md" \
+  's/Create the feature scaffolding/Create duplicate-finding scaffolding/'
+write_pass_review "$TEST_TMP/prior-duplicate-text" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 01 "$duplicate_round00_hash" BLOCKED
+duplicate_finding=$(blocker_digest '- BLOCKER: fixture remediation required')
+set_prior_finding "$TEST_TMP/prior-duplicate-text/tasks.md" "$duplicate_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T001
+append_prior_finding "$TEST_TMP/prior-duplicate-text/tasks.md" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' "$duplicate_finding" \
+  '.gatespec/reviews/REV-TASKS/round-01-verdict.md#B01' REV-FOUNDATION T002
+expect pass tasks-structure "$TEST_TMP/prior-duplicate-text" \
+  "identical blocker text in distinct verdict items remains two Closure rows"
+
+cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-finding-hash"
+rewrite "$TEST_TMP/prior-finding-hash/tasks.md" "s/$multiline_finding/0000000000000000000000000000000000000000000000000000000000000000/"
+expect fail tasks-structure "$TEST_TMP/prior-finding-hash" "Prior Review Closure rejects a stale finding hash"
+
+cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-finding-missing"
+clear_prior_finding "$TEST_TMP/prior-finding-missing/tasks.md" "$multiline_finding"
+expect fail tasks-structure "$TEST_TMP/prior-finding-missing" "current matching REV-TASKS blockers cannot be omitted from Closure"
+
+cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-remediation-late"
+rewrite "$TEST_TMP/prior-remediation-late/tasks.md" 's/| REV-FOUNDATION | T002 |$/| REV-FOUNDATION | T004 |/'
+expect fail tasks-structure "$TEST_TMP/prior-remediation-late" \
+  "finding remediation must exist, be executable, and precede Required-before"
+
+cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-archive"
+mkdir -p "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/reviews"
+cp "$TEST_TMP/prior-archive/tasks.md" \
+  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/tasks.md"
+clear_prior_finding \
+  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/tasks.md" \
+  "$multiline_finding"
+mv "$TEST_TMP/prior-archive/.gatespec/reviews/REV-TASKS" \
+  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/reviews/REV-TASKS"
+rewrite "$TEST_TMP/prior-archive/tasks.md" \
+  's|.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01|.gatespec/archive/20260824T031415Z-retask/reviews/REV-TASKS/round-00-verdict.md#B01|'
+expect pass tasks-structure "$TEST_TMP/prior-archive" "retask archives remain finding sources"
+
+cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-restart-archive"
+mkdir -p "$TEST_TMP/prior-restart-archive/.gatespec/archive/20260824T031415Z-restart/reviews"
+mv "$TEST_TMP/prior-restart-archive/.gatespec/reviews/REV-TASKS" \
+  "$TEST_TMP/prior-restart-archive/.gatespec/archive/20260824T031415Z-restart/reviews/REV-TASKS"
+clear_prior_finding "$TEST_TMP/prior-restart-archive/tasks.md" "$multiline_finding"
+expect pass tasks-structure "$TEST_TMP/prior-restart-archive" "non-retask archives are not Prior Review finding sources"
+
+clone_good prior-retask-missing-review
+make_tasks "$TEST_TMP/prior-retask-missing-review"
+mkdir -p "$TEST_TMP/prior-retask-missing-review/.gatespec/archive/20260824T031416Z-retask"
+cp "$TEST_TMP/prior-retask-missing-review/tasks.md" \
+  "$TEST_TMP/prior-retask-missing-review/.gatespec/archive/20260824T031416Z-retask/tasks.md"
+expect fail tasks-structure "$TEST_TMP/prior-retask-missing-review" \
+  "a retask archive cannot erase blocker lineage by omitting its REV-TASKS directory"
+
 clone_good mapping-pipeline
 make_tasks "$TEST_TMP/mapping-pipeline"
 rewrite "$TEST_TMP/mapping-pipeline/plan.md" 's#| REV-FOUNDATION | bash tests/unit.sh |#| REV-FOUNDATION | bash tests/unit.sh | tee unit.log |#'
@@ -847,6 +1087,14 @@ else
 fi
 
 rc=0
+bash "$SCRIPT" retask-eligible "$TEST_TMP/tasks-good" REV-TASKS > "$TEST_TMP/out" 2>&1 || rc=$?
+if [[ "$rc" -eq 2 ]] && grep -F 'does not accept a REV-ID' "$TEST_TMP/out" >/dev/null; then
+  PASS=$((PASS + 1)); echo "✓ retask-eligible rejects a REV-ID"
+else
+  FAIL=$((FAIL + 1)); echo "✗ retask-eligible REV-ID CLI boundary"; sed 's/^/    /' "$TEST_TMP/out"
+fi
+
+rc=0
 bash "$SCRIPT" spec "$TEST_TMP/good" REV-FINAL extra > "$TEST_TMP/out" 2>&1 || rc=$?
 if [[ "$rc" -eq 2 ]] && grep -F 'Usage:' "$TEST_TMP/out" >/dev/null; then
   PASS=$((PASS + 1)); echo "✓ checker rejects a fourth argument"
@@ -862,6 +1110,547 @@ write_pass_review "$task_feature" REV-TASKS TASKS not-applicable not-applicable 
 git -C "$task_repo" add -- .
 git -C "$task_repo" commit -qm 'Seal task review baseline'
 expect_review pass task-review "$task_feature" REV-TASKS "valid task-review receipt is clean, tracked, and bound"
+
+grandfather_repo="$TEST_TMP/grandfather-repo"
+grandfather_feature=$(init_feature_repo "$grandfather_repo")
+strip_task_closure "$grandfather_feature/tasks.md"
+write_pass_review "$grandfather_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$grandfather_repo" add -- .
+git -C "$grandfather_repo" commit -qm 'Legacy task review before Closure schema'
+expect pass tasks-structure "$grandfather_feature" \
+  "legacy tasks without Closure are grandfathered only by a current tracked clean PASS seal"
+expect pass retask-eligible "$grandfather_feature" \
+  "a valid legacy PASS handoff remains retask-eligible before implementation"
+
+grandfather_archive_repo="$TEST_TMP/grandfather-canonical-retask-archive-repo"
+git clone -q --local --no-hardlinks "$grandfather_repo" "$grandfather_archive_repo"
+git -C "$grandfather_archive_repo" config user.name 'GateSpec Fixture'
+git -C "$grandfather_archive_repo" config user.email 'fixture@example.invalid'
+grandfather_archive_feature="$grandfather_archive_repo/specs/001-hot-reload"
+grandfather_archive_root="$grandfather_archive_feature/.gatespec/archive/20260824T051500Z-retask"
+mkdir -p "$grandfather_archive_root/reviews"
+cp "$grandfather_archive_feature/tasks.md" "$grandfather_archive_root/tasks.md"
+cp -R "$grandfather_archive_feature/.gatespec/reviews/REV-TASKS" \
+  "$grandfather_archive_root/reviews/REV-TASKS"
+git -C "$grandfather_archive_repo" add -- \
+  specs/001-hot-reload/.gatespec/archive/20260824T051500Z-retask
+git -C "$grandfather_archive_repo" commit -qm 'Record a canonical legacy retask archive'
+rewrite "$grandfather_archive_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+  's/2026-08-18T12:00:00Z/2026-08-20T12:00:00Z/'
+seal_self_hash "$grandfather_archive_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+  'Seal-SHA256'
+git -C "$grandfather_archive_repo" add -- \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS/seal.md
+git -C "$grandfather_archive_repo" commit -qm \
+  'Refresh the current PASS seal after canonical archival'
+expect pass tasks-structure "$grandfather_archive_feature" \
+  "a canonical legacy retask archive preserves Closure grandfathering"
+expect pass retask-eligible "$grandfather_archive_feature" \
+  "a canonical legacy retask archive remains eligible for replacement"
+
+for archive_hidden_bit in assume-unchanged skip-worktree; do
+  archive_hidden_repo="$TEST_TMP/grandfather-retask-archive-hidden-$archive_hidden_bit"
+  git clone -q --local --no-hardlinks "$grandfather_archive_repo" "$archive_hidden_repo"
+  git -C "$archive_hidden_repo" config user.name 'GateSpec Fixture'
+  git -C "$archive_hidden_repo" config user.email 'fixture@example.invalid'
+  archive_hidden_feature="$archive_hidden_repo/specs/001-hot-reload"
+  archive_hidden_review="$archive_hidden_feature/.gatespec/archive/20260824T051500Z-retask/reviews/REV-TASKS"
+  archive_hidden_verdict="$archive_hidden_review/round-00-verdict.md"
+  archive_hidden_seal="$archive_hidden_review/seal.md"
+  old_archive_verdict_hash=$(receipt_field "$archive_hidden_verdict" 'Verdict-SHA256')
+  rewrite "$archive_hidden_verdict" \
+    "s/Receipt fixture is structurally valid/Archive receipt is internally coherent under $archive_hidden_bit/"
+  seal_self_hash "$archive_hidden_verdict" 'Verdict-SHA256'
+  new_archive_verdict_hash=$(receipt_field "$archive_hidden_verdict" 'Verdict-SHA256')
+  rewrite "$archive_hidden_seal" \
+    "s/$old_archive_verdict_hash/$new_archive_verdict_hash/"
+  seal_self_hash "$archive_hidden_seal" 'Seal-SHA256'
+  git -C "$archive_hidden_repo" update-index "--$archive_hidden_bit" -- \
+    specs/001-hot-reload/.gatespec/archive/20260824T051500Z-retask/reviews/REV-TASKS/round-00-verdict.md \
+    specs/001-hot-reload/.gatespec/archive/20260824T051500Z-retask/reviews/REV-TASKS/seal.md
+  expect fail tasks-structure "$archive_hidden_feature" \
+    "tasks structure rejects internally coherent archive receipt drift hidden by $archive_hidden_bit"
+done
+
+for archive_extra in product reviews-sibling; do
+  archive_extra_repo="$TEST_TMP/grandfather-retask-archive-extra-$archive_extra"
+  git clone -q --local --no-hardlinks "$grandfather_archive_repo" "$archive_extra_repo"
+  git -C "$archive_extra_repo" config user.name 'GateSpec Fixture'
+  git -C "$archive_extra_repo" config user.email 'fixture@example.invalid'
+  archive_extra_feature="$archive_extra_repo/specs/001-hot-reload"
+  archive_extra_root="$archive_extra_feature/.gatespec/archive/20260824T051500Z-retask"
+  case "$archive_extra" in
+    product)
+      printf '%s\n' 'product content must never enter a retask archive' \
+        > "$archive_extra_root/product.cc"
+      archive_extra_date='2026-08-21T12:00:00Z'
+      ;;
+    reviews-sibling)
+      mkdir -p "$archive_extra_root/reviews/REV-FOUNDATION"
+      printf '%s\n' '# unexpected implementation review sibling' \
+        > "$archive_extra_root/reviews/REV-FOUNDATION/round-00-request.md"
+      archive_extra_date='2026-08-22T12:00:00Z'
+      ;;
+  esac
+  git -C "$archive_extra_repo" add -- \
+    specs/001-hot-reload/.gatespec/archive/20260824T051500Z-retask
+  git -C "$archive_extra_repo" commit -qm \
+    "Add forbidden $archive_extra content to the retask archive"
+  rewrite "$archive_extra_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+    "s/2026-08-20T12:00:00Z/$archive_extra_date/"
+  seal_self_hash "$archive_extra_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+    'Seal-SHA256'
+  git -C "$archive_extra_repo" add -- \
+    specs/001-hot-reload/.gatespec/reviews/REV-TASKS/seal.md
+  git -C "$archive_extra_repo" commit -qm \
+    "Refresh the PASS seal after forbidden $archive_extra archival"
+  expect fail tasks-structure "$archive_extra_feature" \
+    "tasks structure rejects a canonical retask archive plus $archive_extra content"
+  expect fail retask-eligible "$archive_extra_feature" \
+    "retask eligibility rejects a canonical archive plus $archive_extra content"
+done
+
+grandfather_bad_archive_repo="$TEST_TMP/grandfather-bad-retask-archive-repo"
+git clone -q --local --no-hardlinks "$grandfather_repo" "$grandfather_bad_archive_repo"
+git -C "$grandfather_bad_archive_repo" config user.name 'GateSpec Fixture'
+git -C "$grandfather_bad_archive_repo" config user.email 'fixture@example.invalid'
+grandfather_bad_archive_feature="$grandfather_bad_archive_repo/specs/001-hot-reload"
+mkdir -p \
+  "$grandfather_bad_archive_feature/.gatespec/archive/20260824T041500Z-retask"
+cp "$grandfather_bad_archive_feature/tasks.md" \
+  "$grandfather_bad_archive_feature/.gatespec/archive/20260824T041500Z-retask/tasks.md"
+git -C "$grandfather_bad_archive_repo" add -- \
+  specs/001-hot-reload/.gatespec/archive/20260824T041500Z-retask/tasks.md
+git -C "$grandfather_bad_archive_repo" commit -qm \
+  'Add an incomplete legacy retask archive'
+rewrite "$grandfather_bad_archive_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+  's/2026-08-18T12:00:00Z/2026-08-19T12:00:00Z/'
+seal_self_hash \
+  "$grandfather_bad_archive_feature/.gatespec/reviews/REV-TASKS/seal.md" \
+  'Seal-SHA256'
+git -C "$grandfather_bad_archive_repo" add -- \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS/seal.md
+git -C "$grandfather_bad_archive_repo" commit -qm \
+  'Refresh the legacy PASS handoff after the archive commit'
+expect fail retask-eligible "$grandfather_bad_archive_feature" \
+  "legacy Closure grandfathering cannot hide a malformed retask archive"
+
+pass_unknown_repo="$TEST_TMP/pass-unknown-receipt-repo"
+pass_unknown_feature=$(init_feature_repo "$pass_unknown_repo")
+strip_task_closure "$pass_unknown_feature/tasks.md"
+write_pass_review "$pass_unknown_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+printf '%s\n' 'unknown receipt content' \
+  > "$pass_unknown_feature/.gatespec/reviews/REV-TASKS/notes.md"
+git -C "$pass_unknown_repo" add -- .
+git -C "$pass_unknown_repo" commit -qm 'Seal task review with unknown receipt content'
+expect fail retask-eligible "$pass_unknown_feature" \
+  "sealed PASS review directories reject unknown or nested receipt content"
+
+pass_product_repo="$TEST_TMP/pass-product-cocommit-repo"
+pass_product_feature=$(init_feature_repo "$pass_product_repo")
+strip_task_closure "$pass_product_feature/tasks.md"
+write_pass_review "$pass_product_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+mkdir -p "$pass_product_repo/src"
+printf '%s\n' 'product hidden in PASS baseline' > "$pass_product_repo/src/pass-product.txt"
+git -C "$pass_product_repo" add -- .
+git -C "$pass_product_repo" commit -qm 'Seal task review together with product work'
+expect fail retask-eligible "$pass_product_feature" \
+  "v1 PASS baseline commit cannot co-commit product work with the task seal"
+
+pass_prior_product_repo="$TEST_TMP/pass-prior-product-repo"
+pass_prior_product_feature=$(init_feature_repo "$pass_prior_product_repo")
+strip_task_closure "$pass_prior_product_feature/tasks.md"
+git -C "$pass_prior_product_repo" add -- .
+git -C "$pass_prior_product_repo" commit -qm 'Record native tasks before review'
+mkdir -p "$pass_prior_product_repo/src"
+printf '%s\n' 'product committed before the PASS seal' \
+  > "$pass_prior_product_repo/src/pre-seal-product.txt"
+git -C "$pass_prior_product_repo" add -- src/pre-seal-product.txt
+git -C "$pass_prior_product_repo" commit -qm 'Begin product work before task review'
+write_pass_review "$pass_prior_product_feature" REV-TASKS TASKS \
+  not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$pass_prior_product_repo" add -- \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS
+git -C "$pass_prior_product_repo" commit -qm 'Seal task review after product work'
+expect fail retask-eligible "$pass_prior_product_feature" \
+  "v1 PASS eligibility rejects product work committed before the final seal commit"
+
+hidden_product_base_repo="$TEST_TMP/pass-hidden-product-base-repo"
+hidden_product_base_feature=$(init_feature_repo "$hidden_product_base_repo")
+mkdir -p "$hidden_product_base_repo/src"
+printf '%s\n' 'pre-existing product baseline' \
+  > "$hidden_product_base_repo/src/existing-product.cc"
+git -C "$hidden_product_base_repo" add -- src/existing-product.cc
+git -C "$hidden_product_base_repo" commit -qm 'Record pre-existing product baseline'
+write_pass_review "$hidden_product_base_feature" REV-TASKS TASKS \
+  not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$hidden_product_base_repo" add -- specs/001-hot-reload
+git -C "$hidden_product_base_repo" commit -qm \
+  'Seal a valid task review after the product baseline'
+expect pass retask-eligible "$hidden_product_base_feature" \
+  "v1 PASS permits an unchanged product path that predates the first Plan boundary"
+for hidden_product_bit in assume-unchanged skip-worktree; do
+  hidden_product_repo="$TEST_TMP/pass-hidden-product-$hidden_product_bit"
+  git clone -q --local --no-hardlinks "$hidden_product_base_repo" "$hidden_product_repo"
+  git -C "$hidden_product_repo" config user.name 'GateSpec Fixture'
+  git -C "$hidden_product_repo" config user.email 'fixture@example.invalid'
+  hidden_product_feature="$hidden_product_repo/specs/001-hot-reload"
+  git -C "$hidden_product_repo" update-index "--$hidden_product_bit" -- \
+    src/existing-product.cc
+  printf '%s\n' 'product implementation changed after task review' \
+    > "$hidden_product_repo/src/existing-product.cc"
+  expect fail retask-eligible "$hidden_product_feature" \
+    "v1 PASS rejects tracked product drift hidden by $hidden_product_bit"
+done
+
+printf '%s\n' 'dirty grandfather state' > "$grandfather_repo/untracked.txt"
+expect fail tasks-structure "$grandfather_feature" \
+  "dirty state cannot grandfather tasks that omit Closure"
+mv "$grandfather_repo/untracked.txt" "$TEST_TMP/grandfather-untracked.txt"
+
+grandfather_malformed_repo="$TEST_TMP/grandfather-malformed-repo"
+grandfather_malformed_feature=$(init_feature_repo "$grandfather_malformed_repo")
+rewrite "$grandfather_malformed_feature/tasks.md" 's/| Contract refs |/| Contract references |/'
+write_pass_review "$grandfather_malformed_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$grandfather_malformed_repo" add -- .
+git -C "$grandfather_malformed_repo" commit -qm 'Malformed Closure with current PASS receipt'
+expect fail tasks-structure "$grandfather_malformed_feature" \
+  "a PASS seal cannot grandfather partial or malformed Closure"
+expect fail retask-eligible "$grandfather_malformed_feature" \
+  "retask eligibility rejects malformed Closure even with a current PASS seal"
+
+grandfather_partial_repo="$TEST_TMP/grandfather-partial-repo"
+grandfather_partial_feature=$(init_feature_repo "$grandfather_partial_repo")
+strip_prior_closure "$grandfather_partial_feature/tasks.md"
+write_pass_review "$grandfather_partial_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$grandfather_partial_repo" add -- .
+git -C "$grandfather_partial_repo" commit -qm 'Partial Closure with current PASS receipt'
+expect fail retask-eligible "$grandfather_partial_feature" \
+  "retask eligibility never grandfathers exactly one Closure section"
+
+grandfather_indented_repo="$TEST_TMP/grandfather-indented-closure-repo"
+grandfather_indented_feature=$(init_feature_repo "$grandfather_indented_repo")
+rewrite "$grandfather_indented_feature/tasks.md" \
+  's/^## GateSpec Checkpoint Closure/ ## GateSpec Checkpoint Closure/'
+write_pass_review "$grandfather_indented_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review'
+git -C "$grandfather_indented_repo" add -- .
+git -C "$grandfather_indented_repo" commit -qm 'Seal tasks with an indented malformed Closure heading'
+expect fail retask-eligible "$grandfather_indented_feature" \
+  "indented malformed Closure headings cannot enter the legacy-absent path"
+
+retask_round_repo="$TEST_TMP/retask-round02-repo"
+retask_round_feature=$(init_feature_repo "$retask_round_repo")
+git -C "$retask_round_repo" add -- .
+git -C "$retask_round_repo" commit -qm 'Pre-review native task handoff'
+write_pass_review "$retask_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+retask_round00_hash=$(receipt_field \
+  "$retask_round_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+retask_finding=$(blocker_digest '- BLOCKER: fixture remediation required')
+rewrite "$retask_round_feature/tasks.md" 's/Create the feature scaffolding/Create the reviewed feature scaffolding/'
+set_prior_finding "$retask_round_feature/tasks.md" "$retask_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T001
+write_pass_review "$retask_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 01 "$retask_round00_hash" BLOCKED
+retask_round01_hash=$(receipt_field \
+  "$retask_round_feature/.gatespec/reviews/REV-TASKS/round-01-verdict.md" 'Verdict-SHA256')
+rewrite "$retask_round_feature/tasks.md" 's/Implement the configuration store/Implement and verify the configuration store/'
+append_prior_finding "$retask_round_feature/tasks.md" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' "$retask_finding" \
+  '.gatespec/reviews/REV-TASKS/round-01-verdict.md#B01' REV-FOUNDATION T002
+write_pass_review "$retask_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 02 "$retask_round01_hash" BLOCKED
+git -C "$retask_round_repo" add -- .
+git -C "$retask_round_repo" commit -qm 'Exhaust REV-TASKS remediation rounds'
+expect pass retask-eligible "$retask_round_feature" \
+  "a complete valid round-02 BLOCKED chain without a seal is retask-eligible"
+
+retask_checked_restored_repo="$TEST_TMP/retask-checked-then-restored-repo"
+git clone -q --local --no-hardlinks "$retask_round_repo" "$retask_checked_restored_repo"
+git -C "$retask_checked_restored_repo" config user.name 'GateSpec Fixture'
+git -C "$retask_checked_restored_repo" config user.email 'fixture@example.invalid'
+retask_checked_restored_feature="$retask_checked_restored_repo/specs/001-hot-reload"
+rewrite "$retask_checked_restored_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+git -C "$retask_checked_restored_repo" add -- specs/001-hot-reload/tasks.md
+git -C "$retask_checked_restored_repo" commit -qm 'Temporarily complete a product task'
+rewrite "$retask_checked_restored_feature/tasks.md" 's/^- \[x\] T001/- [ ] T001/'
+git -C "$retask_checked_restored_repo" add -- specs/001-hot-reload/tasks.md
+git -C "$retask_checked_restored_repo" commit -qm 'Restore the task checkbox before retask'
+expect fail retask-eligible "$retask_checked_restored_feature" \
+  "retask rejects implementation progress even when a checked task was later restored"
+
+for hidden_index_bit in assume-unchanged skip-worktree; do
+  hidden_source_repo="$TEST_TMP/retask-hidden-source-$hidden_index_bit"
+  git clone -q --local --no-hardlinks "$retask_round_repo" "$hidden_source_repo"
+  git -C "$hidden_source_repo" config user.name 'GateSpec Fixture'
+  git -C "$hidden_source_repo" config user.email 'fixture@example.invalid'
+  hidden_source_feature="$hidden_source_repo/specs/001-hot-reload"
+  hidden_request="$hidden_source_feature/.gatespec/reviews/REV-TASKS/round-02-request.md"
+  hidden_verdict="$hidden_source_feature/.gatespec/reviews/REV-TASKS/round-02-verdict.md"
+  old_hidden_tasks_hash=$(receipt_field "$hidden_request" 'Tasks-Definition-SHA256')
+  old_hidden_request_hash=$(receipt_field "$hidden_request" 'Request-SHA256')
+  rewrite "$hidden_source_feature/tasks.md" \
+    's/Implement and verify the configuration store/Implement and independently verify the configuration store/'
+  new_hidden_tasks_hash=$(normalized_tasks_digest "$hidden_source_feature/tasks.md")
+  rewrite "$hidden_request" "s/$old_hidden_tasks_hash/$new_hidden_tasks_hash/"
+  seal_self_hash "$hidden_request" 'Request-SHA256'
+  new_hidden_request_hash=$(receipt_field "$hidden_request" 'Request-SHA256')
+  rewrite "$hidden_verdict" "s/$old_hidden_request_hash/$new_hidden_request_hash/"
+  seal_self_hash "$hidden_verdict" 'Verdict-SHA256'
+  git -C "$hidden_source_repo" update-index "--$hidden_index_bit" -- \
+    specs/001-hot-reload/tasks.md \
+    specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-02-request.md \
+    specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-02-verdict.md
+  expect fail retask-eligible "$hidden_source_feature" \
+    "retask rejects archive-source drift hidden by $hidden_index_bit"
+done
+
+for hidden_clean_source_bit in assume-unchanged skip-worktree; do
+  hidden_clean_source_repo="$TEST_TMP/retask-hidden-clean-source-$hidden_clean_source_bit"
+  git clone -q --local --no-hardlinks "$retask_round_repo" "$hidden_clean_source_repo"
+  git -C "$hidden_clean_source_repo" config user.name 'GateSpec Fixture'
+  git -C "$hidden_clean_source_repo" config user.email 'fixture@example.invalid'
+  hidden_clean_source_feature="$hidden_clean_source_repo/specs/001-hot-reload"
+  git -C "$hidden_clean_source_repo" update-index "--$hidden_clean_source_bit" -- \
+    specs/001-hot-reload/tasks.md
+  expect fail retask-eligible "$hidden_clean_source_feature" \
+    "retask rejects a byte-clean tasks archive source marked $hidden_clean_source_bit"
+done
+
+make_untracked_retask_chain() {
+  local feature="$1" round00_hash round01_hash finding
+  write_pass_review "$feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+    '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+  round00_hash=$(receipt_field \
+    "$feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+  finding=$(blocker_digest '- BLOCKER: fixture remediation required')
+  rewrite "$feature/tasks.md" 's/Create the feature scaffolding/Create untracked-cycle scaffolding/'
+  set_prior_finding "$feature/tasks.md" "$finding" \
+    '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T001
+  write_pass_review "$feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+    '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 01 "$round00_hash" BLOCKED
+  round01_hash=$(receipt_field \
+    "$feature/.gatespec/reviews/REV-TASKS/round-01-verdict.md" 'Verdict-SHA256')
+  rewrite "$feature/tasks.md" 's/Implement the configuration store/Implement untracked-cycle verification/'
+  append_prior_finding "$feature/tasks.md" \
+    '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' "$finding" \
+    '.gatespec/reviews/REV-TASKS/round-01-verdict.md#B01' REV-FOUNDATION T002
+  write_pass_review "$feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+    '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 02 "$round01_hash" BLOCKED
+}
+
+retask_untracked_repo="$TEST_TMP/retask-untracked-chain-repo"
+retask_untracked_feature=$(init_feature_repo "$retask_untracked_repo")
+git -C "$retask_untracked_repo" commit --allow-empty -qm 'Repository baseline'
+git -C "$retask_untracked_repo" add -- \
+  specs/001-hot-reload/spec.md specs/001-hot-reload/plan.md
+git -C "$retask_untracked_repo" commit -qm 'Approve current plan'
+make_untracked_retask_chain "$retask_untracked_feature"
+expect pass retask-eligible "$retask_untracked_feature" \
+  "v1 wholly untracked task-review chain uses the parent of its exact Plan commit"
+
+retask_ignored_repo="$TEST_TMP/retask-ignored-untracked-chain-repo"
+cp -R "$retask_untracked_repo" "$retask_ignored_repo"
+retask_ignored_feature="$retask_ignored_repo/specs/001-hot-reload"
+printf '%s\n' 'specs/001-hot-reload/tasks.md' >> "$retask_ignored_repo/.git/info/exclude"
+expect fail retask-eligible "$retask_ignored_feature" \
+  "wholly untracked retask archive sources must not be hidden by ignore rules"
+
+retask_symlink_repo="$TEST_TMP/retask-symlink-source-repo"
+cp -R "$retask_untracked_repo" "$retask_symlink_repo"
+retask_symlink_feature="$retask_symlink_repo/specs/001-hot-reload"
+mv "$retask_symlink_feature/tasks.md" "$TEST_TMP/retask-symlink-target-tasks.md"
+ln -s "$TEST_TMP/retask-symlink-target-tasks.md" "$retask_symlink_feature/tasks.md"
+expect fail retask-eligible "$retask_symlink_feature" \
+  "retask rejects a symlinked tasks archive source"
+
+retask_untracked_product_repo="$TEST_TMP/retask-untracked-plan-product-repo"
+retask_untracked_product_feature=$(init_feature_repo "$retask_untracked_product_repo")
+git -C "$retask_untracked_product_repo" commit --allow-empty -qm 'Repository baseline'
+mkdir -p "$retask_untracked_product_repo/src"
+printf '%s\n' 'product work hidden in plan commit' \
+  > "$retask_untracked_product_repo/src/plan-product.txt"
+git -C "$retask_untracked_product_repo" add -- \
+  specs/001-hot-reload/spec.md specs/001-hot-reload/plan.md src/plan-product.txt
+git -C "$retask_untracked_product_repo" commit -qm 'Approve plan with forbidden product delta'
+make_untracked_retask_chain "$retask_untracked_product_feature"
+expect fail retask-eligible "$retask_untracked_product_feature" \
+  "v1 wholly untracked fallback inspects the Plan commit itself for product paths"
+
+retask_parent_product_repo="$TEST_TMP/retask-round00-parent-product-repo"
+retask_parent_product_feature=$(init_feature_repo "$retask_parent_product_repo")
+git -C "$retask_parent_product_repo" add -- .
+git -C "$retask_parent_product_repo" commit -qm 'Record native tasks before review'
+mkdir -p "$retask_parent_product_repo/src"
+printf '%s\n' 'product committed in the parent of the first review request' \
+  > "$retask_parent_product_repo/src/pre-round00-product.txt"
+git -C "$retask_parent_product_repo" add -- src/pre-round00-product.txt
+git -C "$retask_parent_product_repo" commit -qm \
+  'Begin product work before REV-TASKS round 00'
+make_untracked_retask_chain "$retask_parent_product_feature"
+git -C "$retask_parent_product_repo" add -- \
+  specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS
+git -C "$retask_parent_product_repo" commit -qm \
+  'Exhaust task-review rounds after product work'
+expect fail retask-eligible "$retask_parent_product_feature" \
+  "v1 BLOCKED eligibility inspects the parent commit of first-added round 00"
+
+retask_dirty_repo="$TEST_TMP/retask-allowed-dirt-repo"
+retask_dirty_feature=$(init_feature_repo "$retask_dirty_repo")
+git -C "$retask_dirty_repo" add -- .
+git -C "$retask_dirty_repo" commit -qm 'Pre-review native task handoff'
+write_pass_review "$retask_dirty_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+retask_dirty00_hash=$(receipt_field \
+  "$retask_dirty_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+git -C "$retask_dirty_repo" add -- .
+git -C "$retask_dirty_repo" commit -qm 'Record REV-TASKS round 00 finding'
+rewrite "$retask_dirty_feature/tasks.md" 's/Create the feature scaffolding/Create dirty-cycle scaffolding/'
+set_prior_finding "$retask_dirty_feature/tasks.md" "$retask_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T001
+write_pass_review "$retask_dirty_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 01 "$retask_dirty00_hash" BLOCKED
+retask_dirty01_hash=$(receipt_field \
+  "$retask_dirty_feature/.gatespec/reviews/REV-TASKS/round-01-verdict.md" 'Verdict-SHA256')
+git -C "$retask_dirty_repo" add -- .
+git -C "$retask_dirty_repo" commit -qm 'Record REV-TASKS round 01 finding'
+rewrite "$retask_dirty_feature/tasks.md" 's/Implement the configuration store/Implement dirty-cycle verification/'
+append_prior_finding "$retask_dirty_feature/tasks.md" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' "$retask_finding" \
+  '.gatespec/reviews/REV-TASKS/round-01-verdict.md#B01' REV-FOUNDATION T002
+write_pass_review "$retask_dirty_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 02 "$retask_dirty01_hash" BLOCKED
+git -C "$retask_dirty_repo" add -- \
+  specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-02-request.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS/round-02-verdict.md
+expect pass retask-eligible "$retask_dirty_feature" \
+  "retask permits staged tasks and REV-TASKS dirt when index and working bytes are identical"
+
+retask_mm_repo="$TEST_TMP/retask-mm-snapshot-repo"
+cp -R "$retask_dirty_repo" "$retask_mm_repo"
+retask_mm_feature="$retask_mm_repo/specs/001-hot-reload"
+printf '%s\n' '' >> "$retask_mm_feature/tasks.md"
+expect fail retask-eligible "$retask_mm_feature" \
+  "retask rejects MM tasks state whose index and working snapshots differ"
+
+retask_am_repo="$TEST_TMP/retask-am-snapshot-repo"
+cp -R "$retask_dirty_repo" "$retask_am_repo"
+retask_am_feature="$retask_am_repo/specs/001-hot-reload"
+printf '%s\n' '' >> \
+  "$retask_am_feature/.gatespec/reviews/REV-TASKS/round-02-verdict.md"
+expect fail retask-eligible "$retask_am_feature" \
+  "retask rejects AM receipt state whose index and working snapshots differ"
+
+retask_round01_repo="$TEST_TMP/retask-round01-repo"
+retask_round01_feature=$(init_feature_repo "$retask_round01_repo")
+git -C "$retask_round01_repo" add -- .
+git -C "$retask_round01_repo" commit -qm 'Pre-review native task handoff'
+write_pass_review "$retask_round01_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+retask_short00_hash=$(receipt_field \
+  "$retask_round01_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" 'Verdict-SHA256')
+rewrite "$retask_round01_feature/tasks.md" 's/Create the feature scaffolding/Create revised scaffolding/'
+write_pass_review "$retask_round01_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 01 "$retask_short00_hash" BLOCKED
+git -C "$retask_round01_repo" add -- .
+git -C "$retask_round01_repo" commit -qm 'Stop at REV-TASKS round 01'
+expect fail retask-eligible "$retask_round01_feature" \
+  "round-00 and round-01 BLOCKED task reviews are not retask-eligible"
+
+for retask_variant in checked impl-receipt acceptance ia product product-inside invalid orphan stale task-drift missing-prior; do
+  retask_variant_repo="$TEST_TMP/retask-$retask_variant"
+  git clone -q --local --no-hardlinks "$retask_round_repo" "$retask_variant_repo"
+  git -C "$retask_variant_repo" config user.name 'GateSpec Fixture'
+  git -C "$retask_variant_repo" config user.email 'fixture@example.invalid'
+  retask_variant_feature="$retask_variant_repo/specs/001-hot-reload"
+  case "$retask_variant" in
+    checked)
+      rewrite "$retask_variant_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+      ;;
+    impl-receipt)
+      mkdir -p "$retask_variant_feature/.gatespec/reviews/REV-FOUNDATION"
+      printf '%s\n' '# implementation review started' \
+        > "$retask_variant_feature/.gatespec/reviews/REV-FOUNDATION/round-00-request.md"
+      ;;
+    acceptance)
+      printf '%s\n' '# GateSpec Implementation Acceptance' \
+        > "$retask_variant_feature/.gatespec/acceptance.md"
+      ;;
+    ia)
+      printf '%s\n' '# GateSpec Implementation Adjustments' '## Adjustments' '- IA1: already changed' \
+        > "$retask_variant_feature/.gatespec/implementation-adjustments.md"
+      ;;
+    product)
+      mkdir -p "$retask_variant_repo/src"
+      printf '%s\n' 'product implementation began' > "$retask_variant_repo/src/product.txt"
+      ;;
+    product-inside)
+      printf '%s\n' 'product implementation hidden in feature evidence' \
+        > "$retask_variant_feature/product.cc"
+      ;;
+    invalid)
+      rewrite "$retask_variant_feature/.gatespec/reviews/REV-TASKS/round-02-verdict.md" \
+        's/fixture-REV-TASKS-02/tampered-context/'
+      ;;
+    orphan)
+      mv "$retask_variant_feature/.gatespec/reviews/REV-TASKS/round-01-request.md" \
+        "$TEST_TMP/orphan-round-01-request.md"
+      ;;
+    stale)
+      rewrite "$retask_variant_feature/plan.md" \
+        's/Add portable polling and atomic snapshot replacement/Add portable polling with a revised handoff/'
+      seal "$retask_variant_feature/plan.md"
+      ;;
+    task-drift)
+      rewrite "$retask_variant_feature/tasks.md" \
+        's/Implement and verify the configuration store/Implement a drifted unchecked configuration store/'
+      ;;
+    missing-prior)
+      remove_prior_source "$retask_variant_feature/tasks.md" \
+        '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01'
+      ;;
+  esac
+  git -C "$retask_variant_repo" add -- .
+  git -C "$retask_variant_repo" commit -qm "Make retask ineligible: $retask_variant"
+  expect fail retask-eligible "$retask_variant_feature" \
+    "retask rejects $retask_variant state"
+done
+
+retask_transient_repo="$TEST_TMP/retask-transient-product-repo"
+git clone -q --local --no-hardlinks "$retask_round_repo" "$retask_transient_repo"
+git -C "$retask_transient_repo" config user.name 'GateSpec Fixture'
+git -C "$retask_transient_repo" config user.email 'fixture@example.invalid'
+retask_transient_feature="$retask_transient_repo/specs/001-hot-reload"
+mkdir -p "$retask_transient_repo/src"
+printf '%s\n' 'transient product implementation' > "$retask_transient_repo/src/transient.txt"
+git -C "$retask_transient_repo" add -- src/transient.txt
+git -C "$retask_transient_repo" commit -qm 'Temporarily add product implementation'
+git -C "$retask_transient_repo" rm -q -- src/transient.txt
+git -C "$retask_transient_repo" commit -qm 'Delete transient product implementation'
+expect fail retask-eligible "$retask_transient_feature" \
+  "retask inspects the union of committed paths even when product work is later deleted"
+
+retask_detached_repo="$TEST_TMP/retask-detached"
+git clone -q --local --no-hardlinks "$retask_round_repo" "$retask_detached_repo"
+retask_detached_feature="$retask_detached_repo/specs/001-hot-reload"
+git -C "$retask_detached_repo" checkout -q --detach
+expect fail retask-eligible "$retask_detached_feature" "retask rejects detached HEAD"
+
+rewrite "$grandfather_feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+git -C "$grandfather_repo" add -- specs/001-hot-reload/tasks.md
+git -C "$grandfather_repo" commit -qm 'Begin implementation after PASS handoff'
+expect fail retask-eligible "$grandfather_feature" \
+  "a valid PASS handoff stops being retask-eligible after any task is checked"
 
 printf '%s\n' 'untracked handoff dirt' > "$task_repo/untracked.txt"
 expect_review fail task-review "$task_feature" REV-TASKS "task review rejects a dirty worktree" "worktree must be clean"
@@ -933,6 +1722,9 @@ git -C "$task_round_repo" commit -qm 'Repeat task review without remediation'
 expect_review fail task-review "$task_round_feature" REV-TASKS "task retry cannot repeat the same task definition" "remediation must change Tasks-Definition-SHA256"
 
 rewrite "$task_round_feature/tasks.md" 's/Create the feature scaffolding/Create reviewed feature scaffolding/'
+task_round_finding=$(blocker_digest '- BLOCKER: fixture remediation required')
+set_prior_finding "$task_round_feature/tasks.md" "$task_round_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T001
 write_pass_review "$task_round_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review' '- None' 01 "$task_blocked_hash" PASS
 git -C "$task_round_repo" add -- .

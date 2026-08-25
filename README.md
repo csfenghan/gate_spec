@@ -1,10 +1,10 @@
 # GateSpec
 
-GateSpec 0.6.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.7.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension with explicit Requirements/Design gates, optional reviewed Source
-Design, fresh task/implementation receipts, and one final whole-delivery user
-acceptance around the unchanged native execution path. It does not fork or
-modify upstream commands.
+Design, bounded native-task closure, fresh task/implementation receipts, and
+one final whole-delivery user acceptance around the unchanged native
+execution path. It does not fork or modify upstream commands.
 
 Its operating principles are human-led constraints, low auto-inference,
 discussion before execution, bounded review artifacts, and scenario-first
@@ -15,10 +15,12 @@ human decisions.
 | Path | Workflow |
 |---|---|
 | Upstream auto path | `speckit.specify → speckit.plan → speckit.tasks → speckit.analyze → speckit.implement` |
-| GateSpec path | `gatespec.specify → gatespec.plan → [optional gatespec.source-design] → speckit.tasks → speckit.analyze → speckit.implement → final acceptance` |
+| GateSpec path | `gatespec.specify → gatespec.plan → [optional gatespec.source-design] → speckit.tasks → bounded task-only refinement → speckit.analyze → speckit.implement → final acceptance` |
 
-The paths converge at native `speckit.tasks`; GateSpec adds no task generator
-or implement replacement. A gated spec is identified only by
+The paths converge at native `speckit.tasks`, which remains the only creator of
+`tasks.md`. GateSpec adds no task generator or implement replacement; its first
+`after_tasks` hook may only audit and refine that native file before the second
+hook validates it. A gated spec is identified only by
 `<!-- path: gatespec -->` on line 1. Completely unmarked specs make the gate
 checker exit successfully with no output, so upstream behavior stays untouched.
 A displaced marker is treated as a damaged gated artifact and fails.
@@ -165,10 +167,27 @@ commits without pushing, and permits at most two remediation rounds.
 Native tasks end each corresponding phase with a non-parallel row containing
 `GateSpec review checkpoint <REV-ID>:`,
 `speckit.gatespec.review-implementation`, `--scope <REV-ID>`, the matching
-`.gatespec/reviews/<REV-ID>/seal.md`, and `before continuing`. Native analyze
-still runs immediately after tasks. A separate `REV-TASKS` PASS seal is
-required before native implement begins; REV-FINAL is required before its
-completion report.
+`.gatespec/reviews/<REV-ID>/seal.md`, and `before continuing`. The priority-10
+`after_tasks` hook performs one exhaustive task-local closure pass, then the
+priority-20 hook checks the result. Only `tasks.md` may change: approved
+Requirements, Design, Source, receipts, Git state, and product files remain
+read-only. A human-choice or upstream artifact gap blocks and routes to that
+artifact's revision flow.
+
+The refined file's final two H2 sections before its first phase are exact
+Checkpoint Closure and Prior Review Closure tables. The first partitions every
+non-checkpoint task into its strict checkpoint interval, requires verification
+at every checkpoint, and covers every FR/SC/approved D plus Source IDs when
+enabled. The second navigates every basis-matching current or `*-retask` archived
+REV-TASKS `BLOCKER` item by raw-item SHA-256 to concrete remediation tasks.
+Both sections absent are grandfathered only for a complete, current, tracked,
+clean legacy PASS seal; partial or malformed Closure never is.
+These matrices are trace/navigation evidence; the fresh reviewer still judges
+whether tasks semantically close the approved contract and prior findings.
+
+Native analyze still runs after the refined tasks. A separate `REV-TASKS` PASS
+seal is required before native implement begins; REV-FINAL is required before
+its completion report.
 
 Review data is stored under
 `<feature>/.gatespec/reviews/<REV-ID>/`. Round zero uses
@@ -203,6 +222,26 @@ committed locally and rechecked as clean, tracked final state; normal execution
 continues automatically only after both checks pass. REV-FINAL is followed by
 a ≤20-line delivery summary and explicit acceptance recorded in
 `.gatespec/acceptance.md`; its local commit may change only that metadata file.
+
+If REV-TASKS reaches valid BLOCKED round 02, or a valid PASS handoff has not
+begun implementation, `gatespec.plan --retask` may regenerate tasks without
+reopening approved Design. It first requires the deterministic
+`retask-eligible` check: attached branch, tracked/current approved artifacts,
+no checked task, implementation receipt, nonempty IA, acceptance, product
+delta in the complete first-Plan/v2-Original history, or worktree change
+outside the exact retask archive set. It audits historical task/IA blobs,
+binds the v2 handoff tree and epoch/Original continuity, and validates every
+older retask archive's exact tracked tree and historical handoff before
+reporting success. One UTC
+timestamp names `.gatespec/archive/<YYYYMMDDTHHMMSSZ>-retask/`. Every staged
+archive source must have an index blob identical to its working bytes;
+ambiguous `MM`/`AM`, hidden index drift, an index flag on an archive source,
+or an ancestor symlink blocks. Any
+exact-target conflict blocks with no overwrite or retry. The archive and the regenerated v1/v2
+handoff are separate local commits and are never pushed. V1 creates no
+execution state. V2 increments the epoch, keeps Original Baseline, resets Task
+Handoff to pending, binds current Source, derives preserved reviews, and starts
+with canonical empty IA.
 
 ## Constraints
 
@@ -239,6 +278,9 @@ constraints into the constitution.
   use diff re-approval;
 - `--restart`: archive current phase/downstream artifacts, then rebuild from
   the GateSpec template;
+- `--retask` (plan): only after deterministic eligibility, archive current
+  tasks/REV-TASKS (plus v2 state/IA), then run native tasks and the normal
+  refine → check → analyze → fresh REV-TASKS sequence;
 - `--refresh-constraints` (specify): recompute the frozen basis and enter the
   revision flow.
 
@@ -293,17 +335,19 @@ Hooks never infer mode:
 - `before_plan` → `speckit.gatespec.check-requirements`;
 - `before_tasks` priority 10 → `speckit.gatespec.check-design`;
 - `before_tasks` priority 20 → conditional `speckit.gatespec.check-source-design`;
-- `after_tasks` → `speckit.gatespec.check-tasks`;
+- `after_tasks` priority 10 → `speckit.gatespec.refine-tasks` (bounded
+  `tasks.md`-only audit/refinement);
+- `after_tasks` priority 20 → `speckit.gatespec.check-tasks`;
 - `after_analyze` → `speckit.gatespec.review-tasks`;
 - `before_implement` → `speckit.gatespec.check-task-review`;
 - `after_implement` priority 10 → `speckit.gatespec.check-implementation-review`
   (fixed to REV-FINAL);
 - `after_implement` priority 20 → `speckit.gatespec.accept-implementation`.
 
-The portable checker validates structure, hash chains, freshness, and PASS
-seals. Semantic review quality and fresh-context behavior remain prompt and
-operator contracts. Missing or invalid receipts fail; they are never
-manufactured by a checker.
+The portable checker validates structure, Closure/finding identity, hash
+chains, freshness, retask eligibility, and PASS seals. Semantic review quality
+and fresh-context behavior remain prompt and operator contracts. Missing or
+invalid receipts fail; they are never manufactured by a checker.
 
 Native implement exposes no per-task hook, so REV-FOUNDATION/REV-US stage stops
 are a cooperative prompt/task contract. With hooks registered, the fixed
@@ -319,10 +363,11 @@ skipping GateSpec's own entries to avoid recursion.
 bash tests/run-all.sh
 ```
 
-This runs Bash syntax checks, ShellCheck, legacy and Source/v2/acceptance checker fixtures,
-Claude/Codex renderer checks, manifest checks, and an extension-install smoke
-test when the `specify` CLI is available. Ubuntu and macOS CI run the same
-suite and assert that it leaves the worktree clean.
+This runs Bash syntax checks, ShellCheck, legacy/Closure/retask and
+Source/v2/acceptance checker fixtures, Claude/Codex renderer checks, manifest
+checks, and an extension-install smoke test when the `specify` CLI is
+available. Ubuntu and macOS CI run the same suite and assert that it leaves the
+worktree clean.
 
 Static tests cannot prove model batching behavior. Before publishing a release
 that changes Specify/Plan interaction, run the Claude and Codex behavioral

@@ -84,6 +84,7 @@ for required in \
   "$REPO/templates/gatespec-plan-template.md" \
   "$REPO/templates/gatespec-source-design-template.md" \
   "$REPO/templates/gatespec-implementation-adjustments-template.md" \
+  "$REPO/templates/gatespec-task-closure-template.md" \
   "$REPO/scripts/bash/check-gate.sh" \
   "$REPO/reviewers/claude/gatespec-reviewer.md" \
   "$REPO/reviewers/claude/dispatcher.md" \
@@ -332,7 +333,7 @@ fi
 if [[ -n "$TARGET" ]]; then
   if [[ -d "$TARGET/.specify" ]]; then
     (cd "$TARGET" && specify extension add --dev "$REPO" --force)
-    echo "✓ project wiring: $TARGET (6 events / 8 ordered gate-review-acceptance entries active)"
+    echo "✓ project wiring: $TARGET (6 events / 9 ordered gate-refine-review-acceptance entries active)"
   else
     echo "⚠ $TARGET is not initialized for spec-kit (missing .specify/)."
     echo "  Global skills were installed, but the full plan/tasks workflow requires:"

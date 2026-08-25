@@ -188,6 +188,185 @@ replace_token() {
   ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+blocker_digest() {
+  printf '%s\n' "$@" | sha_stream | awk '{print $1}'
+}
+
+set_prior_finding() {
+  local file="$1" digest="$2" source="$3" required="$4" tasks="$5" tmp="$1.tmp"
+  awk -v row="| $digest | $source | $required | $tasks |" '
+    $0 == "| none | none | none | none |" {print row; next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+clear_prior_finding() {
+  local file="$1" digest="$2" tmp="$1.tmp"
+  awk -v prefix="| $digest |" '
+    index($0, prefix) == 1 {print "| none | none | none | none |"; next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+add_prior_finding() {
+  local file="$1" digest="$2" source="$3" required="$4" tasks="$5" tmp="$1.tmp"
+  awk -v row="| $digest | $source | $required | $tasks |" '
+    $0 == "## GateSpec Prior Review Closure *(gatespec: mandatory)*" {inside=1}
+    inside && $0 == "| none | none | none | none |" {print row; added=1; next}
+    inside && !added && /^[[:space:]]*$/ {print row; added=1; inside=0}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+write_v2_blocked_task_round() {
+  local feature="$1" round="$2" previous="$3" blocker="$4" remediation="$5"
+  local directory request verdict spec_hash plan_hash attachments_hash tasks_hash
+  local source_content ia_hash epoch handoff preserved request_hash
+  directory="$feature/.gatespec/reviews/REV-TASKS"
+  request="$directory/round-${round}-request.md"
+  verdict="$directory/round-${round}-verdict.md"
+  mkdir -p "$directory"
+  spec_hash=$(content_hash "$feature/spec.md")
+  plan_hash=$(content_hash "$feature/plan.md")
+  attachments_hash=$(printf '' | sha_stream | awk '{print $1}')
+  tasks_hash=$(normalized_tasks_hash "$feature/tasks.md")
+  source_content=$(source_hash "$feature" content)
+  ia_hash=$(file_hash "$feature/.gatespec/implementation-adjustments.md")
+  epoch=$(receipt_field "$feature/.gatespec/execution-state.md" 'Execution-Epoch')
+  handoff=$(receipt_field "$feature/.gatespec/execution-state.md" 'Task-Handoff-Commit')
+  preserved=$(receipt_field "$feature/.gatespec/execution-state.md" 'Preserved-Reviews-SHA256')
+  {
+    printf '%s\n' '- **Protocol-Version**: `2`' '- **Review-ID**: `REV-TASKS`'
+    printf -- '- **Round**: `%s`\n' "$round"
+    printf '%s\n' '- **Scope**: `TASKS`'
+    printf -- '- **Spec-Content-SHA256**: `%s`\n' "$spec_hash"
+    printf -- '- **Plan-Content-SHA256**: `%s`\n' "$plan_hash"
+    printf -- '- **Design-Attachments-SHA256**: `%s`\n' "$attachments_hash"
+    printf -- '- **Tasks-Definition-SHA256**: `%s`\n' "$tasks_hash"
+    printf -- '- **Execution-Epoch**: `%s`\n' "$epoch"
+    printf -- '- **Source-Design-Content-SHA256**: `%s`\n' "$source_content"
+    printf -- '- **Implementation-Adjustments-SHA256**: `%s`\n' "$ia_hash"
+    printf -- '- **Task-Handoff-Commit**: `%s`\n' "$handoff"
+    printf -- '- **Preserved-Reviews-SHA256**: `%s`\n' "$preserved"
+    printf '%s\n' '- **Implementation-Baseline**: `not-applicable`'
+    printf '%s\n' '- **Base-Commit**: `not-applicable`'
+    printf '%s\n' '- **Subject-Commit**: `not-applicable`'
+    printf '%s\n' '- **Task-IDs**: `none`'
+    printf '%s\n' '- **Changed-Paths-SHA256**: `not-applicable`'
+    printf '%s\n' '- **Final-Delta-SHA256**: `not-applicable`'
+    printf -- '- **Previous-Verdict-SHA256**: `%s`\n\n' "$previous"
+    printf '%s\n' '## Required Tests' '' '- Not run — task-plan review' '' '- **Request-SHA256**: `pending`'
+  } > "$request"
+  self_hash "$request" 'Request-SHA256'
+  request_hash=$(receipt_field "$request" 'Request-SHA256')
+  {
+    printf '%s\n' '- **Protocol-Version**: `2`' '- **Review-ID**: `REV-TASKS`'
+    printf -- '- **Round**: `%s`\n' "$round"
+    printf -- '- **Request-SHA256**: `%s`\n' "$request_hash"
+    printf '%s\n' '- **Reviewer-Platform**: `codex`'
+    printf -- '- **Reviewer-Context-ID**: `retask-v2-%s`\n' "$round"
+    printf '%s\n' '- **Isolation**: `fresh`' '- **Status**: `BLOCKED`' '' '## Tests Run' ''
+    printf '%s\n' '- Not run — task-plan review' '' '## Blockers' ''
+    printf -- '- BLOCKER: %s\n' "$blocker"
+    printf -- '  %s\n\n' "$remediation"
+    printf '%s\n' '## Observations' '' '- The task plan remains structurally reviewable.' ''
+    printf '%s\n' '## Limitations' '' '- Semantic freshness is adapter evidence.' ''
+    printf '%s\n' '- **Verdict-SHA256**: `pending`'
+  } > "$verdict"
+  self_hash "$verdict" 'Verdict-SHA256'
+  BLOCKED_TASK_VERDICT_HASH=$(receipt_field "$verdict" 'Verdict-SHA256')
+  BLOCKED_TASK_FINDING_HASH=$(blocker_digest "- BLOCKER: $blocker" "  $remediation")
+}
+
+write_stale_v1_task_pass_archive() {
+  local feature="$1" archive="$2" request verdict seal tasks_hash request_hash verdict_hash
+  local stale_hash=0000000000000000000000000000000000000000000000000000000000000000
+  mkdir -p "$archive/reviews/REV-TASKS"
+  cp "$feature/tasks.md" "$archive/tasks.md"
+  tasks_hash=$(normalized_tasks_hash "$archive/tasks.md")
+  request="$archive/reviews/REV-TASKS/round-00-request.md"
+  verdict="$archive/reviews/REV-TASKS/round-00-verdict.md"
+  seal="$archive/reviews/REV-TASKS/seal.md"
+  {
+    printf '%s\n' '- **Protocol-Version**: `1`' '- **Review-ID**: `REV-TASKS`' '- **Round**: `00`'
+    printf '%s\n' '- **Scope**: `TASKS`'
+    printf -- '- **Spec-Content-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Plan-Content-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Design-Attachments-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Tasks-Definition-SHA256**: `%s`\n' "$tasks_hash"
+    printf '%s\n' '- **Implementation-Baseline**: `not-applicable`'
+    printf '%s\n' '- **Base-Commit**: `not-applicable`'
+    printf '%s\n' '- **Subject-Commit**: `not-applicable`'
+    printf '%s\n' '- **Task-IDs**: `none`'
+    printf '%s\n' '- **Changed-Paths-SHA256**: `not-applicable`'
+    printf '%s\n\n' '- **Previous-Verdict-SHA256**: `none`'
+    printf '%s\n' '## Required Tests' '' '- Not run — task-plan review' '' '- **Request-SHA256**: `pending`'
+  } > "$request"
+  self_hash "$request" 'Request-SHA256'
+  request_hash=$(receipt_field "$request" 'Request-SHA256')
+  {
+    printf '%s\n' '- **Protocol-Version**: `1`' '- **Review-ID**: `REV-TASKS`' '- **Round**: `00`'
+    printf -- '- **Request-SHA256**: `%s`\n' "$request_hash"
+    printf '%s\n' '- **Reviewer-Platform**: `codex`'
+    printf '%s\n' '- **Reviewer-Context-ID**: `stale-v1-archive-00`'
+    printf '%s\n' '- **Isolation**: `fresh`' '- **Status**: `PASS`' '' '## Tests Run' ''
+    printf '%s\n' '- Not run — task-plan review' '' '## Blockers' '' '- None' ''
+    printf '%s\n' '## Observations' '' '- The legacy task basis was internally self-consistent.' ''
+    printf '%s\n' '## Limitations' '' '- This receipt predates the current v2 artifact basis.' ''
+    printf '%s\n' '- **Verdict-SHA256**: `pending`'
+  } > "$verdict"
+  self_hash "$verdict" 'Verdict-SHA256'
+  verdict_hash=$(receipt_field "$verdict" 'Verdict-SHA256')
+  {
+    printf '%s\n' '- **Protocol-Version**: `1`' '- **Review-ID**: `REV-TASKS`' '- **Round**: `00`'
+    printf '%s\n' '- **Status**: `PASS`'
+    printf -- '- **Request-SHA256**: `%s`\n' "$request_hash"
+    printf -- '- **Verdict-SHA256**: `%s`\n' "$verdict_hash"
+    printf -- '- **Spec-Content-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Plan-Content-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Design-Attachments-SHA256**: `%s`\n' "$stale_hash"
+    printf -- '- **Tasks-Definition-SHA256**: `%s`\n' "$tasks_hash"
+    printf '%s\n' '- **Implementation-Baseline**: `not-applicable`'
+    printf '%s\n' '- **Base-Commit**: `not-applicable`'
+    printf '%s\n' '- **Subject-Commit**: `not-applicable`'
+    printf '%s\n' '- **Sealed-At**: `2026-08-24T12:00:00Z`' '- **Seal-SHA256**: `pending`'
+  } > "$seal"
+  self_hash "$seal" 'Seal-SHA256'
+}
+
+copy_current_v2_pass_archive() {
+  local feature="$1" archive="$2"
+  mkdir -p "$archive/reviews"
+  cp "$feature/tasks.md" "$archive/tasks.md"
+  cp "$feature/.gatespec/execution-state.md" "$archive/execution-state.md"
+  cp "$feature/.gatespec/implementation-adjustments.md" "$archive/implementation-adjustments.md"
+  cp -R "$feature/.gatespec/reviews/REV-TASKS" "$archive/reviews/REV-TASKS"
+}
+
+rebind_v2_archive_handoff() {
+  local archive="$1" handoff="$2" request verdict seal state old_handoff
+  local old_request_hash new_request_hash old_verdict_hash new_verdict_hash
+  request="$archive/reviews/REV-TASKS/round-00-request.md"
+  verdict="$archive/reviews/REV-TASKS/round-00-verdict.md"
+  seal="$archive/reviews/REV-TASKS/seal.md"
+  state="$archive/execution-state.md"
+  old_handoff=$(receipt_field "$request" 'Task-Handoff-Commit')
+  old_request_hash=$(receipt_field "$request" 'Request-SHA256')
+  old_verdict_hash=$(receipt_field "$verdict" 'Verdict-SHA256')
+  replace_token "$request" "$old_handoff" "$handoff"
+  self_hash "$request" 'Request-SHA256'
+  new_request_hash=$(receipt_field "$request" 'Request-SHA256')
+  replace_token "$verdict" "$old_request_hash" "$new_request_hash"
+  self_hash "$verdict" 'Verdict-SHA256'
+  new_verdict_hash=$(receipt_field "$verdict" 'Verdict-SHA256')
+  replace_token "$seal" "$old_handoff" "$handoff"
+  replace_token "$seal" "$old_request_hash" "$new_request_hash"
+  replace_token "$seal" "$old_verdict_hash" "$new_verdict_hash"
+  self_hash "$seal" 'Seal-SHA256'
+  replace_token "$state" "$old_handoff" "$handoff"
+  self_hash "$state" 'Execution-State-SHA256'
+}
+
 bind_current_source_content() {
   local feature="$1" digest tmp
   digest=$(source_hash "$feature" content)
@@ -275,7 +454,15 @@ ConfigWatcher validates and atomically publishes a snapshot.
 ### Failure flow
 1. Validation retains the prior snapshot and emits one diagnostic.
 ## Source Decisions
-- None — the approved Design fixes every source-level material consequence.
+### SD1: runtime reload failure reporting
+- **Scenario**: An invalid save occurs while active readers retain the prior snapshot.
+- **Fixed boundary**: Reload must preserve active connections and the prior valid values.
+- **Options**:
+  - A. Emit one structured diagnostic and retry on the next poll.
+  - B. Return a sticky error through every Current call until a valid save.
+- **Recommendation**: A — readers keep the approved non-blocking behavior.
+- **Technical basis**: FR-002, D1, SD-FAIL1, and the existing diagnostic surface.
+- **Approved**: A (2026-08-24)
 ## Source Change Manifest
 ### SD-F1: configuration implementation
 - **Operation**: `MODIFY`
@@ -519,10 +706,23 @@ cp "$SOURCE_BACKUP" "$FEATURE/contracts/source-design.md"
 cat > "$FEATURE/tasks.md" <<'EOF'
 # Tasks: Source-traced reload
 **Source-Design-Content-SHA256**: `__CONTENT_HASH__`
+
+## GateSpec Checkpoint Closure *(gatespec: mandatory)*
+| Checkpoint | Contract refs | Production tasks | Verification tasks |
+|---|---|---|---|
+| REV-FOUNDATION | D1, FR-002, SD-ALG1, SD-F1, SD-FLOW1, SD-U1, SD1 | T001 | T002 |
+| REV-US1 | FR-001, SD-F2, SD-FAIL1, SD-TEST1 | none | T004 |
+| REV-FINAL | SC-001 | none | T006 |
+
+## GateSpec Prior Review Closure *(gatespec: mandatory)*
+| Finding-SHA256 | Source verdict | Required-before | Remediation tasks |
+|---|---|---|---|
+| none | none | none | none |
+
 ## Phase 1: Setup
 - [ ] T001 Prepare src/config/store.cc for SD-F1 and SD-U1.
 ## Phase 2: Foundational
-- [ ] T002 Implement SD-FLOW1 and SD-ALG1 in src/config/store.cc.
+- [ ] T002 Implement SD1, SD-FLOW1 and SD-ALG1 in src/config/store.cc.
 - [ ] T003 GateSpec review checkpoint REV-FOUNDATION: run speckit.gatespec.review-implementation --scope REV-FOUNDATION and require .gatespec/reviews/REV-FOUNDATION/seal.md before continuing
 ## Phase 3: User Story 1 - Hot reload
 - [ ] T004 [US1] Implement SD-F2, SD-FAIL1 and SD-TEST1 in tests/config/store_test.cc.
@@ -534,6 +734,18 @@ EOF
 replace_token "$FEATURE/tasks.md" '__CONTENT_HASH__' "$CONTENT_HASH"
 cp "$FEATURE/tasks.md" "$TEST_TMP/tasks-good"
 expect pass tasks-structure "$FEATURE" "source-enabled tasks bind hash, SD refs, files, and tests"
+
+sed 's/, SD-U1//' "$FEATURE/tasks.md" > "$TEST_TMP/tasks-missing-source-closure-ref"
+mv "$TEST_TMP/tasks-missing-source-closure-ref" "$FEATURE/tasks.md"
+expect fail tasks-structure "$FEATURE" \
+  "Source-enabled Closure covers every approved SD and SD-* ID"
+cp "$TEST_TMP/tasks-good" "$FEATURE/tasks.md"
+
+sed 's/, SD1 |/ |/' "$FEATURE/tasks.md" > "$TEST_TMP/tasks-missing-approved-sd"
+mv "$TEST_TMP/tasks-missing-approved-sd" "$FEATURE/tasks.md"
+expect fail tasks-structure "$FEATURE" \
+  "Source-enabled Closure cannot omit an approved SD<n> decision"
+cp "$TEST_TMP/tasks-good" "$FEATURE/tasks.md"
 
 sed '/^\*\*Source-Design-Content-SHA256\*\*:/d' "$FEATURE/tasks.md" > "$TEST_TMP/tasks-no-source-hash"
 mv "$TEST_TMP/tasks-no-source-hash" "$FEATURE/tasks.md"
@@ -572,12 +784,391 @@ replace_token "$FEATURE/.gatespec/execution-state.md" '`pending`' "\`$HANDOFF\`"
 # state has only Task-Handoff pending at this point.
 self_hash "$FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
 
+SOURCE_FINDING_REPO="$TEST_TMP/source-finding-repo"
+cp -R "$REPO" "$SOURCE_FINDING_REPO"
+SOURCE_FINDING_FEATURE="$SOURCE_FINDING_REPO/specs/001-hot-reload"
+write_v2_review "$SOURCE_FINDING_FEATURE" REV-TASKS TASKS not-applicable not-applicable \
+  not-applicable none 'Not run — task-plan review' not-applicable
+SOURCE_FINDING_VERDICT="$SOURCE_FINDING_FEATURE/.gatespec/reviews/REV-TASKS/round-00-verdict.md"
+rewrite_source_finding_tmp="$SOURCE_FINDING_VERDICT.tmp"
+awk '
+  /^- \*\*Status\*\*: `PASS`$/ {print "- **Status**: `BLOCKED`"; next}
+  $0 == "- None" {
+    print "- BLOCKER: Preserve the approved Source publication invariant."
+    print "  Add a failure-path verification before foundation review."
+    next
+  }
+  {print}
+' "$SOURCE_FINDING_VERDICT" > "$rewrite_source_finding_tmp"
+mv "$rewrite_source_finding_tmp" "$SOURCE_FINDING_VERDICT"
+self_hash "$SOURCE_FINDING_VERDICT" 'Verdict-SHA256'
+mv "$SOURCE_FINDING_FEATURE/.gatespec/reviews/REV-TASKS/seal.md" \
+  "$TEST_TMP/source-finding-unused-seal.md"
+source_finding_hash=$(blocker_digest \
+  '- BLOCKER: Preserve the approved Source publication invariant.' \
+  '  Add a failure-path verification before foundation review.')
+set_prior_finding "$SOURCE_FINDING_FEATURE/tasks.md" "$source_finding_hash" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T002
+expect pass tasks-structure "$SOURCE_FINDING_FEATURE" \
+  "v2 Prior Review Closure includes blockers whose Spec, Plan, attachments, and Source basis match"
+
+SOURCE_STALE_REPO="$TEST_TMP/source-stale-finding-repo"
+cp -R "$SOURCE_FINDING_REPO" "$SOURCE_STALE_REPO"
+SOURCE_STALE_FEATURE="$SOURCE_STALE_REPO/specs/001-hot-reload"
+SOURCE_STALE_REQUEST="$SOURCE_STALE_FEATURE/.gatespec/reviews/REV-TASKS/round-00-request.md"
+SOURCE_STALE_VERDICT="$SOURCE_STALE_FEATURE/.gatespec/reviews/REV-TASKS/round-00-verdict.md"
+SOURCE_OLD_REQUEST_HASH=$(receipt_field "$SOURCE_STALE_REQUEST" 'Request-SHA256')
+SOURCE_RECORDED_HASH=$(receipt_field "$SOURCE_STALE_REQUEST" 'Source-Design-Content-SHA256')
+SOURCE_ZERO_HASH=0000000000000000000000000000000000000000000000000000000000000000
+replace_token "$SOURCE_STALE_REQUEST" "$SOURCE_RECORDED_HASH" "$SOURCE_ZERO_HASH"
+self_hash "$SOURCE_STALE_REQUEST" 'Request-SHA256'
+SOURCE_NEW_REQUEST_HASH=$(receipt_field "$SOURCE_STALE_REQUEST" 'Request-SHA256')
+replace_token "$SOURCE_STALE_VERDICT" "$SOURCE_OLD_REQUEST_HASH" "$SOURCE_NEW_REQUEST_HASH"
+self_hash "$SOURCE_STALE_VERDICT" 'Verdict-SHA256'
+clear_prior_finding "$SOURCE_STALE_FEATURE/tasks.md" "$source_finding_hash"
+expect pass tasks-structure "$SOURCE_STALE_FEATURE" \
+  "v2 Prior Review discovery ignores a structurally valid blocker from a stale Source basis"
+
 write_v2_review "$FEATURE" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   'Not run — task-plan review' not-applicable
 git -C "$REPO" add specs
 git -C "$REPO" commit -qm 'REV-TASKS PASS baseline'
 BASELINE=$(git -C "$REPO" rev-parse HEAD)
 expect pass task-review "$FEATURE" "Protocol v2 REV-TASKS binds epoch, Source, empty IA, and Task Handoff"
+expect pass retask-eligible "$FEATURE" \
+  "Protocol v2 with current Source and canonical empty IA is retask-eligible before implementation"
+
+SOURCE_STALE_V1_ARCHIVE_REPO="$TEST_TMP/source-stale-v1-retask-archive"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_STALE_V1_ARCHIVE_REPO"
+SOURCE_STALE_V1_ARCHIVE_FEATURE="$SOURCE_STALE_V1_ARCHIVE_REPO/specs/001-hot-reload"
+SOURCE_STALE_V1_ARCHIVE="$SOURCE_STALE_V1_ARCHIVE_FEATURE/.gatespec/archive/20260824T120000Z-retask"
+write_stale_v1_task_pass_archive "$SOURCE_STALE_V1_ARCHIVE_FEATURE" "$SOURCE_STALE_V1_ARCHIVE"
+expect pass tasks-structure "$SOURCE_STALE_V1_ARCHIVE_FEATURE" \
+  "current Protocol v2 accepts a self-consistent stale-basis Protocol v1 retask archive"
+
+SOURCE_STALE_V1_ARCHIVE_DRIFT_REPO="$TEST_TMP/source-stale-v1-retask-archive-drift"
+cp -R "$SOURCE_STALE_V1_ARCHIVE_REPO" "$SOURCE_STALE_V1_ARCHIVE_DRIFT_REPO"
+SOURCE_STALE_V1_ARCHIVE_DRIFT_FEATURE="$SOURCE_STALE_V1_ARCHIVE_DRIFT_REPO/specs/001-hot-reload"
+printf '%s\n' '<!-- stale archived tasks drift -->' \
+  >> "$SOURCE_STALE_V1_ARCHIVE_DRIFT_FEATURE/.gatespec/archive/20260824T120000Z-retask/tasks.md"
+expect fail tasks-structure "$SOURCE_STALE_V1_ARCHIVE_DRIFT_FEATURE" \
+  "stale Protocol v1 retask archives remain subject to internal task-hash validation" \
+  "contributing retask archive tasks.md does not match its terminal REV-TASKS request"
+
+SOURCE_ARCHIVE_BAD_HANDOFF_REPO="$TEST_TMP/source-v2-archive-missing-handoff"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_ARCHIVE_BAD_HANDOFF_REPO"
+SOURCE_ARCHIVE_BAD_HANDOFF_FEATURE="$SOURCE_ARCHIVE_BAD_HANDOFF_REPO/specs/001-hot-reload"
+SOURCE_ARCHIVE_BAD_HANDOFF="$SOURCE_ARCHIVE_BAD_HANDOFF_FEATURE/.gatespec/archive/20260824T121000Z-retask"
+copy_current_v2_pass_archive "$SOURCE_ARCHIVE_BAD_HANDOFF_FEATURE" "$SOURCE_ARCHIVE_BAD_HANDOFF"
+rebind_v2_archive_handoff "$SOURCE_ARCHIVE_BAD_HANDOFF" \
+  1111111111111111111111111111111111111111
+expect fail tasks-structure "$SOURCE_ARCHIVE_BAD_HANDOFF_FEATURE" \
+  "archived v2 handoff must resolve even when request, state, verdict, and seal hashes are self-consistent"
+
+SOURCE_ARCHIVE_EPOCH_REPO="$TEST_TMP/source-v2-archive-duplicate-epochs"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_ARCHIVE_EPOCH_REPO"
+git -C "$SOURCE_ARCHIVE_EPOCH_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_ARCHIVE_EPOCH_REPO" config user.email 'fixture@example.invalid'
+SOURCE_ARCHIVE_EPOCH_FEATURE="$SOURCE_ARCHIVE_EPOCH_REPO/specs/001-hot-reload"
+copy_current_v2_pass_archive "$SOURCE_ARCHIVE_EPOCH_FEATURE" \
+  "$SOURCE_ARCHIVE_EPOCH_FEATURE/.gatespec/archive/20260824T122000Z-retask"
+copy_current_v2_pass_archive "$SOURCE_ARCHIVE_EPOCH_FEATURE" \
+  "$SOURCE_ARCHIVE_EPOCH_FEATURE/.gatespec/archive/20260824T123000Z-retask"
+git -C "$SOURCE_ARCHIVE_EPOCH_REPO" add -- \
+  specs/001-hot-reload/.gatespec/archive
+git -C "$SOURCE_ARCHIVE_EPOCH_REPO" commit -qm 'two individually valid v2 archives repeat E1'
+expect fail retask-eligible "$SOURCE_ARCHIVE_EPOCH_FEATURE" \
+  "v2 retask archive epochs must strictly increase in timestamp order"
+
+SOURCE_RETASK_BLOCKED_REPO="$TEST_TMP/source-retask-blocked"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_BLOCKED_REPO"
+git -C "$SOURCE_RETASK_BLOCKED_REPO" checkout -q -B retask-blocked "$HANDOFF"
+git -C "$SOURCE_RETASK_BLOCKED_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_BLOCKED_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_BLOCKED_FEATURE="$SOURCE_RETASK_BLOCKED_REPO/specs/001-hot-reload"
+replace_token "$SOURCE_RETASK_BLOCKED_FEATURE/.gatespec/execution-state.md" \
+  '`pending`' "\`$HANDOFF\`"
+self_hash "$SOURCE_RETASK_BLOCKED_FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
+
+write_v2_blocked_task_round "$SOURCE_RETASK_BLOCKED_FEATURE" 00 none \
+  'Bind the failure-path task to a precise verification command.' \
+  'Add explicit failure-path evidence before foundation review.'
+BLOCKED_ROUND_00_VERDICT=$BLOCKED_TASK_VERDICT_HASH
+add_prior_finding "$SOURCE_RETASK_BLOCKED_FEATURE/tasks.md" "$BLOCKED_TASK_FINDING_HASH" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T002
+
+write_v2_blocked_task_round "$SOURCE_RETASK_BLOCKED_FEATURE" 01 "$BLOCKED_ROUND_00_VERDICT" \
+  'Separate the atomic publication setup from its behavioral assertion.' \
+  'Make the setup responsibility explicit before foundation review.'
+BLOCKED_ROUND_01_VERDICT=$BLOCKED_TASK_VERDICT_HASH
+add_prior_finding "$SOURCE_RETASK_BLOCKED_FEATURE/tasks.md" "$BLOCKED_TASK_FINDING_HASH" \
+  '.gatespec/reviews/REV-TASKS/round-01-verdict.md#B01' REV-FOUNDATION T001
+
+write_v2_blocked_task_round "$SOURCE_RETASK_BLOCKED_FEATURE" 02 "$BLOCKED_ROUND_01_VERDICT" \
+  'The remaining task decomposition still couples two independently testable failure cases.' \
+  'Regenerate the task plan through the bounded retask recovery path.'
+git -C "$SOURCE_RETASK_BLOCKED_REPO" add -- \
+  specs/001-hot-reload/tasks.md \
+  specs/001-hot-reload/.gatespec/execution-state.md \
+  specs/001-hot-reload/.gatespec/reviews/REV-TASKS
+expect pass retask-eligible "$SOURCE_RETASK_BLOCKED_FEATURE" \
+  "Protocol v2 round-02 BLOCKED chain is eligible when its terminal request binds current tasks and state"
+
+SOURCE_RETASK_TASK_DRIFT_REPO="$TEST_TMP/source-retask-task-drift"
+cp -R "$SOURCE_RETASK_BLOCKED_REPO" "$SOURCE_RETASK_TASK_DRIFT_REPO"
+SOURCE_RETASK_TASK_DRIFT_FEATURE="$SOURCE_RETASK_TASK_DRIFT_REPO/specs/001-hot-reload"
+sed 's/T002 Implement SD1, SD-FLOW1 and SD-ALG1/T002 Implement SD1, SD-FLOW1 and SD-ALG1 with post-review drift/' \
+  "$SOURCE_RETASK_TASK_DRIFT_FEATURE/tasks.md" > "$TEST_TMP/source-retask-task-drift.md"
+mv "$TEST_TMP/source-retask-task-drift.md" "$SOURCE_RETASK_TASK_DRIFT_FEATURE/tasks.md"
+git -C "$SOURCE_RETASK_TASK_DRIFT_REPO" add -- specs/001-hot-reload/tasks.md
+expect fail retask-eligible "$SOURCE_RETASK_TASK_DRIFT_FEATURE" \
+  "Protocol v2 retask rejects tasks changed after the terminal round-02 request" \
+  "terminal BLOCKED request does not bind the current tasks definition"
+
+SOURCE_RETASK_STATE_DRIFT_REPO="$TEST_TMP/source-retask-state-drift"
+cp -R "$SOURCE_RETASK_BLOCKED_REPO" "$SOURCE_RETASK_STATE_DRIFT_REPO"
+SOURCE_RETASK_STATE_DRIFT_FEATURE="$SOURCE_RETASK_STATE_DRIFT_REPO/specs/001-hot-reload"
+replace_token "$SOURCE_RETASK_STATE_DRIFT_FEATURE/.gatespec/execution-state.md" '`E1`' '`E2`'
+self_hash "$SOURCE_RETASK_STATE_DRIFT_FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
+replace_token "$SOURCE_RETASK_STATE_DRIFT_FEATURE/.gatespec/implementation-adjustments.md" '`E1`' '`E2`'
+git -C "$SOURCE_RETASK_STATE_DRIFT_REPO" add -- \
+  specs/001-hot-reload/.gatespec/execution-state.md \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+expect fail retask-eligible "$SOURCE_RETASK_STATE_DRIFT_FEATURE" \
+  "Protocol v2 retask rejects epoch and IA drift after the terminal round-02 request" \
+  "terminal BLOCKED request does not bind current v2 epoch, Source, IA, handoff, and preserved reviews"
+
+SOURCE_RETASK_BOUNDARY_REPO="$TEST_TMP/source-retask-product-handoff"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_BOUNDARY_REPO"
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" checkout -q -B product-handoff "$HANDOFF"
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_BOUNDARY_FEATURE="$SOURCE_RETASK_BOUNDARY_REPO/specs/001-hot-reload"
+mkdir -p "$SOURCE_RETASK_BOUNDARY_REPO/src/retask-fixture"
+printf '%s\n' 'product work hidden in the declared task handoff' \
+  > "$SOURCE_RETASK_BOUNDARY_REPO/src/retask-fixture/handoff.txt"
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" add -- src/retask-fixture/handoff.txt
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" commit -qm 'invalid product-bearing task handoff'
+SOURCE_RETASK_BAD_HANDOFF=$(git -C "$SOURCE_RETASK_BOUNDARY_REPO" rev-parse HEAD)
+replace_token "$SOURCE_RETASK_BOUNDARY_FEATURE/.gatespec/execution-state.md" \
+  '`pending`' "\`$SOURCE_RETASK_BAD_HANDOFF\`"
+self_hash "$SOURCE_RETASK_BOUNDARY_FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
+SOURCE_RETASK_ORIGINAL_HANDOFF=$HANDOFF
+HANDOFF=$SOURCE_RETASK_BAD_HANDOFF
+write_v2_review "$SOURCE_RETASK_BOUNDARY_FEATURE" REV-TASKS TASKS not-applicable \
+  not-applicable not-applicable none 'Not run — task-plan review' not-applicable
+HANDOFF=$SOURCE_RETASK_ORIGINAL_HANDOFF
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" add -- specs/001-hot-reload
+git -C "$SOURCE_RETASK_BOUNDARY_REPO" commit -qm 'seal invalid product-bearing handoff'
+expect fail retask-eligible "$SOURCE_RETASK_BOUNDARY_FEATURE" \
+  "Protocol v2 retask inspects the Task-Handoff boundary commit itself" \
+  "v2 Task-Handoff commit contains product or unknown path 'src/retask-fixture/handoff.txt'"
+
+SOURCE_RETASK_MERGE_REPO="$TEST_TMP/source-retask-merge-handoff"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_MERGE_REPO"
+git -C "$SOURCE_RETASK_MERGE_REPO" checkout -q -B merge-handoff-main "$HANDOFF"
+git -C "$SOURCE_RETASK_MERGE_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_MERGE_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_MERGE_FEATURE="$SOURCE_RETASK_MERGE_REPO/specs/001-hot-reload"
+git -C "$SOURCE_RETASK_MERGE_REPO" checkout -q -b merge-handoff-side
+sed 's/T002 Implement SD1, SD-FLOW1 and SD-ALG1/T002 Implement SD1, SD-FLOW1 and SD-ALG1 through a merged handoff/' \
+  "$SOURCE_RETASK_MERGE_FEATURE/tasks.md" > "$TEST_TMP/source-retask-merge-tasks.md"
+mv "$TEST_TMP/source-retask-merge-tasks.md" "$SOURCE_RETASK_MERGE_FEATURE/tasks.md"
+git -C "$SOURCE_RETASK_MERGE_REPO" add -- specs/001-hot-reload/tasks.md
+git -C "$SOURCE_RETASK_MERGE_REPO" commit -qm 'side task handoff candidate'
+git -C "$SOURCE_RETASK_MERGE_REPO" checkout -q merge-handoff-main
+git -C "$SOURCE_RETASK_MERGE_REPO" merge -q --no-ff merge-handoff-side \
+  -m 'invalid merged task handoff'
+SOURCE_RETASK_MERGE_HANDOFF=$(git -C "$SOURCE_RETASK_MERGE_REPO" rev-parse HEAD)
+replace_token "$SOURCE_RETASK_MERGE_FEATURE/.gatespec/execution-state.md" \
+  '`pending`' "\`$SOURCE_RETASK_MERGE_HANDOFF\`"
+self_hash "$SOURCE_RETASK_MERGE_FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
+SOURCE_RETASK_ORIGINAL_HANDOFF=$HANDOFF
+HANDOFF=$SOURCE_RETASK_MERGE_HANDOFF
+write_v2_review "$SOURCE_RETASK_MERGE_FEATURE" REV-TASKS TASKS not-applicable \
+  not-applicable not-applicable none 'Not run — task-plan review' not-applicable
+HANDOFF=$SOURCE_RETASK_ORIGINAL_HANDOFF
+git -C "$SOURCE_RETASK_MERGE_REPO" add -- specs/001-hot-reload
+git -C "$SOURCE_RETASK_MERGE_REPO" commit -qm 'seal invalid merged handoff'
+expect fail retask-eligible "$SOURCE_RETASK_MERGE_FEATURE" \
+  "Protocol v2 retask rejects a merge commit used as Task-Handoff" \
+  "v2 Task-Handoff commit must have exactly one parent"
+
+SOURCE_RETASK_TRANSIENT_REPO="$TEST_TMP/source-retask-transient-product"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_TRANSIENT_REPO"
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_TRANSIENT_FEATURE="$SOURCE_RETASK_TRANSIENT_REPO/specs/001-hot-reload"
+mkdir -p "$SOURCE_RETASK_TRANSIENT_REPO/src/retask-fixture"
+printf '%s\n' 'transient v2 product implementation' \
+  > "$SOURCE_RETASK_TRANSIENT_REPO/src/retask-fixture/transient.txt"
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" add -- src/retask-fixture/transient.txt
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" commit -qm 'Temporarily add v2 product implementation'
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" rm -q -- src/retask-fixture/transient.txt
+git -C "$SOURCE_RETASK_TRANSIENT_REPO" commit -qm 'Delete transient v2 product implementation'
+expect fail retask-eligible "$SOURCE_RETASK_TRANSIENT_FEATURE" \
+  "Protocol v2 retask inspects transient committed product paths, not only the final tree diff"
+
+SOURCE_RETASK_TRANSIENT_TASK_REPO="$TEST_TMP/source-retask-transient-task-progress"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_TRANSIENT_TASK_REPO"
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_TRANSIENT_TASK_FEATURE="$SOURCE_RETASK_TRANSIENT_TASK_REPO/specs/001-hot-reload"
+cp "$SOURCE_RETASK_TRANSIENT_TASK_FEATURE/tasks.md" "$TEST_TMP/source-retask-before-progress.md"
+mark_task "$SOURCE_RETASK_TRANSIENT_TASK_FEATURE/tasks.md" T001
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" add -- specs/001-hot-reload/tasks.md
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" commit -qm 'temporarily record task execution progress'
+cp "$TEST_TMP/source-retask-before-progress.md" "$SOURCE_RETASK_TRANSIENT_TASK_FEATURE/tasks.md"
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" add -- specs/001-hot-reload/tasks.md
+git -C "$SOURCE_RETASK_TRANSIENT_TASK_REPO" commit -qm 'hide prior task execution progress'
+expect fail retask-eligible "$SOURCE_RETASK_TRANSIENT_TASK_FEATURE" \
+  "Protocol v2 retask inspects historical task progress even after checkboxes are restored"
+
+SOURCE_RETASK_TRANSIENT_IA_REPO="$TEST_TMP/source-retask-transient-ia"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_TRANSIENT_IA_REPO"
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_TRANSIENT_IA_FEATURE="$SOURCE_RETASK_TRANSIENT_IA_REPO/specs/001-hot-reload"
+cp "$SOURCE_RETASK_TRANSIENT_IA_FEATURE/.gatespec/implementation-adjustments.md" \
+  "$TEST_TMP/source-retask-empty-ia.md"
+cat > "$SOURCE_RETASK_TRANSIENT_IA_FEATURE/.gatespec/implementation-adjustments.md" <<EOF
+# GateSpec Implementation Adjustments
+- **Execution-Epoch**: \`E1\`
+- **Source-Design-Content-SHA256**: \`$CONTENT_HASH\`
+## Adjustments
+### IA1: transient implementation evidence
+- **Source refs**: \`SD-F1\`
+- **Task ID**: \`T002\`
+- **Changed Paths**: \`src/config/store.cc\`
+- **Changed Symbols**: \`ReloadConfig\`
+- **Reason**: This fixture proves implementation work once existed.
+- **Boundary Impact**: \`none\`
+- **Verification**: Historical inspection must retain this evidence.
+EOF
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" add -- \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" commit -qm 'temporarily record implementation adjustment'
+cp "$TEST_TMP/source-retask-empty-ia.md" \
+  "$SOURCE_RETASK_TRANSIENT_IA_FEATURE/.gatespec/implementation-adjustments.md"
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" add -- \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+git -C "$SOURCE_RETASK_TRANSIENT_IA_REPO" commit -qm 'hide prior implementation adjustment'
+expect fail retask-eligible "$SOURCE_RETASK_TRANSIENT_IA_FEATURE" \
+  "Protocol v2 retask inspects historical nonempty IA even after the empty baseline is restored"
+
+SOURCE_RETASK_HIDDEN_PRODUCT_REPO="$TEST_TMP/source-retask-hidden-pre-handoff-product"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO"
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" checkout -q -B hidden-product-handoff "$HANDOFF"
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_HIDDEN_PRODUCT_FEATURE="$SOURCE_RETASK_HIDDEN_PRODUCT_REPO/specs/001-hot-reload"
+mkdir -p "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO/src/retask-fixture"
+printf '%s\n' 'product work hidden before an empty declared handoff' \
+  > "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO/src/retask-fixture/pre-handoff.txt"
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" add -- src/retask-fixture/pre-handoff.txt
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" commit -qm 'product work before declared task handoff'
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" commit --allow-empty -qm 'empty metadata handoff after product work'
+SOURCE_RETASK_HIDDEN_HANDOFF=$(git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" rev-parse HEAD)
+replace_token "$SOURCE_RETASK_HIDDEN_PRODUCT_FEATURE/.gatespec/execution-state.md" \
+  '`pending`' "\`$SOURCE_RETASK_HIDDEN_HANDOFF\`"
+self_hash "$SOURCE_RETASK_HIDDEN_PRODUCT_FEATURE/.gatespec/execution-state.md" 'Execution-State-SHA256'
+SOURCE_RETASK_ORIGINAL_HANDOFF=$HANDOFF
+HANDOFF=$SOURCE_RETASK_HIDDEN_HANDOFF
+write_v2_review "$SOURCE_RETASK_HIDDEN_PRODUCT_FEATURE" REV-TASKS TASKS not-applicable \
+  not-applicable not-applicable none 'Not run — task-plan review' not-applicable
+HANDOFF=$SOURCE_RETASK_ORIGINAL_HANDOFF
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" add -- specs/001-hot-reload
+git -C "$SOURCE_RETASK_HIDDEN_PRODUCT_REPO" commit -qm 'seal handoff that hides pre-boundary product work'
+expect fail retask-eligible "$SOURCE_RETASK_HIDDEN_PRODUCT_FEATURE" \
+  "Protocol v2 Task-Handoff tree cannot hide product work behind a later metadata commit"
+
+SOURCE_RETASK_STATE_HISTORY_REPO="$TEST_TMP/source-retask-state-history-drift"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_STATE_HISTORY_REPO"
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" config user.name 'GateSpec Fixture'
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" config user.email 'fixture@example.invalid'
+SOURCE_RETASK_STATE_HISTORY_FEATURE="$SOURCE_RETASK_STATE_HISTORY_REPO/specs/001-hot-reload"
+SOURCE_RETASK_STATE_HISTORY_FILE="$SOURCE_RETASK_STATE_HISTORY_FEATURE/.gatespec/execution-state.md"
+cp "$SOURCE_RETASK_STATE_HISTORY_FILE" "$TEST_TMP/source-retask-valid-state.md"
+replace_token "$SOURCE_RETASK_STATE_HISTORY_FILE" '`E1`' '`E3`'
+SOURCE_RETASK_STATE_HISTORY_TMP="$SOURCE_RETASK_STATE_HISTORY_FILE.tmp"
+awk -v original="$HANDOFF" '
+  /^- \*\*Original-Implementation-Baseline\*\*:/ {
+    print "- **Original-Implementation-Baseline**: `" original "`"
+    next
+  }
+  {print}
+' "$SOURCE_RETASK_STATE_HISTORY_FILE" > "$SOURCE_RETASK_STATE_HISTORY_TMP"
+mv "$SOURCE_RETASK_STATE_HISTORY_TMP" "$SOURCE_RETASK_STATE_HISTORY_FILE"
+self_hash "$SOURCE_RETASK_STATE_HISTORY_FILE" 'Execution-State-SHA256'
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" add -- \
+  specs/001-hot-reload/.gatespec/execution-state.md
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" commit -qm 'invalid E1 to E3 execution-state jump and Original drift'
+cp "$TEST_TMP/source-retask-valid-state.md" "$SOURCE_RETASK_STATE_HISTORY_FILE"
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" add -- \
+  specs/001-hot-reload/.gatespec/execution-state.md
+git -C "$SOURCE_RETASK_STATE_HISTORY_REPO" commit -qm 'restore apparently valid current execution state'
+expect fail retask-eligible "$SOURCE_RETASK_STATE_HISTORY_FEATURE" \
+  "Protocol v2 retask rejects committed epoch gaps and Original Baseline drift even after restoration"
+
+SOURCE_RETASK_IA_ORDER_REPO="$TEST_TMP/source-retask-empty-ia-reordered"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_IA_ORDER_REPO"
+SOURCE_RETASK_IA_ORDER_FEATURE="$SOURCE_RETASK_IA_ORDER_REPO/specs/001-hot-reload"
+cat > "$SOURCE_RETASK_IA_ORDER_FEATURE/.gatespec/implementation-adjustments.md" <<EOF
+# GateSpec Implementation Adjustments
+## Adjustments
+- None — no bounded implementation adjustment has been recorded.
+- **Source-Design-Content-SHA256**: \`$CONTENT_HASH\`
+- **Execution-Epoch**: \`E1\`
+EOF
+git -C "$SOURCE_RETASK_IA_ORDER_REPO" add -- \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+expect fail retask-eligible "$SOURCE_RETASK_IA_ORDER_FEATURE" \
+  "Protocol v2 canonical empty IA rejects reordered fields and Adjustments section"
+
+SOURCE_RETASK_IA_NONE_REPO="$TEST_TMP/source-retask-empty-ia-none-text"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_IA_NONE_REPO"
+SOURCE_RETASK_IA_NONE_FEATURE="$SOURCE_RETASK_IA_NONE_REPO/specs/001-hot-reload"
+sed 's/^- None — no bounded implementation adjustment has been recorded\.$/- None — no implementation changes have been recorded./' \
+  "$SOURCE_RETASK_IA_NONE_FEATURE/.gatespec/implementation-adjustments.md" \
+  > "$TEST_TMP/source-retask-empty-ia-none-text.md"
+mv "$TEST_TMP/source-retask-empty-ia-none-text.md" \
+  "$SOURCE_RETASK_IA_NONE_FEATURE/.gatespec/implementation-adjustments.md"
+git -C "$SOURCE_RETASK_IA_NONE_REPO" add -- \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+expect fail retask-eligible "$SOURCE_RETASK_IA_NONE_FEATURE" \
+  "Protocol v2 canonical empty IA requires the exact fixed None row"
+
+SOURCE_RETASK_IA_PROSE_REPO="$TEST_TMP/source-retask-empty-ia-extra-prose"
+git clone -q --local --no-hardlinks "$REPO" "$SOURCE_RETASK_IA_PROSE_REPO"
+SOURCE_RETASK_IA_PROSE_FEATURE="$SOURCE_RETASK_IA_PROSE_REPO/specs/001-hot-reload"
+printf '%s\n' '- Extra prose outside the canonical empty IA schema.' \
+  >> "$SOURCE_RETASK_IA_PROSE_FEATURE/.gatespec/implementation-adjustments.md"
+git -C "$SOURCE_RETASK_IA_PROSE_REPO" add -- \
+  specs/001-hot-reload/.gatespec/implementation-adjustments.md
+expect fail retask-eligible "$SOURCE_RETASK_IA_PROSE_FEATURE" \
+  "Protocol v2 canonical empty IA rejects extra fields or prose"
+
+SOURCE_RETASK_IA_REPO="$TEST_TMP/source-retask-nonempty-ia"
+cp -R "$REPO" "$SOURCE_RETASK_IA_REPO"
+SOURCE_RETASK_IA_FEATURE="$SOURCE_RETASK_IA_REPO/specs/001-hot-reload"
+cat > "$SOURCE_RETASK_IA_FEATURE/.gatespec/implementation-adjustments.md" <<'EOF'
+# GateSpec Implementation Adjustments
+- **Execution-Epoch**: `E1`
+- **Source-Design-Content-SHA256**: `__CONTENT_HASH__`
+## Adjustments
+### IA1: work already began
+- **Source refs**: `SD-F1`
+- **Task ID**: `T002`
+- **Changed Paths**: `src/config/store.cc`
+- **Changed Symbols**: `ReloadConfig`
+- **Reason**: A product adjustment already exists.
+- **Boundary Impact**: `none`
+- **Verification**: Unit review would inspect the helper.
+EOF
+replace_token "$SOURCE_RETASK_IA_FEATURE/.gatespec/implementation-adjustments.md" \
+  '__CONTENT_HASH__' "$CONTENT_HASH"
+expect fail retask-eligible "$SOURCE_RETASK_IA_FEATURE" \
+  "Protocol v2 retask rejects nonempty Source IA even when the dirt path is otherwise allowed"
 
 cat > "$FEATURE/.gatespec/implementation-adjustments.md" <<EOF
 # GateSpec Implementation Adjustments
@@ -770,7 +1361,11 @@ mkdir -p "$NO_SOURCE/.gatespec"
 cp "$FEATURE/spec.md" "$NO_SOURCE/spec.md"
 sed 's/^- \*\*Protocol Version\*\*: `1`$/- **Protocol Version**: `2`/' "$FEATURE/plan.md" > "$NO_SOURCE/plan.md"
 seal_gate "$NO_SOURCE/plan.md"
-sed '/^\*\*Source-Design-Content-SHA256\*\*:/d' "$TEST_TMP/tasks-good" > "$NO_SOURCE/tasks.md"
+sed \
+  -e '/^\*\*Source-Design-Content-SHA256\*\*:/d' \
+  -e 's/| REV-FOUNDATION | D1, FR-002, SD-ALG1, SD-F1, SD-FLOW1, SD-U1, SD1 |/| REV-FOUNDATION | D1, FR-002 |/' \
+  -e 's/| REV-US1 | FR-001, SD-F2, SD-FAIL1, SD-TEST1 |/| REV-US1 | FR-001 |/' \
+  "$TEST_TMP/tasks-good" > "$NO_SOURCE/tasks.md"
 NO_SOURCE_ORIGINAL=$(git -C "$REPO" rev-parse HEAD)
 cat > "$NO_SOURCE/.gatespec/execution-state.md" <<EOF
 # GateSpec Execution State

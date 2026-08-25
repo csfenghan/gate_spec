@@ -129,6 +129,8 @@ claude_source="$RENDER_HOME/.claude/skills/speckit-gatespec-source-design/SKILL.
 codex_source="$RENDER_HOME/.agents/skills/speckit-gatespec-source-design/SKILL.md"
 claude_accept="$RENDER_HOME/.claude/skills/speckit-gatespec-accept-implementation/SKILL.md"
 codex_accept="$RENDER_HOME/.agents/skills/speckit-gatespec-accept-implementation/SKILL.md"
+claude_refine="$RENDER_HOME/.claude/skills/speckit-gatespec-refine-tasks/SKILL.md"
+codex_refine="$RENDER_HOME/.agents/skills/speckit-gatespec-refine-tasks/SKILL.md"
 claude_reviewer="$RENDER_HOME/.claude/agents/gatespec-reviewer.md"
 codex_reviewer="$RENDER_HOME/.codex/agents/gatespec-reviewer.toml"
 dollar='$'
@@ -285,6 +287,40 @@ else
   not_ok "Source Design / Protocol v2 / acceptance rendered contract"
 fi
 
+closure_protocol_ok=1
+for skill in "$claude_refine" "$codex_refine"; do
+  for rule in \
+    'The only persistent path this command may create or modify is that exact' \
+    'all nine audit categories' \
+    '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' \
+    '## GateSpec Prior Review Closure *(gatespec: mandatory)*' \
+    '.gatespec/archive/*-retask/reviews/REV-TASKS/' \
+    'grandfathered no-op' \
+    'raw UTF-8 bytes of the complete item'; do
+    grep -F "$rule" "$skill" >/dev/null || closure_protocol_ok=0
+  done
+done
+# Literal Markdown backticks are intentional protocol text.
+# shellcheck disable=SC2016
+for rule in \
+  'retask-eligible' \
+  'UTC-YYYYMMDDTHHMMSSZ' \
+  'Task-Handoff-Commit' \
+  'Preserved-Reviews-SHA256' \
+  'A collision blocks: never overwrite' \
+  'do not create a manifest or retask receipt' \
+  'do not call ordinary `tasks-structure`' \
+  'gatespec: archive REV-TASKS cycle for retask' \
+  'Never push'; do
+  grep -F "$rule" "$claude_plan" >/dev/null || closure_protocol_ok=0
+  grep -F "$rule" "$codex_plan" >/dev/null || closure_protocol_ok=0
+done
+if [[ "$closure_protocol_ok" -eq 1 ]]; then
+  ok "rendered refine/retask skills preserve Closure and safe regeneration contracts"
+else
+  not_ok "rendered Closure/refine/retask contract"
+fi
+
 if grep -F 'Only approval-eligible human decisions belong here' "$REPO/templates/gatespec-spec-template.md" >/dev/null &&
    grep -F -- '- **Scenario**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
    grep -F -- '- **Fixed boundary**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null &&
@@ -425,7 +461,24 @@ else
   ok "atomic renderer and reviewer installer leave zero temporary files"
 fi
 
-if ! grep -F 'version: "0.6.0"' extension.yml >/dev/null ||
+after_tasks_order_ok=0
+if awk '
+  /^  after_tasks:$/ {inside=1; next}
+  inside && /^  after_analyze:$/ {exit (refine == 1 && check == 2 ? 0 : 1)}
+  inside && /command: "speckit\.gatespec\.refine-tasks"/ {refine=++seen}
+  inside && /command: "speckit\.gatespec\.check-tasks"/ {check=++seen}
+  END {if (inside && !done) exit !(refine == 1 && check == 2)}
+' extension.yml; then
+  after_tasks_order_ok=1
+fi
+hook_entry_count=$(awk '
+  /^hooks:$/ {inside=1; next}
+  inside && /^tags:$/ {inside=0}
+  inside && /command: "speckit\.gatespec\./ {count++}
+  END {print count+0}
+' extension.yml)
+
+if ! grep -F 'version: "0.7.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -433,16 +486,19 @@ if ! grep -F 'version: "0.6.0"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-requirements"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-design"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-source-design"' extension.yml >/dev/null ||
+   ! grep -F 'command: "speckit.gatespec.refine-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.review-tasks"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-task-review"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.check-implementation-review"' extension.yml >/dev/null ||
    ! grep -F 'command: "speckit.gatespec.accept-implementation"' extension.yml >/dev/null ||
-   [[ $(grep -c 'priority: 10' extension.yml || true) -ne 2 ]] ||
-   [[ $(grep -c 'priority: 20' extension.yml || true) -ne 2 ]]; then
-  not_ok "0.6.0 manifest requirements and eight ordered hook entries"
+   [[ "$after_tasks_order_ok" -ne 1 ]] ||
+   [[ "$hook_entry_count" -ne 9 ]] ||
+   [[ $(grep -c 'priority: 10' extension.yml || true) -ne 3 ]] ||
+   [[ $(grep -c 'priority: 20' extension.yml || true) -ne 3 ]]; then
+  not_ok "0.7.0 manifest requirements and nine ordered hook entries"
 else
-  ok "0.6.0 manifest preserves six events and registers eight ordered entries"
+  ok "0.7.0 manifest preserves six events and registers nine ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,
@@ -461,6 +517,7 @@ if command -v specify >/dev/null 2>&1; then
        [[ ! -e "$package/specs" ]] &&
        [[ -f "$package/templates/gatespec-source-design-template.md" ]] &&
        [[ -f "$package/templates/gatespec-implementation-adjustments-template.md" ]] &&
+       [[ -f "$package/templates/gatespec-task-closure-template.md" ]] &&
        cmp -s "$REPO/reviewers/claude/gatespec-reviewer.md" "$package/reviewers/claude/gatespec-reviewer.md" &&
        cmp -s "$REPO/reviewers/claude/dispatcher.md" "$package/reviewers/claude/dispatcher.md" &&
        cmp -s "$REPO/reviewers/codex/gatespec-reviewer.toml" "$package/reviewers/codex/gatespec-reviewer.toml" &&

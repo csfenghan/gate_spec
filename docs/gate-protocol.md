@@ -1,4 +1,4 @@
-# GateSpec 0.6.0 Gate Protocol
+# GateSpec 0.7.0 Gate Protocol
 
 This document defines Requirements/Design gates, optional Source Design,
 native-task and implementation reviews, final delivery acceptance, hooks,
@@ -11,8 +11,9 @@ GateSpec remains a parallel gated path, not an upstream replacement:
 ```text
 auto:   speckit.specify ─→ speckit.plan ────────────────────────────────┐
 gated:  gatespec.specify ─→ gatespec.plan ─→ [optional source-design] ─┤
-              └→ native speckit.tasks → speckit.analyze → speckit.implement
-                    task trace/review          automatic reviews → final acceptance
+              └→ native speckit.tasks → bounded task-only refinement
+                    → speckit.analyze → speckit.implement
+                         task review     automatic reviews → final acceptance
 ```
 
 Line 1 of a gated spec is exactly `<!-- path: gatespec -->`. If the marker is
@@ -271,11 +272,16 @@ last PASS Subject is preserved as binary patch and path manifest, a normal
 compensating commit restores the safe Subject without reset/rebase/stash, and
 old Source/tasks/reviews/IA/acceptance are archived. Original Baseline remains
 unchanged. Fresh revalidation under `.gatespec/revalidations/E<n>/` binds each
-preserved PASS Subject; unreviewed work is never reapplied automatically.
+preserved PASS Subject; unreviewed work is never reapplied automatically. Each
+revalidation retains its creation epoch and binds its preserved Subject plus
+Source hash. A later task-only retask does not relabel or regenerate that
+evidence when those bindings are unchanged; the new execution epoch instead
+binds the C-sorted raw revalidation manifest through
+Preserved-Reviews-SHA256.
 
 ## Native task and task-review protocol
 
-Native `speckit.tasks` remains the only task generator. Every required
+Native `speckit.tasks` remains the only creator of `tasks.md`. Every required
 checkpoint maps to exactly one phase-ending, non-`[P]` checklist row containing
 the canonical reviewer command and stop condition:
 
@@ -283,11 +289,60 @@ the canonical reviewer command and stop condition:
 GateSpec review checkpoint <REV-ID>: run speckit.gatespec.review-implementation --scope <REV-ID>; require .gatespec/reviews/<REV-ID>/seal.md before continuing.
 ```
 
-The `after_tasks` structural hook rejects missing, duplicate, extra, parallel,
-or misplaced checkpoint rows and mismatched test mapping; it never edits tasks.
-With Source enabled it also requires the approved Source content hash, SD-* and
-precise-path refs on every non-checkpoint task, and complete coverage of all
-Source IDs/manifest paths.
+Priority-10 `after_tasks` runs `refine-tasks` before structural validation. It
+reads the complete approved basis and native tasks, performs the fixed
+type/build/API-consumer/producer-to-test/lifecycle/earliest-checkpoint/
+path-symbol-parallel/artifact-trace/prior-blocker audit, and repairs every
+task-local gap in one coherent pass. Its only write boundary is that exact
+`tasks.md`; it cannot edit approved artifacts, receipts, execution metadata,
+product files, Git state, or remotes. A Requirements, human-choice, Design, or
+Source gap blocks and routes back to the corresponding revision protocol.
+
+The refined task file contains exactly two mandatory Closure H2 sections, in
+order, as the final two H2 sections before its first `## Phase`:
+
+```markdown
+## GateSpec Checkpoint Closure *(gatespec: mandatory)*
+
+| Checkpoint | Contract refs | Production tasks | Verification tasks |
+|---|---|---|---|
+| REV-FOUNDATION | D1, FR-001 | T001 | T002 |
+
+## GateSpec Prior Review Closure *(gatespec: mandatory)*
+
+| Finding-SHA256 | Source verdict | Required-before | Remediation tasks |
+|---|---|---|---|
+| none | none | none | none |
+```
+
+Checkpoint rows exactly follow Plan order. Each row owns the non-checkpoint
+task interval strictly after the preceding checkpoint and before its own
+checkpoint. Across its Production/Verification cells every executable task
+appears globally exactly once in file order; Production may be exact `none`,
+Verification is nonempty. Contract refs use original IDs, no ranges, C-sorted
+and joined only by comma-space. Collectively they cover all FR-###, SC-###,
+approved D<n>, and, with Source, approved SD<n> plus every SD-* ID.
+
+Prior findings come only from current REV-TASKS and
+`.gatespec/archive/*-retask/reviews/REV-TASKS`. A verdict is relevant when its
+Spec, Plan, Design Attachments and, for v2, Source content basis equal the
+current approved basis; tasks/epoch/handoff/IA fields do not determine this
+selection. Each complete raw `- BLOCKER:` Markdown item, including continuation
+lines and their LF bytes, has identity SHA-256 and source
+`<feature-relative-verdict>#B<NN>`. A row maps it to existing non-checkpoint
+remediation tasks no later than one Required checkpoint. No finding uses the
+single exact all-`none` row. Restart/revise/Source-revision archives are ignored.
+The tables are navigation/trace evidence, not proof of semantic closure; the
+fresh task reviewer still judges completeness and whether remediation works.
+
+Priority-20 `after_tasks` rejects malformed Closure, missing/duplicate/extra/
+parallel/misplaced checkpoint rows, interval or ref gaps, stale finding rows,
+and mismatched test mapping. Both Closure sections may be absent only when a
+complete current REV-TASKS PASS seal is tracked at HEAD, byte-current, and the
+worktree is clean. One missing section or any malformed section is never
+grandfathered. With Source enabled the checker also requires the approved
+Source content hash, SD-* and precise-path refs on every non-checkpoint task,
+and complete coverage of all Source IDs/manifest paths.
 Same-phase parallel work must be disjoint and joined before the checkpoint. No
 work crosses a checkpoint without its matching PASS seal.
 
@@ -309,6 +364,51 @@ before it is invalid.
 
 Task-only findings return to native tasks/analyze. Requirement or design
 findings return to the applicable gated phase.
+
+### Retask after task-review exhaustion
+
+`gatespec.plan --retask` is the sole bounded regeneration path that does not
+reopen approved Design. `retask-eligible` accepts only either a complete valid
+REV-TASKS round-02 BLOCKED chain without a seal, or a valid PASS handoff before
+implementation. It rejects round 00/01, malformed/orphan/stale reviews,
+checked tasks, any implementation receipt, nonempty IA, acceptance, product
+delta, detached HEAD, unrelated worktree changes, and any archive source whose
+index blob differs from its working bytes (`MM`/`AM` snapshot ambiguity).
+The comparison is unconditional for every indexed archive source, including
+paths hidden by index flags, and every ancestor must be non-symlink. Existing
+retask archives are exact-tree, tracked/raw-HEAD, chain, payload, handoff, and
+epoch revalidated even when legacy tasks have no Closure tables. An archive
+source carrying an index flag blocks even if its bytes currently match, because
+its removal is not reproducibly stageable. Product-history inspection begins at the first v1 Plan boundary
+or the v2 Original Baseline, audits every commit path and historical tasks/IA
+blob, and therefore rejects checked tasks or nonempty IA that were later
+restored. V2 additionally binds the complete Task-Handoff tree, anchors the
+unchanged Original Baseline in the first committed execution state, and
+requires gap-free epoch transitions.
+At this entry boundary, existing Closure must be either wholly absent under the
+legacy rule or structurally complete; the old tasks are not required to map the
+new items in the legal unsealed terminal round-02 BLOCKED verdict that they
+could not yet contain. Round-00/01 and prior retask-archive findings, plus every
+existing row, remain strict. Regenerated tasks must map terminal findings after
+the chain moves into the retask archive.
+
+The command computes one UTC `YYYYMMDDTHHMMSSZ` timestamp and reserves
+`.gatespec/archive/<timestamp>-retask/`. Any exact target or path-mapping
+collision blocks before writes; it never overwrites, merges, changes suffix,
+or waits for a new timestamp. One local archive commit moves `tasks.md` and
+current `reviews/REV-TASKS`; v2 also archives execution state and IA. A second
+local handoff commit contains regenerated tasks/state and no product change.
+No step pushes.
+
+Protocol v1 creates no execution state. Protocol v2 increments the execution
+epoch, preserves Original Baseline, resets Task Handoff to `pending`, binds
+current Source or `not-applicable`, derives Preserved Reviews, and creates
+canonical empty IA with the exact template None row and no extra fields,
+headings, comments, or prose when
+Source is enabled. Native tasks remains the creator;
+the normal refine → check → analyze → fresh REV-TASKS sequence then runs. New
+Prior Review Closure rows retain all basis-matching blockers from current and
+earlier `*-retask` archives.
 
 ## Implementation review protocol
 
@@ -386,6 +486,7 @@ self-hashed `.gatespec/acceptance.md` metadata-only local commit.
 | Plan declares an unknown design-evidence schema | Stop; never downgrade or guess a rewrite. |
 | First Source enable | Before code only; archive stale tasks/REV-TASKS and regenerate. |
 | Source revise after code | Preserve patch, compensate to safe Subject, archive, fresh review/approval/revalidation; keep Original Baseline. |
+| `plan --retask` | Only after `retask-eligible`; archive tasks/REV-TASKS (plus v2 state/IA), then regenerate through native tasks and normal closure/review hooks in two local no-push commits. |
 | `--revise` | Archive Source/tasks/reviews/revalidations/execution/IA/acceptance, reopen Draft, preserve baseline, diff re-approve. |
 | `--restart` | Archive phase/downstream Source/execution/review/acceptance artifacts, rebuild template. |
 | `--refresh-constraints` | Recompute spec basis and enter revision flow. |
@@ -444,6 +545,11 @@ The ordered verdict fields are `Protocol-Version`, `Review-ID`, `Round`,
 at least one `- BLOCKER: ...` item. Implementation Tests Run covers every
 approved Required Tests string and adds non-empty result text.
 
+Prior Review Closure hashes each complete raw BLOCKER list item separately,
+from its leading `- BLOCKER:` through all continuation lines, with one LF per
+line. Its `#B01`, `#B02`, ... ordinal is local to that verdict's source order;
+identical text in distinct source items remains distinct rows.
+
 The ordered v1 seal fields are `Protocol-Version`, `Review-ID`, `Round`, `Status`,
 `Request-SHA256`, `Verdict-SHA256`, the four artifact hashes,
 `Implementation-Baseline`, `Base-Commit`, `Subject-Commit`, `Sealed-At`, and
@@ -476,11 +582,13 @@ Implementation Review Contract, template remnants, and approval snapshot. The
 checker validates syntax, reasoned N/A, and code-fence presence; it never claims
 to prove architectural sufficiency.
 
-Tasks-structure checks cover exact contract fields, checkpoint/test-set
-equality, checkpoint row uniqueness/order/non-parallel form, and every
-canonical reviewer-command/stop token. Task-review checks validate REV-TASKS
-request, PASS
-verdict, seal chain, plan basis, and normalized tasks definition.
+Tasks-structure checks cover exact contract fields, Closure placement/schema,
+checkpoint intervals and ref coverage, prior-finding identity/remediation,
+checkpoint/test-set equality, checkpoint row uniqueness/order/non-parallel
+form, legacy grandfather eligibility, and every canonical reviewer-command/
+stop token. Internal retask-eligible mode validates bounded regeneration
+preconditions. Task-review checks validate REV-TASKS request, PASS verdict,
+seal chain, plan basis, and normalized tasks definition.
 Implementation-review checks validate the selected REV-ID (REV-FINAL by
 default), bounded rounds, request/verdict/seal chain, subject/upstream hashes,
 PASS-only sealing, and current-scope freshness. Its internal
@@ -510,7 +618,8 @@ bypass.
 | `before_plan` | `check-requirements` | Approved Requirements required |
 | `before_tasks` priority 10 | `check-design` | Approved Design/contract required |
 | `before_tasks` priority 20 | `check-source-design` | Conditional approved Source + REV-SOURCE |
-| `after_tasks` | `check-tasks` | Native task/checkpoint structure |
+| `after_tasks` priority 10 | `refine-tasks` | Bounded native-task closure audit/refinement |
+| `after_tasks` priority 20 | `check-tasks` | Native task/checkpoint/Closure structure |
 | `after_analyze` | `review-tasks` | Fresh-context REV-TASKS verdict |
 | `before_implement` | `check-task-review` | Current REV-TASKS PASS seal |
 | `after_implement` priority 10 | `check-implementation-review` | Current REV-FINAL PASS seal |
@@ -518,8 +627,9 @@ bypass.
 
 Manual check modes are `spec`, `design`, `source`, `tasks-structure`,
 `task-review`, `implementation-review [REV-ID]`, and `acceptance`. Only
-spec/design retain interactive default
-inference. Gated specify/plan execute peer extensions' same-phase hooks while
+spec/design retain interactive default inference; `retask-eligible` is an
+internal fail-closed Plan preflight rather than a public approval check. Gated
+specify/plan execute peer extensions' same-phase hooks while
 excluding `speckit.gatespec.*`, preventing recursion. Unmarked upstream
 features remain silent in all GateSpec hooks.
 

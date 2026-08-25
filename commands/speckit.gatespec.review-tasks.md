@@ -49,7 +49,15 @@ commit in manual reviewer mode.
 
 ## Coordinator path
 
-1. Resolve `.specify/feature.json` and quote the feature path. Run
+1. Resolve `.specify/feature.json` and quote the feature path. Before ordinary
+   structure validation, if `round-02-verdict.md` exists and the current
+   REV-TASKS seal is absent, run
+   `check-gate.sh retask-eligible <feature-dir>` as a receipt/recovery probe.
+   On success, create nothing: report that the review budget is exhausted and
+   direct the authoring context to
+   `__SPECKIT_COMMAND_GATESPEC_PLAN__ --retask`. On failure, print its
+   diagnostics verbatim and stop; an orphan, invalid, stale, or implemented
+   round-02 state is not normal remediation. Otherwise run
    `check-gate.sh tasks-structure <feature-dir>`. A silent zero result for an
    unmarked upstream feature returns immediately with no writes or report.
    Stop on every failure.
@@ -66,7 +74,10 @@ commit in manual reviewer mode.
    - round 02 BLOCKED, an orphan file, an invalid chain, or any round beyond 02
      → stop. There are at most two remediation rounds after round 00.
    A remediation request requires a changed normalized tasks definition. Never
-   overwrite an earlier request or verdict.
+   overwrite an earlier request or verdict. For round 02 BLOCKED, report that
+   the review budget is exhausted and direct the authoring context to
+   `__SPECKIT_COMMAND_GATESPEC_PLAN__ --retask`; do not suggest another tasks
+   edit/review round in the current cycle.
 4. Compute current hashes using the checker contract: scoped spec/plan content,
    the C-sorted relative-path/TAB/file-hash design-attachment manifest, and
    tasks.md with CRLF normalized and only valid T### `[xX]` progress normalized
@@ -150,19 +161,63 @@ For active Protocol v2, use this exact request instead:
 ## Fresh reviewer judgment
 
 Review the approved Requirements/Design and native tasks from the request
-without editing them. Check at least: every FR/story and mapped validation has
-executable task coverage; Design Evidence Schema 1 repository integration,
-component/dependency changes, core contract skeleton and interaction flow,
-thread/resource ownership, external behavior, and lifecycle contracts are all
-preserved; exact file scopes and dependencies are sufficient; parallel labels
-cannot race; phases remain independently testable; every Implementation Review
-Contract checkpoint is phase-final and its tests are executable; and tasks
-introduce no unapproved requirement, design choice, or gold-plating. A material
-uncertainty is a BLOCKER, not an inferred default. For source-enabled v2, read
-the full Source bundle and require every SD-F path, SD-U symbol, SD-FLOW,
-SD-ALG, SD-FAIL, and SD-TEST to map to executable tasks with exact paths and
-dependencies. Validate Source content hash, empty IA baseline, execution epoch,
-Task-Handoff commit, and every preserved revalidation.
+without editing them. A successful structural hook and the two closure matrices
+are navigation, not proof. Open and inspect the underlying artifacts, every
+task, every referenced prior verdict item, and all named paths/symbols. Never
+infer semantic closure from a matrix row, trace token, changed tasks hash, test
+name, or reviewer assertion.
+
+First validate the exact matrix schemas and navigate every Checkpoint Closure
+row in Plan order. For each row, independently verify its actual task interval,
+all Contract refs, every Production task, every Verification task, phase-final
+checkpoint, mapped required test, dependency boundary, and earliest point at
+which each obligation is both implemented and testable. Then navigate every
+Prior Review Closure row to the exact `<verdict>#B<NN>` item, reproduce its raw
+complete-item SHA-256, validate its current Spec/Plan/Attachments plus v2 Source
+basis, and prove that the named remediation tasks close the whole finding no
+later than Required-before. The all-`none` row is valid only when exhaustive
+search of the current chain and every basis-matching `*-retask` archive finds no
+BLOCKER item.
+
+Complete all of these fixed categories even after finding a blocker:
+
+1. type/state/schema completeness and all conversions/compatibility edges;
+2. declaration-to-definition/implementation plus build, dependency,
+   generation, registration, packaging, install, and configuration closure;
+3. changed-API producer plus every in-scope caller, consumer, adapter, mock,
+   and compatibility path;
+4. every behavior/error/boundary producer to executable tests that actually
+   reach and distinguish it;
+5. setup/startup/runtime/cancellation/backpressure/failure/recovery/rollback/
+   teardown, ownership/resource cleanup, and concurrency/order closure;
+6. earliest-checkpoint placement for each contract and prior remediation;
+7. precise real paths and symbols, executable dependencies, independently
+   testable phases, and race-free `[P]` scopes;
+8. complete trace for every FR, story/scenario, SC, approved D, engineering
+   determination, bounded Implementation Freedom, Design Evidence Schema 1
+   component/API/flow/thread/resource/external/lifecycle contract, test
+   mapping, and checkpoint; and
+9. every basis-matching prior BLOCKER, including repeated or reintroduced
+   findings, with concrete closure rather than hash churn or restatement.
+
+For source-enabled v2, the same exhaustive pass includes every approved SD<n>,
+every SD-F path, SD-U declaration/symbol, SD-FLOW, SD-ALG invariant/bound,
+SD-FAIL behavior, SD-TEST trace, Source Change Manifest path, current Source
+content hash, empty IA baseline, execution epoch, Task-Handoff commit, and
+preserved revalidation. Revalidation items bind their own creation epoch,
+preserved Subject, and current Source; after a task-only retask, validate the
+raw preserved manifest without requiring immutable old items to claim the new
+task-cycle epoch. A missing task, unexecutable test, late placement,
+unbounded implementation choice, material uncertainty, gold-plating, or
+approved-contract mismatch is a BLOCKER, not an inferred default.
+
+Accumulate all independently actionable blockers across every matrix row and
+all nine categories before returning one verdict. Do not stop at the first
+failure, cap findings, collapse unrelated defects into one vague item, or defer
+an already observable blocker to a later review round. Each `- BLOCKER:` item
+must name the affected artifact ref or prior Finding-SHA256, concrete task/path/
+symbol evidence, and the missing or contradictory closure so the author can
+remediate the whole set in one pass.
 
 The adapter, or a manual fresh session whose returned text is supplied back to
 this no-input coordinator, returns exactly the active request Protocol-Version
@@ -207,7 +262,11 @@ as `round-<NN>-verdict.md`; never rewrite reviewer prose.
 
 - BLOCKED: create no seal. Report blockers and stop the hook. The authoring
   context may remediate tasks, rerun native analyze, and open the next allowed
-  round; this reviewer context may not do so.
+  round; this reviewer context may not do so. If this is round 02, normal
+  remediation is exhausted: keep every receipt and task byte intact and direct
+  the authoring context only to
+  `__SPECKIT_COMMAND_GATESPEC_PLAN__ --retask`, which performs the bounded
+  archive/reset before new native tasks and a fresh round-00 cycle.
 - PASS: create `seal.md` atomically with the exact ordered fields below, copying
   all bound values from the accepted request/verdict. `Sealed-At` is current UTC
   `YYYY-MM-DDTHH:MM:SSZ`; hash all raw bytes before Seal-SHA256.

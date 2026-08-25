@@ -81,10 +81,15 @@ snapshot. Revise/restart Source, obtain fresh REV-SOURCE, and require user diff
 approval. Under `.gatespec/revalidations/E<n>/`, issue a fresh self-contained
 revalidation request/verdict/seal for every previously preserved PASS Subject
 against the new Source hash. C-sort the relative-path/raw-hash manifest into
-Preserved-Reviews-SHA256. Regenerate tasks and REV-TASKS for the new epoch.
-Never reapply the unreviewed patch automatically; new tasks may reintroduce its
-valid ideas. REV-FINAL always compares the unchanged Original Baseline to the
-new final Subject.
+Preserved-Reviews-SHA256. An item permanently records the epoch in which that
+Source revalidation was created, its preserved Subject, and the Source hash it
+reviewed. A later task-only retask may advance the active execution epoch while
+retaining that immutable evidence if the Source hash and Subject are unchanged;
+the active execution state binds the complete raw manifest and never rewrites
+an item's epoch. Regenerate tasks and REV-TASKS for the new epoch. Never reapply
+the unreviewed patch automatically; new tasks may reintroduce its valid ideas.
+REV-FINAL always compares the unchanged Original Baseline to the new final
+Subject.
 
 ## Step 2: source-level design
 

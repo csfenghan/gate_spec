@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.6.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.7.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -19,7 +19,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 | tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows | tasks-structure fixtures |
 | `.specify/feature.json.feature_directory` | checker/commands | jq → python3 → restricted single-line parser tests |
 | `setup-plan.sh --json` fields | gated plan setup | renderer/install smoke + manual plan smoke |
-| six hook events, ordered multiple entries, and priority | 8 fixed gate/review/acceptance entries | manifest assertions + manual hook smoke |
+| six hook events, ordered multiple entries, and priority | 9 fixed gate/refine/review/acceptance entries | manifest assertions + manual hook smoke |
 | native tasks/implement read `contracts/` | optional Source Design context | Source trace fixtures + manual prompt smoke |
 | mandatory hook same-session invocation and invalid-YAML skip behavior | fresh-context/manual fallback boundary | Claude/Codex manual isolation smoke |
 | Claude/Codex custom-agent locations and fresh-spawn syntax | reviewer adapters/dispatcher | renderer + isolated-home install smoke |
@@ -79,13 +79,24 @@ In a scratch initialized project:
    reused.
 11. Re-approve a spec and confirm the old plan fails Requirements basis match.
 12. Generate native tasks with one non-parallel checkpoint row per approved
-   REV-ID and confirm `after_tasks` rejects a missing, duplicate, extra, or
-   parallel checkpoint.
+   REV-ID. Confirm priority-10 `after_tasks` changes only `tasks.md`, closes
+   producer/consumer/test/lifecycle gaps, and writes the two exact Closure
+   tables; priority-20 must reject a missing, duplicate, extra, parallel, or
+   misplaced checkpoint, incomplete task interval/ref coverage, and stale
+   prior-finding row. Confirm a complete current clean tracked legacy PASS is a
+   no-op grandfather, while one missing or malformed Closure section fails.
 13. Run native analyze. Confirm the same author/analyzer context may coordinate
    REV-TASKS receipts but is forbidden from judging or authoring the verdict;
    obtain judgment from a fresh Claude/Codex context or the manual new-session
    fallback, and confirm `before_implement` rejects missing, BLOCKED, and stale
    task-review seals.
+   Exhaust REV-TASKS through a valid round-02 BLOCKED chain and confirm Plan
+   `--retask` is the only bounded regeneration route: it uses one UTC
+   `*-retask` archive target, makes separate archive/handoff local commits,
+   never pushes, retains blocker identities in the new Prior Review Closure,
+   and refuses round 00/01, checked/implemented/IA/acceptance/product-delta,
+   out-of-scope dirt, divergent index/working snapshots, detached, stale,
+   orphan, or collision states.
 14. Run native implement through a stage checkpoint. Confirm parallel work joins,
    the context creates only a local commit/request and never pushes, a fresh
    reviewer alone returns verdict text, the coordinator validates/persists it
@@ -99,7 +110,10 @@ In a scratch initialized project:
 16. Confirm Protocol v1 legacy, v2 without Source, and v2 with Source. In v2,
     verify Task-Handoff, empty IA baseline, exact SD task coverage, IA Subject
     snapshots, Original Baseline, preserved revalidations, and raw Final Delta.
-    A material Source departure must block rather than become IA.
+    A v2 retask increments only Execution Epoch, preserves Original Baseline,
+    resets Task Handoff, binds current Source, derives preserved reviews, and
+    resets Source IA to canonical empty. V1 retask creates no state. A material
+    Source departure must block rather than become IA.
 17. Confirm priority-10 `after_implement` rejects missing/stale REV-FINAL. Its
     PASS automatically reaches priority-20 acceptance; rejection writes
     nothing, acceptance makes one metadata-only local commit, and stale/

@@ -1,9 +1,9 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.6.0 is a personal spec-kit extension with human approval gates for
+GateSpec 0.7.0 is a personal spec-kit extension with human approval gates for
 Requirements and Design, optional reviewed Source Design, independent-context
-task/implementation reviews, and one final whole-delivery acceptance. Read this
-file before changing the repository.
+task/implementation reviews, bounded checked task closure, and one final
+whole-delivery acceptance. Read this file before changing the repository.
 
 ## Product invariants
 
@@ -39,11 +39,16 @@ approval mechanism.
 Normal implementation checkpoints are automatic. After REV-FINAL, the user
 accepts the complete delivery once; Source boundary violations are exceptional
 blocks, not routine implementation approvals.
+Native tasks is the only task-file creator. The first after_tasks hook may
+perform one bounded tasks.md-only closure refinement; the second validates it.
 
 ## Architecture invariants
 
 - Upstream `speckit.*` is never modified. Both paths converge at the unchanged
   `speckit.tasks → speckit.analyze → speckit.implement` sequence.
+- Native tasks remains the only creator. `after_tasks` priority 10 may modify
+  only that `tasks.md` to close the fixed audit; priority 20 validates exact
+  Closure matrices. It never edits approved artifacts, receipts, Git, or code.
 - `contracts/source-design.md` alone enables the optional Source sub-contract;
   its line 1 is exactly `<!-- gatespec: source-design -->`. Shards are direct
   regular `.md` files under `contracts/source-design/` and never enable Source
@@ -78,6 +83,11 @@ blocks, not routine implementation approvals.
 - IA is limited to bounded internal adjustments and belongs in each Subject;
   material or uncertain Source departure blocks. Final acceptance is a
   metadata-only local commit after REV-FINAL and never substitutes for CI.
+- Closure partitions every non-checkpoint task by strict checkpoint interval,
+  covers all approved artifact IDs, and hashes every basis-matching current or
+  `*-retask` archived REV-TASKS blocker. Missing both sections is grandfathered
+  only by a current tracked clean legacy PASS; partial/malformed never is.
+  The matrices are navigation evidence; fresh review still judges semantics.
 - The repository is the source of truth. Edit `commands/`, never rendered
   global skills.
 
@@ -94,6 +104,12 @@ Approved Requirements freezes its basis. User constraint drift warns until
 Drafts resume in place, approved artifacts are read-only, `--revise` uses diff
 re-approval, and `--restart` archives before rebuilding. Revision/restart must
 archive tasks and review receipts rather than leave stale execution work.
+`plan --retask` is narrower: only valid round-02 BLOCKED or not-yet-implemented
+PASS is eligible. It creates separate local archive/handoff commits, never
+pushes, preserves blocker lineage, and for v2 increments epoch while keeping
+Original Baseline and resetting Task Handoff/current Source/empty IA.
+Allowed archive dirt must have identical index and working bytes; `MM`/`AM`
+snapshot ambiguity blocks rather than choosing one copy implicitly.
 
 The six Design Detailing dimensions are exact mandatory core fields and record
 reasoned engineering determinations where applicable. Constraints may add
@@ -105,9 +121,9 @@ after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.6.0 manifest, 6 hook events / 8 ordered entries |
+| `extension.yml` | 0.7.0 manifest, 6 hook events / 9 ordered entries |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
-| `templates/` | spec/plan plus Source Design and IA templates |
+| `templates/` | spec/plan, Source Design, IA, and task Closure templates |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |
 | `scripts/bash/check-gate.sh` | deterministic machine gate |
 | `install.sh` | atomic global renderer + optional project registration |
@@ -127,7 +143,8 @@ Windows uses WSL/Git Bash.
 - Aliases render only in commands mode. Skill invocations are
   `/speckit-gatespec-*` (Claude) and `$speckit-gatespec-*` (Codex).
 - `before_plan` and `before_tasks` retain the Requirements/Design gates.
-  Source adds the second `before_tasks` entry; final acceptance adds the second
+  Source adds the second `before_tasks` entry; bounded refine then check are the
+  two ordered `after_tasks` entries; final acceptance adds the second
   `after_implement` entry. Manual check accepts `spec`, `design`, `source`,
   `tasks-structure`, `task-review`, `implementation-review [REV-ID]`, or
   `acceptance`.

@@ -10,7 +10,7 @@ FEATURE_DIR="${2:-}"
 REVIEW_ID="${3:-}"
 MARKER='<!-- path: gatespec -->'
 SOURCE_MARKER='<!-- gatespec: source-design -->'
-USAGE='Usage: check-gate.sh <spec|design|source-candidate|source-review|source|tasks-structure|task-review|implementation-candidate|implementation-review|acceptance-candidate|acceptance> [feature-dir] [REV-ID]'
+USAGE='Usage: check-gate.sh <spec|design|source-candidate|source-review|source|tasks-structure|task-review|retask-eligible|implementation-candidate|implementation-review|acceptance-candidate|acceptance> [feature-dir] [REV-ID]'
 
 if [[ "$#" -gt 3 ]]; then
   echo "$USAGE" >&2
@@ -18,7 +18,7 @@ if [[ "$#" -gt 3 ]]; then
 fi
 
 case "$MODE" in
-  spec|design|source-candidate|source-review|source|tasks-structure|acceptance-candidate|acceptance)
+  spec|design|source-candidate|source-review|source|tasks-structure|retask-eligible|acceptance-candidate|acceptance)
     if [[ -n "$REVIEW_ID" ]]; then
       echo "GATE ERROR: $MODE does not accept a REV-ID." >&2
       exit 2
@@ -1226,7 +1226,10 @@ check_source_structure() {
 check_source_receipt_whitelist() {
   local file="$1" kind="$2" context="$3" invalid="$TMP_DIR/source-receipt-invalid"
   awk -v kind="$kind" '
-    /^[[:space:]]*$/ {next}
+    /^[[:space:]]*$/ {
+      if (kind == "verdict" && section == "Blockers") blocker_active=0
+      next
+    }
     kind == "request" {
       if (state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Previous-Verdict-SHA256)\*\*: `[^`]+`$/) next
       if (state == 0 && $0 == "## Required Tests") {state=1; next}
@@ -1457,6 +1460,10 @@ check_execution_state() {
     {print NR ":" $0}
   ' "$EXECUTION_STATE")
   [[ -z "$invalid" ]] || { fail "$context: only the canonical v2 execution fields are allowed"; bad=1; }
+  [[ $(sed -n '1p' "$EXECUTION_STATE") == '# GateSpec Execution State' &&
+     $(grep -cFx '# GateSpec Execution State' "$EXECUTION_STATE" || true) -eq 1 ]] || {
+    fail "$context: canonical execution state requires its exact line-1 title"; bad=1;
+  }
   check_ordered_fields "$EXECUTION_STATE" "$context" \
     'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
     'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
@@ -1504,6 +1511,62 @@ check_execution_state() {
   [[ "$bad" -eq 0 ]] && pass "$context: v2 epoch, original baseline, handoff, Source, and preserved reviews are current"
 }
 
+check_canonical_empty_ia() {
+  local file="$1" context="$2" expected_epoch="$3" expected_source="$4"
+  local before="$FAILURES" invalid epoch source
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    fail "$context: canonical empty IA must be a regular non-symlink file"
+    return 1
+  fi
+  invalid=$(awk '
+    /^[[:space:]]*$/ {next}
+    NR == 1 && $0 == "# GateSpec Implementation Adjustments" {next}
+    /^- \*\*(Execution-Epoch|Source-Design-Content-SHA256)\*\*: `[^`]+`$/ {next}
+    $0 == "## Adjustments" {next}
+    $0 == "- None — no bounded implementation adjustment has been recorded." {next}
+    {print NR ":" $0}
+  ' "$file")
+  [[ -z "$invalid" ]] || fail "$context: canonical empty IA contains extra fields, headings, comments, or prose"
+  if ! awk '
+    /^[[:space:]]*$/ {next}
+    {
+      n++
+      if (n == 1 && $0 == "# GateSpec Implementation Adjustments") next
+      if (n == 2 && $0 ~ /^- \*\*Execution-Epoch\*\*: `E[1-9][0-9]*`$/) next
+      if (n == 3) {
+        value=$0
+        sub(/^- \*\*Source-Design-Content-SHA256\*\*: `/, "", value)
+        sub(/`$/, "", value)
+        if (length(value) == 64 && value !~ /[^0-9a-f]/) next
+      }
+      if (n == 4 && $0 == "## Adjustments") next
+      if (n == 5 && $0 == "- None — no bounded implementation adjustment has been recorded.") next
+      bad=1
+    }
+    END {exit bad || n != 5}
+  ' "$file"; then
+    fail "$context: canonical empty IA nonblank lines are not in the exact protocol order"
+  fi
+  [[ $(grep -cFx '# GateSpec Implementation Adjustments' "$file" || true) -eq 1 &&
+     $(sed -n '1p' "$file") == '# GateSpec Implementation Adjustments' ]] ||
+    fail "$context: canonical empty IA requires its exact line-1 title"
+  check_ordered_fields "$file" "$context" \
+    'Execution-Epoch' 'Source-Design-Content-SHA256'
+  [[ $(grep -cFx '## Adjustments' "$file" || true) -eq 1 ]] ||
+    fail "$context: canonical empty IA requires exactly one Adjustments section"
+  [[ $(grep -cFx -- '- None — no bounded implementation adjustment has been recorded.' "$file" || true) -eq 1 ]] ||
+    fail "$context: canonical empty IA requires the exact template None row"
+  epoch=$(markdown_field_value "$file" 'Execution-Epoch')
+  source=$(markdown_field_value "$file" 'Source-Design-Content-SHA256')
+  [[ "$epoch" == "$expected_epoch" ]] || fail "$context: Execution-Epoch does not match the required snapshot"
+  [[ "$source" == "$expected_source" ]] || fail "$context: Source Design hash does not match the required snapshot"
+  if [[ "$FAILURES" -eq "$before" ]]; then
+    pass "$context: IA snapshot is canonical, empty, and epoch/Source-bound"
+    return 0
+  fi
+  return 1
+}
+
 check_implementation_adjustments() {
   local require_empty="$1" context='implementation-adjustments.md' epoch source_hash expected_source
   local headings="$TMP_DIR/ia-headings" id block value expected=1 bad=0 source_bundle="$TMP_DIR/ia-source-bundle"
@@ -1518,12 +1581,14 @@ check_implementation_adjustments() {
   expected_source=$(source_design_content_hash) || expected_source=''
   [[ "$epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution-Epoch does not match execution-state.md"; bad=1; }
   [[ "$source_hash" == "$expected_source" ]] || { fail "$context: Source Design hash is stale"; bad=1; }
-  grep -E '^### IA[1-9][0-9]*:' "$IA_FILE" > "$headings" || true
   if [[ "$require_empty" == yes ]]; then
-    if [[ -s "$headings" ]] || [[ $(grep -cE '^- None —[[:space:]]*[^[:space:]].*$' "$IA_FILE" || true) -ne 1 ]]; then
-      fail "$context: REV-TASKS baseline requires an empty IA log"; bad=1
-    fi
-  elif [[ -s "$headings" ]] && grep -E '^- None —' "$IA_FILE" >/dev/null 2>&1; then
+    check_canonical_empty_ia "$IA_FILE" "$context" "$CURRENT_EXECUTION_EPOCH" "$expected_source" || bad=1
+    : > "$TMP_DIR/ia-changed-paths"
+    [[ "$bad" -eq 0 ]] && pass "$context: IA log is epoch-bound, bounded, ordered, and path-complete"
+    return
+  fi
+  grep -E '^### IA[1-9][0-9]*:' "$IA_FILE" > "$headings" || true
+  if [[ -s "$headings" ]] && grep -E '^- None —' "$IA_FILE" >/dev/null 2>&1; then
     fail "$context: adjustment blocks cannot coexist with the empty state"; bad=1
   fi
   while IFS= read -r heading; do
@@ -1769,12 +1834,13 @@ check_implementation_review_contract() {
 
 check_tasks_structure() {
   local id count line line_number later_task phase_heading task_id bad=0 expected=1 expected_id story
-  local previous_checkpoint_line=0
+  local previous_checkpoint_line=0 closure_policy="${1:-required}"
   local checkpoint_ids="$TMP_DIR/task-checkpoint-ids" valid_ids="$TMP_DIR/task-ids"
   echo ""
   echo "Tasks Structure Gate: $TASKS"
-  if [[ ! -f "$TASKS" ]]; then
-    fail "tasks.md not found in $FEATURE_DIR"
+  TASKS_CLOSURE_POLICY=$closure_policy
+  if [[ ! -f "$TASKS" || -L "$TASKS" ]]; then
+    fail "tasks.md must be a regular non-symlink file in $FEATURE_DIR"
     return
   fi
 
@@ -1908,6 +1974,12 @@ check_tasks_structure() {
   fi
 
   [[ "$bad" -eq 0 ]] && pass "tasks.md: review checkpoints are declared once, serial, and phase-final"
+  if [[ "$closure_policy" == optional ]] &&
+     ! grep -qE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec (Checkpoint|Prior Review) Closure' "$TASKS"; then
+    pass "tasks.md: legacy retask eligibility checks basic task/checkpoint structure before Closure regeneration"
+  else
+    check_tasks_closure
+  fi
   if [[ -f "$SOURCE_ENTRY" ]]; then
     check_source_task_trace
   fi
@@ -1960,6 +2032,1052 @@ check_source_task_trace() {
     fi
   done < "$TMP_DIR/source-manifest-paths"
   [[ "$bad" -eq 0 ]] && pass "tasks.md: every Source item and changed path maps to executable work"
+}
+
+canonical_id_list() {
+  local value="$1" pattern="$2" destination="$3" context="$4" allow_none="$5"
+  local id rebuilt sorted="$TMP_DIR/canonical-list-sorted" bad=0 separator=''
+  : > "$destination"
+  if [[ "$value" == none ]]; then
+    if [[ "$allow_none" == yes ]]; then return 0; fi
+    fail "$context must contain at least one identifier"
+    return 1
+  fi
+  [[ -n "$value" ]] || { fail "$context must not be empty"; return 1; }
+  printf '%s\n' "$value" | awk -F ', ' '{for (i=1;i<=NF;i++) print $i}' > "$destination"
+  while IFS= read -r id; do
+    if ! printf '%s\n' "$id" | grep -Eq "$pattern"; then
+      fail "$context contains invalid identifier '$id'"
+      bad=1
+    fi
+    rebuilt="${rebuilt:-}${separator}${id}"
+    separator=', '
+  done < "$destination"
+  if [[ "${rebuilt:-}" != "$value" ]]; then
+    fail "$context must use exact comma+space separators"
+    bad=1
+  fi
+  LC_ALL=C sort -u "$destination" > "$sorted"
+  if ! cmp -s "$destination" "$sorted"; then
+    fail "$context must be unique and C-sorted"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]]
+}
+
+collect_required_closure_contracts() {
+  local bundle="$TMP_DIR/closure-source-bundle"
+  : > "$TMP_DIR/closure-required-contracts"
+  sed -n 's/^- \*\*\(FR-[0-9][0-9]*\|SC-[0-9][0-9]*\)\*\*:.*/\1/p' "$SPEC" \
+    >> "$TMP_DIR/closure-required-contracts"
+  sed -n 's/^### \(D[1-9][0-9]*\):.*/\1/p' "$PLAN" \
+    >> "$TMP_DIR/closure-required-contracts"
+  if [[ -f "$SOURCE_ENTRY" ]]; then
+    source_bundle_concat > "$bundle"
+    sed -n \
+      -e 's/^### \(SD[1-9][0-9]*\):.*/\1/p' \
+      -e 's/^### \(SD-\(F\|U\|FLOW\|ALG\|FAIL\|TEST\)[1-9][0-9]*\):.*/\1/p' \
+      "$bundle" >> "$TMP_DIR/closure-required-contracts"
+  fi
+  LC_ALL=C sort -u -o "$TMP_DIR/closure-required-contracts" "$TMP_DIR/closure-required-contracts"
+}
+
+extract_four_column_table() {
+  local body="$1" header="$2" output="$3" context="$4" invalid
+  : > "$output"
+  invalid=$(awk -v header="$header" '
+    /^[[:space:]]*$/ {next}
+    !seen_header {
+      if ($0 != header) {print NR ":" $0; bad=1}
+      seen_header=1
+      next
+    }
+    !seen_separator {
+      if ($0 != "|---|---|---|---|") {print NR ":" $0; bad=1}
+      seen_separator=1
+      next
+    }
+    {
+      if ($0 !~ /^\| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \|$/) {
+        print NR ":" $0
+      }
+    }
+    END {
+      if (!seen_header) print "missing header"
+      if (!seen_separator) print "missing separator"
+    }
+  ' "$body")
+  if [[ -n "$invalid" ]]; then
+    fail "$context must contain only its exact header, separator, and canonical four-column rows"
+    return 1
+  fi
+  awk -F '|' -v header="$header" '
+    /^[[:space:]]*$/ || $0 == header || $0 == "|---|---|---|---|" {next}
+    {
+      for (i=2;i<=5;i++) {
+        value=$i
+        sub(/^ /, "", value)
+        sub(/ $/, "", value)
+        printf "%s%s", (i == 2 ? "" : "\t"), value
+      }
+      print ""
+    }
+  ' "$body" > "$output"
+}
+
+check_checkpoint_closure_table() {
+  local body="$TMP_DIR/checkpoint-closure-body" rows="$TMP_DIR/checkpoint-closure-rows"
+  local checkpoint refs production verification expected checkpoint_line previous_line=0
+  local row_count required_count index=0 bad=0 id line
+  local contract_pattern='^(FR-[0-9]+|SC-[0-9]+|D[1-9][0-9]*|SD[1-9][0-9]*|SD-(F|U|FLOW|ALG|FAIL|TEST)[1-9][0-9]*)$'
+  local task_pattern='^T[0-9][0-9][0-9]$'
+  section_body "$TASKS" 'GateSpec Checkpoint Closure' > "$body"
+  if ! extract_four_column_table "$body" \
+    '| Checkpoint | Contract refs | Production tasks | Verification tasks |' "$rows" \
+    'tasks.md: GateSpec Checkpoint Closure'; then
+    return
+  fi
+  : > "$TMP_DIR/closure-actual-contracts"
+  : > "$TMP_DIR/closure-all-task-ids"
+  row_count=$(awk 'NF {n++} END {print n+0}' "$rows")
+  required_count=$(awk 'NF {n++} END {print n+0}' "$TMP_DIR/required-checkpoints")
+  if [[ "$row_count" -ne "$required_count" ]]; then
+    fail "tasks.md: Checkpoint Closure needs exactly one row per Required Checkpoint"
+    bad=1
+  fi
+
+  while IFS=$'\t' read -r checkpoint refs production verification; do
+    [[ -n "$checkpoint" ]] || continue
+    index=$((index + 1))
+    expected=$(sed -n "${index}p" "$TMP_DIR/required-checkpoints")
+    if [[ "$checkpoint" != "$expected" ]]; then
+      fail "tasks.md: Checkpoint Closure row $index must be $expected"
+      bad=1
+    fi
+    if canonical_id_list "$refs" "$contract_pattern" "$TMP_DIR/closure-row-contracts" \
+      "tasks.md: $checkpoint Contract refs" no; then
+      cat "$TMP_DIR/closure-row-contracts" >> "$TMP_DIR/closure-actual-contracts"
+    else
+      bad=1
+    fi
+    if ! canonical_id_list "$production" "$task_pattern" "$TMP_DIR/closure-row-production" \
+      "tasks.md: $checkpoint Production tasks" yes; then
+      bad=1
+    fi
+    if ! canonical_id_list "$verification" "$task_pattern" "$TMP_DIR/closure-row-verification" \
+      "tasks.md: $checkpoint Verification tasks" no; then
+      bad=1
+    fi
+    cat "$TMP_DIR/closure-row-production" "$TMP_DIR/closure-row-verification" \
+      > "$TMP_DIR/closure-row-tasks"
+    LC_ALL=C sort "$TMP_DIR/closure-row-tasks" | uniq -d > "$TMP_DIR/closure-row-duplicates"
+    if [[ -s "$TMP_DIR/closure-row-duplicates" ]]; then
+      fail "tasks.md: $checkpoint Production and Verification tasks overlap"
+      bad=1
+    fi
+    checkpoint_line=$(grep -nE "^- \\[[ xX]\\] T[0-9][0-9][0-9].*GateSpec review checkpoint ${checkpoint}:" "$TASKS" \
+      | cut -d: -f1)
+    if ! [[ "$checkpoint_line" =~ ^[0-9]+$ ]]; then
+      fail "tasks.md: cannot establish the strict task interval for $checkpoint"
+      bad=1
+      checkpoint_line=$previous_line
+    fi
+    : > "$TMP_DIR/closure-interval-tasks"
+    awk -v start="$previous_line" -v stop="$checkpoint_line" '
+      NR > start && NR < stop &&
+      /^- \[[ xX]\] T[0-9][0-9][0-9]([[:space:]]|$)/ &&
+      $0 !~ /GateSpec review checkpoint REV-(FOUNDATION|US[1-9][0-9]*|FINAL):/ {
+        print substr($0, index($0, "T"), 4)
+      }
+    ' "$TASKS" | LC_ALL=C sort > "$TMP_DIR/closure-interval-tasks"
+    LC_ALL=C sort "$TMP_DIR/closure-row-tasks" > "$TMP_DIR/closure-row-tasks-sorted"
+    if ! cmp -s "$TMP_DIR/closure-interval-tasks" "$TMP_DIR/closure-row-tasks-sorted"; then
+      fail "tasks.md: $checkpoint Production/Verification tasks must exactly partition its strict checkpoint interval"
+      bad=1
+    fi
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      line=$(grep -E "^- \\[[ xX]\\] ${id}([[:space:]]|$)" "$TASKS" || true)
+      if [[ $(printf '%s\n' "$line" | awk 'NF {n++} END {print n+0}') -ne 1 ]]; then
+        fail "tasks.md: Checkpoint Closure task $id must resolve exactly once"
+        bad=1
+      elif printf '%s\n' "$line" | grep -Eq 'GateSpec review checkpoint REV-(FOUNDATION|US[1-9][0-9]*|FINAL):'; then
+        fail "tasks.md: Checkpoint Closure must not reference checkpoint task $id"
+        bad=1
+      fi
+    done < "$TMP_DIR/closure-row-tasks"
+    cat "$TMP_DIR/closure-row-tasks" >> "$TMP_DIR/closure-all-task-ids"
+    previous_line=$checkpoint_line
+  done < "$rows"
+
+  LC_ALL=C sort -u "$TMP_DIR/closure-actual-contracts" > "$TMP_DIR/closure-contracts-sorted"
+  if ! cmp -s "$TMP_DIR/closure-required-contracts" "$TMP_DIR/closure-contracts-sorted"; then
+    fail "tasks.md: Checkpoint Closure Contract refs must exactly cover current FR/SC/approved Design and Source IDs"
+    bad=1
+  fi
+  LC_ALL=C sort "$TMP_DIR/closure-all-task-ids" | uniq -d > "$TMP_DIR/closure-duplicate-tasks"
+  if [[ -s "$TMP_DIR/closure-duplicate-tasks" ]]; then
+    fail "tasks.md: every non-checkpoint task may appear in Closure exactly once"
+    bad=1
+  fi
+  awk '
+    /^- \[[ xX]\] T[0-9][0-9][0-9]([[:space:]]|$)/ &&
+    $0 !~ /GateSpec review checkpoint REV-(FOUNDATION|US[1-9][0-9]*|FINAL):/ {
+      print substr($0, index($0, "T"), 4)
+    }
+  ' "$TASKS" | LC_ALL=C sort > "$TMP_DIR/closure-all-noncheckpoint-tasks"
+  LC_ALL=C sort "$TMP_DIR/closure-all-task-ids" > "$TMP_DIR/closure-all-task-ids-sorted"
+  if ! cmp -s "$TMP_DIR/closure-all-noncheckpoint-tasks" "$TMP_DIR/closure-all-task-ids-sorted"; then
+    fail "tasks.md: Checkpoint Closure must cover every non-checkpoint task exactly once"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: checkpoint closure exactly partitions contracts and task intervals"
+}
+
+check_tasks_closure() {
+  local checkpoint_exact prior_exact checkpoint_candidates prior_candidates first_phase
+  local before_phase_h2="$TMP_DIR/tasks-before-phase-h2" previous penultimate bad=0 grandfather_before
+  checkpoint_exact=$(grep -Fxc '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' "$TASKS" || true)
+  prior_exact=$(grep -Fxc '## GateSpec Prior Review Closure *(gatespec: mandatory)*' "$TASKS" || true)
+  checkpoint_candidates=$(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Checkpoint Closure' "$TASKS" || true)
+  prior_candidates=$(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Prior Review Closure' "$TASKS" || true)
+  if [[ "$checkpoint_candidates" -eq 0 && "$prior_candidates" -eq 0 ]]; then
+    grandfather_before=$FAILURES
+    if check_complete_tracked_task_review_grandfather; then
+      collect_prior_review_findings
+      [[ "$FAILURES" -eq "$grandfather_before" ]] && check_task_review_git_state
+      if [[ "$FAILURES" -eq "$grandfather_before" ]]; then
+        pass "tasks.md: complete clean tracked legacy REV-TASKS PASS handoff is grandfathered"
+      fi
+    else
+      fail "tasks.md: both mandatory GateSpec Closure sections are required for a new or unsealed task plan"
+    fi
+    return
+  fi
+  if [[ "$checkpoint_exact" -ne 1 || "$prior_exact" -ne 1 ||
+        "$checkpoint_candidates" -ne 1 || "$prior_candidates" -ne 1 ]]; then
+    fail "tasks.md: both GateSpec Closure headings must be exact, unique, and present together"
+    return
+  fi
+  first_phase=$(awk '/^## Phase([[:space:]]|$)/ {print NR; exit}' "$TASKS")
+  if ! [[ "$first_phase" =~ ^[0-9]+$ ]]; then
+    fail "tasks.md: Closure sections must precede the first ## Phase"
+    return
+  fi
+  awk -v stop="$first_phase" 'NR < stop && /^## / {print}' "$TASKS" > "$before_phase_h2"
+  previous=$(awk 'NF {previous=current; current=$0} END {print previous}' "$before_phase_h2")
+  penultimate=$(awk 'NF {previous=current; current=$0} END {print current}' "$before_phase_h2")
+  if [[ "$previous" != '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' ||
+        "$penultimate" != '## GateSpec Prior Review Closure *(gatespec: mandatory)*' ]]; then
+    fail "tasks.md: Closure sections must be the final two H2 sections before the first Phase, in fixed order"
+    bad=1
+  fi
+  collect_required_closure_contracts
+  check_checkpoint_closure_table
+  check_prior_review_closure_table
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: mandatory Closure sections are exact and correctly positioned"
+}
+
+check_historical_task_request_file() {
+  local file="$1" expected_round="$2" previous_hash="$3" context protocol id round scope
+  local spec_hash plan_hash attachments_hash tasks_hash source_hash epoch ia_hash handoff preserved
+  local baseline base subject task_ids changed final_delta previous previous_line tests_line hash_line
+  local before="$FAILURES" expected_source
+  HISTORICAL_REQUEST_BASIS_MATCH=no
+  HISTORICAL_REQUEST_TASKS_HASH=''
+  HISTORICAL_REQUEST_PROTOCOL=''
+  HISTORICAL_REQUEST_SPEC_HASH=''
+  HISTORICAL_REQUEST_PLAN_HASH=''
+  HISTORICAL_REQUEST_ATTACHMENTS_HASH=''
+  HISTORICAL_REQUEST_EPOCH=''
+  HISTORICAL_REQUEST_SOURCE_HASH=''
+  HISTORICAL_REQUEST_IA_HASH=''
+  HISTORICAL_REQUEST_HANDOFF=''
+  HISTORICAL_REQUEST_PRESERVED=''
+  [[ -f "$file" ]] || { fail "historical REV-TASKS: request file is missing"; return 1; }
+  context=${file#"$FEATURE_DIR"/}
+  check_receipt_line_whitelist "$file" request "$context"
+  protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  if [[ "$protocol" == 2 ]]; then
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Execution-Epoch' 'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' 'Implementation-Baseline' \
+      'Base-Commit' 'Subject-Commit' 'Task-IDs' 'Changed-Paths-SHA256' \
+      'Final-Delta-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  else
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Implementation-Baseline' 'Base-Commit' 'Subject-Commit' 'Task-IDs' \
+      'Changed-Paths-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  fi
+  check_exact_h2_order "$file" "$context" 'Required Tests'
+  previous_line=$(markdown_field_line_numbers "$file" 'Previous-Verdict-SHA256')
+  tests_line=$(awk '$0 == "## Required Tests" {print NR}' "$file")
+  hash_line=$(markdown_field_line_numbers "$file" 'Request-SHA256')
+  if ! [[ "$previous_line" =~ ^[0-9]+$ && "$tests_line" =~ ^[0-9]+$ && "$hash_line" =~ ^[0-9]+$ ]] ||
+     (( previous_line >= tests_line || tests_line >= hash_line )); then
+    fail "$context: Required Tests must follow Previous-Verdict-SHA256 and precede Request-SHA256"
+  fi
+  id=$(markdown_field_value "$file" 'Review-ID')
+  round=$(markdown_field_value "$file" 'Round')
+  scope=$(markdown_field_value "$file" 'Scope')
+  spec_hash=$(markdown_field_value "$file" 'Spec-Content-SHA256')
+  plan_hash=$(markdown_field_value "$file" 'Plan-Content-SHA256')
+  attachments_hash=$(markdown_field_value "$file" 'Design-Attachments-SHA256')
+  tasks_hash=$(markdown_field_value "$file" 'Tasks-Definition-SHA256')
+  epoch=$(markdown_field_value "$file" 'Execution-Epoch')
+  source_hash=$(markdown_field_value "$file" 'Source-Design-Content-SHA256')
+  ia_hash=$(markdown_field_value "$file" 'Implementation-Adjustments-SHA256')
+  handoff=$(markdown_field_value "$file" 'Task-Handoff-Commit')
+  preserved=$(markdown_field_value "$file" 'Preserved-Reviews-SHA256')
+  baseline=$(markdown_field_value "$file" 'Implementation-Baseline')
+  base=$(markdown_field_value "$file" 'Base-Commit')
+  subject=$(markdown_field_value "$file" 'Subject-Commit')
+  task_ids=$(markdown_field_value "$file" 'Task-IDs')
+  changed=$(markdown_field_value "$file" 'Changed-Paths-SHA256')
+  final_delta=$(markdown_field_value "$file" 'Final-Delta-SHA256')
+  previous=$(markdown_field_value "$file" 'Previous-Verdict-SHA256')
+  case "$protocol" in 1|2) ;; *) fail "$context: Protocol-Version must be 1 or 2" ;; esac
+  [[ "$id" == REV-TASKS ]] || fail "$context: Review-ID must be REV-TASKS"
+  [[ "$round" == "$expected_round" ]] || fail "$context: Round must be $expected_round"
+  [[ "$scope" == TASKS ]] || fail "$context: Scope must be TASKS"
+  [[ "$previous" == "$previous_hash" ]] || fail "$context: Previous-Verdict-SHA256 does not chain to the prior round"
+  for digest in "$spec_hash" "$plan_hash" "$attachments_hash" "$tasks_hash"; do
+    is_lower_hex64 "$digest" || { fail "$context: artifact hashes must be lowercase 64-hex"; break; }
+  done
+  if [[ "$baseline" != not-applicable || "$base" != not-applicable || "$subject" != not-applicable ||
+        "$task_ids" != none || "$changed" != not-applicable ]]; then
+    fail "$context: historical TASKS Git and Task-IDs fields must use their fixed not-applicable/none values"
+  fi
+  if [[ "$protocol" == 2 ]]; then
+    printf '%s\n' "$epoch" | grep -Eq '^E[1-9][0-9]*$' || fail "$context: Execution-Epoch must be E<n>"
+    if [[ "$source_hash" != not-applicable ]] && ! is_lower_hex64 "$source_hash"; then
+      fail "$context: Source-Design-Content-SHA256 must be not-applicable or lowercase 64-hex"
+    fi
+    if [[ "$ia_hash" != not-applicable ]] && ! is_lower_hex64 "$ia_hash"; then
+      fail "$context: Implementation-Adjustments-SHA256 must be not-applicable or lowercase 64-hex"
+    fi
+    is_git_oid "$handoff" || fail "$context: Task-Handoff-Commit must be a commit OID"
+    if [[ "$preserved" != not-applicable ]] && ! is_lower_hex64 "$preserved"; then
+      fail "$context: Preserved-Reviews-SHA256 must be not-applicable or lowercase 64-hex"
+    fi
+    [[ "$final_delta" == not-applicable ]] || fail "$context: TASKS Final-Delta-SHA256 must be not-applicable"
+  elif [[ -n "$epoch$source_hash$ia_hash$handoff$preserved$final_delta" ]]; then
+    fail "$context: Protocol v1 must not contain Protocol v2 fields"
+  fi
+  check_request_tests "$file" TASKS "$context" REV-TASKS
+  check_self_hash "$file" 'Request-SHA256' "$context"
+  HISTORICAL_REQUEST_TASKS_HASH=$tasks_hash
+  HISTORICAL_REQUEST_PROTOCOL=$protocol
+  HISTORICAL_REQUEST_SPEC_HASH=$spec_hash
+  HISTORICAL_REQUEST_PLAN_HASH=$plan_hash
+  HISTORICAL_REQUEST_ATTACHMENTS_HASH=$attachments_hash
+  HISTORICAL_REQUEST_EPOCH=$epoch
+  HISTORICAL_REQUEST_SOURCE_HASH=$source_hash
+  HISTORICAL_REQUEST_IA_HASH=$ia_hash
+  HISTORICAL_REQUEST_HANDOFF=$handoff
+  HISTORICAL_REQUEST_PRESERVED=$preserved
+  if [[ -f "$SOURCE_ENTRY" ]]; then expected_source=$(source_design_content_hash) || expected_source=''
+  else expected_source=not-applicable; fi
+  if [[ "$spec_hash" == "$CURRENT_SPEC_HASH" && "$plan_hash" == "$CURRENT_PLAN_HASH" &&
+        "$attachments_hash" == "$CURRENT_ATTACHMENTS_HASH" ]]; then
+    if [[ -f "$SOURCE_ENTRY" ]]; then
+      [[ "$protocol" == 2 && "$source_hash" == "$expected_source" ]] && HISTORICAL_REQUEST_BASIS_MATCH=yes
+    elif [[ "$protocol" == 1 || "$source_hash" == not-applicable ]]; then
+      HISTORICAL_REQUEST_BASIS_MATCH=yes
+    fi
+  fi
+  [[ "$FAILURES" -eq "$before" ]]
+}
+
+append_blocker_findings() {
+  local verdict="$1" relative="$2" archive_root="$3" body="$TMP_DIR/historical-blocker-body"
+  local prefix count i=1 item digest ordinal
+  HISTORICAL_FINDING_SERIAL=$(( ${HISTORICAL_FINDING_SERIAL:-0} + 1 ))
+  prefix="$TMP_DIR/finding-${HISTORICAL_FINDING_SERIAL}"
+  receipt_section_body "$verdict" 'Blockers' 'Verdict-SHA256' > "$body"
+  count=$(awk -v prefix="$prefix" '
+    function flush_blanks(    j) {
+      for (j=0; j<pending_blanks; j++) printf "\n" >> file
+      pending_blanks=0
+    }
+    /^- BLOCKER:[[:space:]]+/ {
+      count++
+      active=1
+      pending_blanks=0
+      file=sprintf("%s-%02d", prefix, count)
+      printf "%s\n", $0 > file
+      next
+    }
+    active && /^[[:space:]]*$/ {pending_blanks++; next}
+    active && /^[[:space:]]+[^[:space:]]/ {
+      flush_blanks()
+      printf "%s\n", $0 >> file
+      next
+    }
+    /^- / || /^## / || /^[^[:space:]]/ {active=0; pending_blanks=0; next}
+    END {print count+0}
+  ' "$body")
+  while [[ "$i" -le "$count" ]]; do
+    printf -v item '%s-%02d' "$prefix" "$i"
+    digest=$(file_hash "$item") || digest=''
+    printf -v ordinal 'B%02d' "$i"
+    printf '%s\t%s#%s\t%s\n' "$digest" "$relative" "$ordinal" "$archive_root" \
+      >> "$TMP_DIR/required-prior-findings"
+    i=$((i + 1))
+  done
+}
+
+git_tree_blob_manifest_hash() {
+  local commit="$1" kind="$2" tree="$TMP_DIR/git-tree-$kind"
+  local manifest="$TMP_DIR/git-tree-$kind-manifest" meta path mode type oid rel digest tail
+  local source_entry='' saw_source_shard=0
+  : > "$manifest"
+  git -C "$GIT_ROOT" ls-tree -r "$commit" -- "$GIT_FEATURE_REL" > "$tree" 2>/dev/null || return 1
+  while IFS=$'\t' read -r meta path; do
+    [[ -n "$path" ]] || continue
+    mode=$(printf '%s\n' "$meta" | awk '{print $1}')
+    type=$(printf '%s\n' "$meta" | awk '{print $2}')
+    oid=$(printf '%s\n' "$meta" | awk '{print $3}')
+    [[ "$type" == blob && "$mode" =~ ^100(644|755)$ ]] || continue
+    rel=${path#"$GIT_FEATURE_REL"/}
+    case "$kind" in
+      attachments)
+        case "$rel" in
+          research.md|data-model.md|quickstart.md) ;;
+          contracts/source-design.md|contracts/source-design/*) continue ;;
+          contracts/*) ;;
+          *) continue ;;
+        esac
+        digest=$(git -C "$GIT_ROOT" cat-file blob "$oid" 2>/dev/null | portable_sha256 | awk '{print $1}') || return 1
+        printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+        ;;
+      source)
+        case "$rel" in
+          contracts/source-design.md)
+            git -C "$GIT_ROOT" cat-file blob "$oid" > "$TMP_DIR/git-tree-source-entry" 2>/dev/null || return 1
+            digest=$(sed '/^## Gate Approval/,$d' "$TMP_DIR/git-tree-source-entry" | portable_sha256 | awk '{print $1}')
+            printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+            source_entry=yes
+            ;;
+          contracts/source-design/*.md)
+            tail=${rel#contracts/source-design/}
+            [[ "$tail" != */* ]] || continue
+            digest=$(git -C "$GIT_ROOT" cat-file blob "$oid" 2>/dev/null | portable_sha256 | awk '{print $1}') || return 1
+            printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+            saw_source_shard=1
+            ;;
+        esac
+        ;;
+      preserved)
+        case "$rel" in .gatespec/revalidations/*) ;; *) continue ;; esac
+        digest=$(git -C "$GIT_ROOT" cat-file blob "$oid" 2>/dev/null | portable_sha256 | awk '{print $1}') || return 1
+        printf '%s\t%s\n' "$rel" "$digest" >> "$manifest"
+        ;;
+      *) return 1 ;;
+    esac
+  done < "$tree"
+  if [[ "$kind" == source ]]; then
+    if [[ -z "$source_entry" ]]; then
+      [[ "$saw_source_shard" -eq 0 ]] || return 1
+      printf '%s' 'not-applicable'
+      return
+    fi
+  elif [[ "$kind" == preserved && ! -s "$manifest" ]]; then
+    printf '%s' 'not-applicable'
+    return
+  fi
+  LC_ALL=C sort "$manifest" | portable_sha256 | awk '{print $1}'
+}
+
+check_archived_v2_handoff() {
+  local root="$1" review="$root/reviews/REV-TASKS" round00="$root/reviews/REV-TASKS/round-00-request.md"
+  local context="${root#"$FEATURE_DIR"/}" handoff original epoch source ia_hash preserved
+  local parents spec_blob="$TMP_DIR/archive-handoff-spec" plan_blob="$TMP_DIR/archive-handoff-plan"
+  local tasks_blob="$TMP_DIR/archive-handoff-tasks" state_blob="$TMP_DIR/archive-handoff-state"
+  local ia_blob="$TMP_DIR/archive-handoff-ia" invalid actual_attachments actual_source actual_preserved bad=0
+  handoff=$(markdown_field_value "$round00" 'Task-Handoff-Commit')
+  original=$(markdown_field_value "$root/execution-state.md" 'Original-Implementation-Baseline')
+  epoch=$(markdown_field_value "$round00" 'Execution-Epoch')
+  source=$(markdown_field_value "$round00" 'Source-Design-Content-SHA256')
+  ia_hash=$(markdown_field_value "$round00" 'Implementation-Adjustments-SHA256')
+  preserved=$(markdown_field_value "$round00" 'Preserved-Reviews-SHA256')
+  if [[ -z "$GIT_ROOT" ]] || ! resolve_git_feature_paths || ! is_git_oid "$handoff" ||
+     ! git -C "$GIT_ROOT" cat-file -e "${handoff}^{commit}" 2>/dev/null; then
+    fail "tasks.md: $context archived Task-Handoff-Commit must resolve to a commit"
+    return
+  fi
+  parents=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$handoff" 2>/dev/null || true)
+  [[ $(printf '%s\n' "$parents" | awk '{print NF+0}') -eq 2 ]] || {
+    fail "tasks.md: $context archived Task-Handoff-Commit must have one parent"; bad=1;
+  }
+  if ! is_git_oid "$original" ||
+     ! git -C "$GIT_ROOT" merge-base --is-ancestor "$original" "$handoff" 2>/dev/null ||
+     ! git -C "$GIT_ROOT" merge-base --is-ancestor "$handoff" HEAD 2>/dev/null; then
+    fail "tasks.md: $context archived Original→Task-Handoff→HEAD ancestry is invalid"
+    bad=1
+  fi
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/spec.md" > "$spec_blob" 2>/dev/null ||
+     [[ $(content_hash "$spec_blob") != $(markdown_field_value "$round00" 'Spec-Content-SHA256') ]]; then
+    fail "tasks.md: $context archived Task-Handoff spec snapshot is stale"
+    bad=1
+  fi
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/plan.md" > "$plan_blob" 2>/dev/null ||
+     [[ $(content_hash "$plan_blob") != $(markdown_field_value "$round00" 'Plan-Content-SHA256') ]]; then
+    fail "tasks.md: $context archived Task-Handoff plan snapshot is stale"
+    bad=1
+  fi
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/tasks.md" > "$tasks_blob" 2>/dev/null ||
+     [[ $(normalized_tasks_hash "$tasks_blob") != $(markdown_field_value "$round00" 'Tasks-Definition-SHA256') ]]; then
+    fail "tasks.md: $context archived Task-Handoff tasks snapshot does not bind round 00"
+    bad=1
+  fi
+  if [[ -f "$tasks_blob" ]] && grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$tasks_blob"; then
+    fail "tasks.md: $context archived Task-Handoff tasks snapshot contains completed task evidence"
+    bad=1
+  fi
+  actual_attachments=$(git_tree_blob_manifest_hash "$handoff" attachments) || actual_attachments=''
+  [[ "$actual_attachments" == $(markdown_field_value "$round00" 'Design-Attachments-SHA256') ]] || {
+    fail "tasks.md: $context archived Task-Handoff Design Attachments snapshot is stale"; bad=1;
+  }
+  actual_source=$(git_tree_blob_manifest_hash "$handoff" source) || actual_source=''
+  [[ "$actual_source" == "$source" ]] || {
+    fail "tasks.md: $context archived Task-Handoff Source snapshot is stale"; bad=1;
+  }
+  actual_preserved=$(git_tree_blob_manifest_hash "$handoff" preserved) || actual_preserved=''
+  [[ "$actual_preserved" == "$preserved" ]] || {
+    fail "tasks.md: $context archived Task-Handoff preserved-review manifest is stale"; bad=1;
+  }
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/.gatespec/execution-state.md" \
+      > "$state_blob" 2>/dev/null; then
+    fail "tasks.md: $context archived Task-Handoff is missing pending execution state"
+    bad=1
+  else
+    invalid=$(awk '
+      /^[[:space:]]*$/ {next}
+      NR == 1 && $0 == "# GateSpec Execution State" {next}
+      /^- \*\*(Protocol-Version|Execution-Epoch|Original-Implementation-Baseline|Task-Handoff-Commit|Source-Design-Content-SHA256|Preserved-Reviews-SHA256|Execution-State-SHA256)\*\*: `[^`]+`$/ {next}
+      {print}
+    ' "$state_blob")
+    [[ -z "$invalid" && $(sed -n '1p' "$state_blob") == '# GateSpec Execution State' ]] || {
+      fail "tasks.md: $context archived pending execution state is non-canonical"; bad=1;
+    }
+    check_ordered_fields "$state_blob" "$context archived pending execution state" \
+      'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
+      'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
+    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == 2 &&
+       $(markdown_field_value "$state_blob" 'Execution-Epoch') == "$epoch" &&
+       $(markdown_field_value "$state_blob" 'Original-Implementation-Baseline') == "$original" &&
+       $(markdown_field_value "$state_blob" 'Task-Handoff-Commit') == pending &&
+       $(markdown_field_value "$state_blob" 'Source-Design-Content-SHA256') == "$source" &&
+       $(markdown_field_value "$state_blob" 'Preserved-Reviews-SHA256') == "$preserved" ]] || {
+      fail "tasks.md: $context archived pending execution state does not bind round 00"; bad=1;
+    }
+    check_self_hash "$state_blob" 'Execution-State-SHA256' "$context archived pending execution state"
+  fi
+  if [[ "$source" == not-applicable ]]; then
+    [[ "$ia_hash" == not-applicable ]] || { fail "tasks.md: $context archived no-Source IA must be not-applicable"; bad=1; }
+    if git -C "$GIT_ROOT" cat-file -e "$handoff:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" 2>/dev/null; then
+      fail "tasks.md: $context archived no-Source Task-Handoff contains IA"
+      bad=1
+    fi
+  elif ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" \
+      > "$ia_blob" 2>/dev/null; then
+    fail "tasks.md: $context archived Task-Handoff is missing empty IA"
+    bad=1
+  else
+    check_canonical_empty_ia "$ia_blob" "$context archived Task-Handoff IA" "$epoch" "$source" || bad=1
+    [[ $(file_hash "$ia_blob") == "$ia_hash" ]] || {
+      fail "tasks.md: $context archived Task-Handoff IA does not bind round 00"; bad=1;
+    }
+  fi
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: $context archived v2 Task-Handoff snapshot is reproducible"
+}
+
+append_contributing_archive_manifest() {
+  local root="$1" review file rel protocol source_hash tasks_hash latest_request
+  local git_rel state_invalid state_epoch state_original state_source state_handoff state_preserved
+  review="$root/reviews/REV-TASKS"
+  [[ -n "$root" ]] || return 0
+  if [[ ! -f "$root/tasks.md" ]]; then
+    fail "tasks.md: contributing retask archive '${root#"$FEATURE_DIR"/}' is missing tasks.md"
+    return 1
+  fi
+  printf '%s\n' "$root" >> "$TMP_DIR/prior-closure-contributing-archives"
+  git_rel="${root#"$FEATURE_DIR"/}/tasks.md"
+  [[ -n "${GIT_FEATURE_REL:-}" ]] && git_rel="$GIT_FEATURE_REL/$git_rel"
+  printf '%s\t%s\n' "$git_rel" "$root/tasks.md" \
+    >> "$TMP_DIR/prior-closure-archive-files"
+  while IFS= read -r file; do
+    [[ -f "$file" ]] || continue
+    rel=${file#"$FEATURE_DIR"/}
+    git_rel=$rel
+    [[ -n "${GIT_FEATURE_REL:-}" ]] && git_rel="$GIT_FEATURE_REL/$git_rel"
+    printf '%s\t%s\n' "$git_rel" "$file" >> "$TMP_DIR/prior-closure-archive-files"
+  done < <(find "$review" -maxdepth 1 -type f -print)
+  latest_request=$(find "$review" -maxdepth 1 -type f -name 'round-*-request.md' -print | LC_ALL=C sort | tail -1)
+  protocol=$(markdown_field_value "$latest_request" 'Protocol-Version')
+  tasks_hash=$(markdown_field_value "$latest_request" 'Tasks-Definition-SHA256')
+  if [[ "$tasks_hash" != $(normalized_tasks_hash "$root/tasks.md") ]]; then
+    fail "tasks.md: contributing retask archive tasks.md does not match its terminal REV-TASKS request"
+  fi
+  if grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$root/tasks.md"; then
+    fail "tasks.md: retask archive contains completed task evidence"
+  fi
+  if [[ "$protocol" == 2 ]]; then
+    if [[ ! -f "$root/execution-state.md" ]]; then
+      fail "tasks.md: contributing v2 retask archive is missing execution-state.md"
+    else
+      state_invalid=$(awk '
+        /^[[:space:]]*$/ {next}
+        NR == 1 && $0 == "# GateSpec Execution State" {next}
+        /^- \*\*(Protocol-Version|Execution-Epoch|Original-Implementation-Baseline|Task-Handoff-Commit|Source-Design-Content-SHA256|Preserved-Reviews-SHA256|Execution-State-SHA256)\*\*: `[^`]+`$/ {next}
+        {print NR ":" $0}
+      ' "$root/execution-state.md")
+      [[ -z "$state_invalid" ]] || fail "tasks.md: contributing retask archive execution state has non-canonical content"
+      [[ $(sed -n '1p' "$root/execution-state.md") == '# GateSpec Execution State' &&
+         $(grep -cFx '# GateSpec Execution State' "$root/execution-state.md" || true) -eq 1 ]] ||
+        fail "tasks.md: contributing retask archive execution state requires its exact line-1 title"
+      check_ordered_fields "$root/execution-state.md" "${root#"$FEATURE_DIR"/}/execution-state.md" \
+        'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
+        'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
+      [[ $(markdown_field_value "$root/execution-state.md" 'Protocol-Version') == 2 ]] ||
+        fail "tasks.md: contributing retask archive execution state must use Protocol-Version 2"
+      state_epoch=$(markdown_field_value "$root/execution-state.md" 'Execution-Epoch')
+      state_original=$(markdown_field_value "$root/execution-state.md" 'Original-Implementation-Baseline')
+      state_source=$(markdown_field_value "$root/execution-state.md" 'Source-Design-Content-SHA256')
+      state_handoff=$(markdown_field_value "$root/execution-state.md" 'Task-Handoff-Commit')
+      state_preserved=$(markdown_field_value "$root/execution-state.md" 'Preserved-Reviews-SHA256')
+      if [[ "$state_epoch" != $(markdown_field_value "$latest_request" 'Execution-Epoch') ||
+            "$state_source" != $(markdown_field_value "$latest_request" 'Source-Design-Content-SHA256') ||
+            "$state_handoff" != $(markdown_field_value "$latest_request" 'Task-Handoff-Commit') ||
+            "$state_preserved" != $(markdown_field_value "$latest_request" 'Preserved-Reviews-SHA256') ]]; then
+        fail "tasks.md: contributing retask archive execution state does not bind its terminal request"
+      fi
+      is_git_oid "$state_original" ||
+        fail "tasks.md: contributing retask archive Original-Implementation-Baseline must be a commit OID"
+      check_self_hash "$root/execution-state.md" 'Execution-State-SHA256' \
+        "${root#"$FEATURE_DIR"/}/execution-state.md"
+      git_rel="${root#"$FEATURE_DIR"/}/execution-state.md"
+      [[ -n "${GIT_FEATURE_REL:-}" ]] && git_rel="$GIT_FEATURE_REL/$git_rel"
+      printf '%s\t%s\n' "$git_rel" "$root/execution-state.md" \
+        >> "$TMP_DIR/prior-closure-archive-files"
+    fi
+    [[ -f "$root/execution-state.md" ]] && check_archived_v2_handoff "$root"
+    source_hash=$(markdown_field_value "$latest_request" 'Source-Design-Content-SHA256')
+    if [[ "$source_hash" != not-applicable ]]; then
+      if [[ ! -f "$root/implementation-adjustments.md" ]]; then
+        fail "tasks.md: contributing Source/v2 retask archive is missing implementation-adjustments.md"
+      else
+        if [[ $(file_hash "$root/implementation-adjustments.md") != \
+              $(markdown_field_value "$latest_request" 'Implementation-Adjustments-SHA256') ]]; then
+          fail "tasks.md: contributing retask archive IA does not match its terminal REV-TASKS request"
+        fi
+        check_canonical_empty_ia "$root/implementation-adjustments.md" \
+          "${root#"$FEATURE_DIR"/}/implementation-adjustments.md" \
+          "$(markdown_field_value "$latest_request" 'Execution-Epoch')" "$source_hash" || true
+        git_rel="${root#"$FEATURE_DIR"/}/implementation-adjustments.md"
+        [[ -n "${GIT_FEATURE_REL:-}" ]] && git_rel="$GIT_FEATURE_REL/$git_rel"
+        printf '%s\t%s\n' "$git_rel" \
+          "$root/implementation-adjustments.md" >> "$TMP_DIR/prior-closure-archive-files"
+      fi
+    elif [[ -e "$root/implementation-adjustments.md" ]]; then
+      fail "tasks.md: no-Source retask archive must not contain implementation-adjustments.md"
+    fi
+  elif [[ -e "$root/execution-state.md" || -e "$root/implementation-adjustments.md" ]]; then
+    fail "tasks.md: Protocol v1 retask archive must not contain v2 execution state or IA"
+  fi
+}
+
+check_historical_task_chain() {
+  local directory="$1" archive_root="$2" context=${1#"$FEATURE_DIR"/}
+  local i=0 round request verdict request_hash status previous=none previous_tasks='' current_tasks
+  local previous_status='' seal="$directory/seal.md" seal_round invalid gap=0 terminal_round='' terminal_status=''
+  local chain_basis=yes before="$FAILURES" chain_protocol='' current_protocol
+  local current_spec current_plan current_attachments current_epoch current_source current_ia current_handoff current_preserved
+  local previous_spec='' previous_plan='' previous_attachments='' previous_epoch='' previous_source=''
+  local previous_ia='' previous_handoff='' previous_preserved=''
+  HISTORICAL_CHAIN_TERMINAL_ROUND=''
+  HISTORICAL_CHAIN_TERMINAL_STATUS=''
+  HISTORICAL_CHAIN_BASIS_MATCH=no
+  HISTORICAL_CHAIN_PROTOCOL=''
+  HISTORICAL_CHAIN_TERMINAL_TASKS_HASH=''
+  HISTORICAL_CHAIN_TERMINAL_EPOCH=''
+  HISTORICAL_CHAIN_TERMINAL_SOURCE_HASH=''
+  HISTORICAL_CHAIN_TERMINAL_IA_HASH=''
+  HISTORICAL_CHAIN_TERMINAL_HANDOFF=''
+  HISTORICAL_CHAIN_TERMINAL_PRESERVED=''
+  if [[ ! -d "$directory" || -L "$directory" ]]; then
+    fail "$context: historical review root must be a regular directory"
+    return 1
+  fi
+  invalid=$(find "$directory" -mindepth 1 -maxdepth 1 -print | while IFS= read -r file; do
+    rel=${file##*/}
+    if [[ ! -f "$file" || -L "$file" ]] ||
+       ! printf '%s\n' "$rel" | grep -Eq '^(round-(00|01|02)-(request|verdict)\.md|seal\.md)$'; then
+      printf '%s\n' "$rel"
+    fi
+  done)
+  [[ -z "$invalid" ]] || fail "$context: historical chain contains non-canonical receipt files"
+  while [[ "$i" -le 2 ]]; do
+    printf -v round '%02d' "$i"
+    request="$directory/round-${round}-request.md"
+    verdict="$directory/round-${round}-verdict.md"
+    if [[ -e "$request" || -e "$verdict" ]]; then
+      if [[ "$gap" -eq 1 || ! -f "$request" || ! -f "$verdict" ]]; then
+        fail "$context: historical rounds must be contiguous request/verdict pairs from round 00"
+        gap=1
+        i=$((i + 1))
+        continue
+      fi
+      if ! check_historical_task_request_file "$request" "$round" "$previous"; then :; fi
+      [[ "$HISTORICAL_REQUEST_BASIS_MATCH" == yes ]] || chain_basis=no
+      current_tasks=$HISTORICAL_REQUEST_TASKS_HASH
+      current_protocol=$HISTORICAL_REQUEST_PROTOCOL
+      current_spec=$HISTORICAL_REQUEST_SPEC_HASH
+      current_plan=$HISTORICAL_REQUEST_PLAN_HASH
+      current_attachments=$HISTORICAL_REQUEST_ATTACHMENTS_HASH
+      current_epoch=$HISTORICAL_REQUEST_EPOCH
+      current_source=$HISTORICAL_REQUEST_SOURCE_HASH
+      current_ia=$HISTORICAL_REQUEST_IA_HASH
+      current_handoff=$HISTORICAL_REQUEST_HANDOFF
+      current_preserved=$HISTORICAL_REQUEST_PRESERVED
+      if [[ -z "$chain_protocol" ]]; then chain_protocol=$current_protocol
+      elif [[ "$current_protocol" != "$chain_protocol" ]]; then fail "$context: Protocol-Version must remain fixed across rounds"; fi
+      if [[ "$i" -gt 0 ]]; then
+        [[ "$previous_status" == BLOCKED ]] || fail "$context: every nonterminal prior round must be BLOCKED"
+        [[ "$current_tasks" != "$previous_tasks" ]] || fail "$context: task remediation must change Tasks-Definition-SHA256"
+        if [[ "$current_spec" != "$previous_spec" || "$current_plan" != "$previous_plan" ||
+              "$current_attachments" != "$previous_attachments" ]]; then
+          fail "$context: task remediation must retain Spec, Plan, and Design-Attachments hashes"
+        fi
+        if [[ "$current_protocol" == 2 ]] &&
+           [[ "$current_epoch" != "$previous_epoch" || "$current_source" != "$previous_source" ||
+              "$current_ia" != "$previous_ia" || "$current_handoff" != "$previous_handoff" ||
+              "$current_preserved" != "$previous_preserved" ]]; then
+          fail "$context: v2 task remediation must retain epoch, Source, IA, handoff, and preserved-review bindings"
+        fi
+      fi
+      request_hash=$(markdown_field_value "$request" 'Request-SHA256')
+      check_verdict_file "$verdict" REV-TASKS "$round" "$request_hash" TASKS "$current_protocol"
+      status=$CHECKED_VERDICT_STATUS
+      if [[ "$status" == BLOCKED && "$HISTORICAL_REQUEST_BASIS_MATCH" == yes ]] &&
+         ! [[ "$MODE" == retask-eligible && "${TASKS_CLOSURE_POLICY:-required}" == optional &&
+               -z "$archive_root" && "$round" == 02 && ! -f "$seal" ]]; then
+        append_blocker_findings "$verdict" "${verdict#"$FEATURE_DIR"/}" "$archive_root"
+      fi
+      previous=$CHECKED_VERDICT_HASH
+      previous_status=$status
+      previous_tasks=$current_tasks
+      previous_spec=$current_spec
+      previous_plan=$current_plan
+      previous_attachments=$current_attachments
+      previous_epoch=$current_epoch
+      previous_source=$current_source
+      previous_ia=$current_ia
+      previous_handoff=$current_handoff
+      previous_preserved=$current_preserved
+      terminal_round=$round
+      terminal_status=$status
+    else
+      gap=1
+    fi
+    i=$((i + 1))
+  done
+  if [[ -z "$terminal_round" ]]; then
+    fail "$context: historical review directory has no complete round"
+    return 1
+  fi
+  if [[ -f "$seal" ]]; then
+    seal_round=$(markdown_field_value "$seal" 'Round')
+    if [[ "$seal_round" != "$terminal_round" || "$terminal_status" != PASS ]]; then
+      fail "$context: historical seal must bind its terminal PASS round"
+    else
+      check_seal_file "$seal" "$directory/round-${terminal_round}-request.md" \
+        "$directory/round-${terminal_round}-verdict.md" REV-TASKS "$terminal_round"
+    fi
+  elif [[ "$terminal_status" != BLOCKED ]]; then
+    fail "$context: unsealed historical chain must end in BLOCKED"
+  fi
+  HISTORICAL_CHAIN_TERMINAL_ROUND=$terminal_round
+  HISTORICAL_CHAIN_TERMINAL_STATUS=$terminal_status
+  HISTORICAL_CHAIN_BASIS_MATCH=$chain_basis
+  HISTORICAL_CHAIN_PROTOCOL=$chain_protocol
+  HISTORICAL_CHAIN_TERMINAL_TASKS_HASH=$current_tasks
+  HISTORICAL_CHAIN_TERMINAL_EPOCH=$current_epoch
+  HISTORICAL_CHAIN_TERMINAL_SOURCE_HASH=$current_source
+  HISTORICAL_CHAIN_TERMINAL_IA_HASH=$current_ia
+  HISTORICAL_CHAIN_TERMINAL_HANDOFF=$current_handoff
+  HISTORICAL_CHAIN_TERMINAL_PRESERVED=$current_preserved
+  [[ "$FAILURES" -eq "$before" ]]
+}
+
+collect_prior_review_findings() {
+  local archive archive_name archive_entry archive_rel archive_invalid review
+  : > "$TMP_DIR/required-prior-findings"
+  : > "$TMP_DIR/prior-closure-contributing-archives"
+  : > "$TMP_DIR/prior-closure-archive-files"
+  HISTORICAL_FINDING_SERIAL=0
+  initialize_review_hashes
+  if [[ -n "$GIT_ROOT" ]]; then
+    resolve_git_feature_paths || true
+  fi
+  review="$FEATURE_DIR/.gatespec/reviews/REV-TASKS"
+  if [[ -e "$review" || -L "$review" ]]; then
+    if [[ ! -d "$review" || -L "$review" ]]; then
+      fail "tasks.md: current REV-TASKS review root must be a regular directory"
+    elif find "$review" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+      check_historical_task_chain "$review" ''
+    fi
+  fi
+  if [[ -e "$FEATURE_DIR/.gatespec" || -L "$FEATURE_DIR/.gatespec" ]] &&
+     [[ ! -d "$FEATURE_DIR/.gatespec" || -L "$FEATURE_DIR/.gatespec" ]]; then
+    fail "tasks.md: an existing .gatespec root must be a regular non-symlink directory"
+  elif [[ -e "$FEATURE_DIR/.gatespec/archive" || -L "$FEATURE_DIR/.gatespec/archive" ]] &&
+       [[ ! -d "$FEATURE_DIR/.gatespec/archive" || -L "$FEATURE_DIR/.gatespec/archive" ]]; then
+    fail "tasks.md: an existing archive root must be a regular non-symlink directory"
+  elif [[ -d "$FEATURE_DIR/.gatespec/archive" ]]; then
+    while IFS= read -r archive; do
+      archive_name=${archive##*/}
+      if ! printf '%s\n' "$archive_name" | grep -Eq '^[0-9]{8}T[0-9]{6}Z-retask$'; then
+        fail "tasks.md: retask archive '$archive_name' must use the exact UTC timestamp name"
+      fi
+      if [[ ! -d "$archive" || -L "$archive" ]]; then
+        fail "tasks.md: retask archive '${archive#"$FEATURE_DIR"/}' must be a regular directory"
+        continue
+      fi
+      archive_invalid=''
+      while IFS= read -r archive_entry; do
+        archive_rel=${archive_entry#"$archive"/}
+        case "$archive_rel" in
+          tasks.md|execution-state.md|implementation-adjustments.md)
+            [[ -f "$archive_entry" && ! -L "$archive_entry" ]] || archive_invalid=$archive_rel
+            ;;
+          reviews|reviews/REV-TASKS)
+            [[ -d "$archive_entry" && ! -L "$archive_entry" ]] || archive_invalid=$archive_rel
+            ;;
+          reviews/REV-TASKS/round-00-request.md|reviews/REV-TASKS/round-00-verdict.md|\
+          reviews/REV-TASKS/round-01-request.md|reviews/REV-TASKS/round-01-verdict.md|\
+          reviews/REV-TASKS/round-02-request.md|reviews/REV-TASKS/round-02-verdict.md|\
+          reviews/REV-TASKS/seal.md)
+            [[ -f "$archive_entry" && ! -L "$archive_entry" ]] || archive_invalid=$archive_rel
+            ;;
+          *) archive_invalid=$archive_rel ;;
+        esac
+        [[ -z "$archive_invalid" ]] || break
+      done < <(find "$archive" -mindepth 1 -print)
+      if [[ -n "$archive_invalid" ]]; then
+        fail "tasks.md: retask archive '${archive#"$FEATURE_DIR"/}' contains unknown or non-regular entry '$archive_invalid'"
+        continue
+      fi
+      if [[ ! -f "$archive/tasks.md" || -L "$archive/tasks.md" ]]; then
+        fail "tasks.md: retask archive '${archive#"$FEATURE_DIR"/}' is missing regular non-symlink tasks.md"
+      fi
+      if [[ ! -d "$archive/reviews/REV-TASKS" || -L "$archive/reviews" ||
+            -L "$archive/reviews/REV-TASKS" ]]; then
+        fail "tasks.md: retask archive '${archive#"$FEATURE_DIR"/}' is missing its regular REV-TASKS review directory"
+        continue
+      fi
+      check_historical_task_chain "$archive/reviews/REV-TASKS" "$archive"
+      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 && "$HISTORICAL_CHAIN_PROTOCOL" == 2 ]]; then
+        fail "tasks.md: legacy Protocol v1 cannot follow a Protocol v2 retask archive"
+      fi
+      append_contributing_archive_manifest "$archive"
+      if [[ "$HISTORICAL_CHAIN_PROTOCOL" == 2 ]]; then
+        [[ -f "$archive/execution-state.md" && ! -L "$archive/execution-state.md" ]] ||
+          fail "tasks.md: v2 retask archive '${archive#"$FEATURE_DIR"/}' requires regular execution-state.md"
+        if [[ "$HISTORICAL_CHAIN_TERMINAL_SOURCE_HASH" != not-applicable ]]; then
+          [[ -f "$archive/implementation-adjustments.md" && ! -L "$archive/implementation-adjustments.md" ]] ||
+            fail "tasks.md: Source/v2 retask archive '${archive#"$FEATURE_DIR"/}' requires regular implementation-adjustments.md"
+        elif [[ -e "$archive/implementation-adjustments.md" || -L "$archive/implementation-adjustments.md" ]]; then
+          fail "tasks.md: no-Source v2 retask archive '${archive#"$FEATURE_DIR"/}' must not contain implementation-adjustments.md"
+        fi
+      elif [[ "$HISTORICAL_CHAIN_PROTOCOL" == 1 ]] &&
+           [[ -e "$archive/execution-state.md" || -L "$archive/execution-state.md" ||
+              -e "$archive/implementation-adjustments.md" || -L "$archive/implementation-adjustments.md" ]]; then
+        fail "tasks.md: v1 retask archive '${archive#"$FEATURE_DIR"/}' must not contain v2 state or IA"
+      fi
+    done < <(find "$FEATURE_DIR/.gatespec/archive" -mindepth 1 -maxdepth 1 -name '*-retask' -print | LC_ALL=C sort)
+  fi
+}
+
+check_v2_execution_history_continuity() {
+  local state_rel="$GIT_FEATURE_REL/.gatespec/execution-state.md"
+  local commits="$TMP_DIR/retask-state-history-commits" blob="$TMP_DIR/retask-state-history-blob"
+  local history_epochs="$TMP_DIR/retask-state-history-epochs"
+  local commit epoch original number previous_number=0 anchor_original='' seen=0
+  local current_number archive archive_state archive_epoch archive_original archive_number
+  local previous_archive_number=0 bad=0
+  if ! printf '%s\n' "${CURRENT_EXECUTION_EPOCH:-}" | grep -Eq '^E[1-9][0-9]*$' ||
+     ! is_git_oid "${CURRENT_ORIGINAL_BASELINE:-}"; then
+    fail "retask eligibility: cannot audit history from an invalid current epoch or Original Baseline"
+    return
+  fi
+  git -C "$GIT_ROOT" log --reverse --format=%H -- "$state_rel" > "$commits" 2>/dev/null || {
+    fail "retask eligibility: cannot inspect execution-state history"
+    return
+  }
+  : > "$history_epochs"
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    if ! git -C "$GIT_ROOT" show "$commit:$state_rel" > "$blob" 2>/dev/null; then
+      fail "retask eligibility: committed execution-state history contains a deletion or unreadable snapshot"
+      bad=1
+      continue
+    fi
+    epoch=$(markdown_field_value "$blob" 'Execution-Epoch')
+    original=$(markdown_field_value "$blob" 'Original-Implementation-Baseline')
+    if ! printf '%s\n' "$epoch" | grep -Eq '^E[1-9][0-9]*$' || ! is_git_oid "$original"; then
+      fail "retask eligibility: committed execution-state history has an invalid epoch or Original Baseline"
+      bad=1
+      continue
+    fi
+    number=${epoch#E}
+    printf '%s\n' "$epoch" >> "$history_epochs"
+    if [[ "$seen" -eq 0 ]]; then
+      [[ "$number" -eq 1 ]] || { fail "retask eligibility: execution-state history must begin at E1"; bad=1; }
+      anchor_original=$original
+    else
+      [[ "$original" == "$anchor_original" ]] || {
+        fail "retask eligibility: Original-Implementation-Baseline changed in committed execution-state history"; bad=1;
+      }
+      if [[ "$number" -ne "$previous_number" && "$number" -ne $((previous_number + 1)) ]]; then
+        fail "retask eligibility: execution epochs must advance one step without gaps"
+        bad=1
+      fi
+    fi
+    previous_number=$number
+    seen=$((seen + 1))
+  done < "$commits"
+  if [[ "$seen" -eq 0 ]]; then
+    fail "retask eligibility: Protocol v2 requires committed execution-state history"
+    return
+  fi
+  [[ "$CURRENT_ORIGINAL_BASELINE" == "$anchor_original" ]] || {
+    fail "retask eligibility: current Original Baseline differs from the first committed execution state"; bad=1;
+  }
+  current_number=${CURRENT_EXECUTION_EPOCH#E}
+  if [[ "$current_number" -ne "$previous_number" && "$current_number" -ne $((previous_number + 1)) ]]; then
+    fail "retask eligibility: current execution epoch is not the committed epoch or its single successor"
+    bad=1
+  fi
+  if [[ -d "$FEATURE_DIR/.gatespec/archive" ]]; then
+    while IFS= read -r archive; do
+      archive_state="$archive/execution-state.md"
+      [[ -f "$archive_state" && ! -L "$archive_state" ]] || continue
+      archive_epoch=$(markdown_field_value "$archive_state" 'Execution-Epoch')
+      archive_original=$(markdown_field_value "$archive_state" 'Original-Implementation-Baseline')
+      [[ "$archive_original" == "$anchor_original" ]] || {
+        fail "retask eligibility: retask archive '${archive##*/}' changes Original-Implementation-Baseline"; bad=1;
+      }
+      if ! printf '%s\n' "$archive_epoch" | grep -Eq '^E[1-9][0-9]*$' ||
+         [[ ${archive_epoch#E} -gt "$current_number" ]]; then
+        fail "retask eligibility: retask archive '${archive##*/}' has an invalid or future execution epoch"
+        bad=1
+        continue
+      fi
+      archive_number=${archive_epoch#E}
+      if [[ "$previous_archive_number" -gt 0 && "$archive_number" -le "$previous_archive_number" ]]; then
+        fail "retask eligibility: v2 retask archive epochs must strictly increase in timestamp order"
+        bad=1
+      fi
+      if ! grep -Fqx -- "$archive_epoch" "$history_epochs"; then
+        fail "retask eligibility: retask archive '${archive##*/}' epoch never appears in committed execution-state history"
+        bad=1
+      fi
+      previous_archive_number=$archive_number
+    done < <(find "$FEATURE_DIR/.gatespec/archive" -mindepth 1 -maxdepth 1 -name '*-retask' -print | LC_ALL=C sort)
+  fi
+  if [[ "$previous_archive_number" -gt 0 && "$current_number" -le "$previous_archive_number" ]]; then
+    fail "retask eligibility: current execution epoch must be newer than every v2 retask archive"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: Original Baseline and execution epochs are continuous across committed state and retask archives"
+}
+
+check_prior_review_closure_table() {
+  local body="$TMP_DIR/prior-closure-body" rows="$TMP_DIR/prior-closure-rows"
+  local digest source required remediation expected checkpoint_line id task_line bad=0 pair
+  section_body "$TASKS" 'GateSpec Prior Review Closure' > "$body"
+  if ! extract_four_column_table "$body" \
+    '| Finding-SHA256 | Source verdict | Required-before | Remediation tasks |' "$rows" \
+    'tasks.md: GateSpec Prior Review Closure'; then
+    return
+  fi
+  collect_prior_review_findings
+  if [[ ! -s "$TMP_DIR/required-prior-findings" ]]; then
+    if [[ $(awk 'NF {n++} END {print n+0}' "$rows") -ne 1 ]] ||
+       ! grep -Fqx $'none\tnone\tnone\tnone' "$rows"; then
+      fail "tasks.md: Prior Review Closure without current-basis findings must contain only the exact none row"
+    else
+      pass "tasks.md: Prior Review Closure records the exact no-finding state"
+    fi
+    return
+  fi
+  : > "$TMP_DIR/prior-closure-actual-pairs"
+  while IFS=$'\t' read -r digest source required remediation; do
+    [[ -n "$digest" ]] || continue
+    if [[ "$digest" == none || "$source" == none || "$required" == none || "$remediation" == none ]]; then
+      fail "tasks.md: Prior Review Closure cannot mix the none row with findings"
+      bad=1
+      continue
+    fi
+    if ! is_lower_hex64 "$digest"; then fail "tasks.md: Finding-SHA256 must be lowercase 64-hex"; bad=1; fi
+    pair=$(printf '%s\t%s' "$digest" "$source")
+    if ! awk -F '\t' -v digest="$digest" -v source="$source" \
+      '$1 == digest && $2 == source {found=1} END {exit !found}' "$TMP_DIR/required-prior-findings"; then
+      fail "tasks.md: Prior Review Closure contains unknown or incorrectly hashed finding '$source'"
+      bad=1
+    fi
+    printf '%s\n' "$pair" >> "$TMP_DIR/prior-closure-actual-pairs"
+    if ! grep -Fqx -- "$required" "$TMP_DIR/required-checkpoints"; then
+      fail "tasks.md: finding '$source' Required-before must be a declared checkpoint"
+      bad=1
+      continue
+    fi
+    checkpoint_line=$(grep -nE "^- \\[[ xX]\\] T[0-9][0-9][0-9].*GateSpec review checkpoint ${required}:" "$TASKS" | cut -d: -f1)
+    if canonical_id_list "$remediation" '^T[0-9][0-9][0-9]$' "$TMP_DIR/prior-remediation-tasks" \
+      "tasks.md: finding '$source' Remediation tasks" no; then
+      while IFS= read -r id; do
+        task_line=$(grep -nE "^- \\[[ xX]\\] ${id}([[:space:]]|$)" "$TASKS" | cut -d: -f1)
+        if ! [[ "$task_line" =~ ^[0-9]+$ ]] ||
+           grep -E "^- \\[[ xX]\\] ${id}.*GateSpec review checkpoint REV-" "$TASKS" >/dev/null 2>&1; then
+          fail "tasks.md: finding '$source' remediation $id must be one non-checkpoint task"
+          bad=1
+        elif ! [[ "$checkpoint_line" =~ ^[0-9]+$ ]] || [[ "$task_line" -ge "$checkpoint_line" ]]; then
+          fail "tasks.md: finding '$source' remediation $id occurs after Required-before $required"
+          bad=1
+        fi
+      done < "$TMP_DIR/prior-remediation-tasks"
+    else
+      bad=1
+    fi
+  done < "$rows"
+  LC_ALL=C sort "$TMP_DIR/prior-closure-actual-pairs" | uniq -d > "$TMP_DIR/prior-closure-duplicate-pairs"
+  [[ ! -s "$TMP_DIR/prior-closure-duplicate-pairs" ]] || { fail "tasks.md: each prior finding must have exactly one closure row"; bad=1; }
+  cut -f1,2 "$TMP_DIR/required-prior-findings" | LC_ALL=C sort > "$TMP_DIR/prior-closure-required-pairs"
+  LC_ALL=C sort "$TMP_DIR/prior-closure-actual-pairs" > "$TMP_DIR/prior-closure-actual-pairs-sorted"
+  if ! cmp -s "$TMP_DIR/prior-closure-required-pairs" "$TMP_DIR/prior-closure-actual-pairs-sorted"; then
+    fail "tasks.md: Prior Review Closure must cover every current-basis BLOCKER item exactly once"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: every current and retask-archive blocker has bounded remediation closure"
+}
+
+check_complete_tracked_task_review_grandfather() {
+  local before="$FAILURES"
+  [[ -f "$FEATURE_DIR/.gatespec/reviews/REV-TASKS/seal.md" ]] || return 1
+  initialize_review_hashes
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    check_execution_state downstream
+    [[ "$FAILURES" -eq "$before" ]] && check_implementation_adjustments no
+  fi
+  [[ "$FAILURES" -eq "$before" ]] && check_review_chain REV-TASKS TASKS
+  [[ "$FAILURES" -eq "$before" ]] && check_task_review_git_state
+  [[ "$FAILURES" -eq "$before" ]]
 }
 
 review_scope_for_id() {
@@ -2021,9 +3139,21 @@ check_receipt_line_whitelist() {
     }
     kind == "verdict" {
       if (state == 0 && verdict_pre($0)) next
-      if ($0 == "## Tests Run" || $0 == "## Blockers" || $0 == "## Observations" || $0 == "## Limitations") {state=1; next}
-      if (state == 1 && $0 ~ /^- [^[:space:]](.*[^[:space:]])?$/ && $0 !~ /^- \*\*Verdict-SHA256\*\*:/) next
       if (state == 1 && $0 ~ /^- \*\*Verdict-SHA256\*\*: `[^`]+`$/) {state=2; next}
+      if ($0 == "## Tests Run" || $0 == "## Blockers" || $0 == "## Observations" || $0 == "## Limitations") {
+        state=1
+        section=substr($0, 4)
+        blocker_active=0
+        next
+      }
+      if (state == 1 && section == "Blockers") {
+        if ($0 ~ /^- [^[:space:]](.*[^[:space:]])?$/) {
+          blocker_active=($0 ~ /^- BLOCKER:[[:space:]]+/)
+          next
+        }
+        if (blocker_active && $0 ~ /^[[:space:]]+[^[:space:]](.*[^[:space:]])?$/) next
+      }
+      if (state == 1 && section != "Blockers" && $0 ~ /^- [^[:space:]](.*[^[:space:]])?$/) next
       print NR ":" $0
       next
     }
@@ -2280,14 +3410,9 @@ check_request_file() {
         elif [[ "$ia_hash" != $(file_hash "$TMP_DIR/task-handoff-ia") ]]; then
           fail "$context: task handoff IA snapshot hash is stale"
           bad=1
-        elif [[ $(markdown_field_value "$TMP_DIR/task-handoff-ia" 'Execution-Epoch') != "$execution_epoch" ]] ||
-             [[ $(markdown_field_value "$TMP_DIR/task-handoff-ia" 'Source-Design-Content-SHA256') != "$source_hash" ]] ||
-             grep -Eq '^### IA[1-9][0-9]*:' "$TMP_DIR/task-handoff-ia" ||
-             [[ $(grep -cE '^- None —[[:space:]]*[^[:space:]].*$' "$TMP_DIR/task-handoff-ia" || true) -ne 1 ]]; then
-          fail "$context: Task-Handoff-Commit IA baseline must be empty and bind the receipt epoch and Source hash"
-          bad=1
         else
-          pass "$context: task review binds the empty IA snapshot in Task-Handoff-Commit"
+          check_canonical_empty_ia "$TMP_DIR/task-handoff-ia" \
+            "$context Task-Handoff IA snapshot" "$execution_epoch" "$source_hash" || bad=1
         fi
       elif [[ "$ia_hash" != not-applicable ]]; then
         fail "$context: IA must be not-applicable without Source Design"
@@ -2476,15 +3601,23 @@ check_verdict_file() {
   receipt_section_body "$file" 'Blockers' 'Verdict-SHA256' > "$TMP_DIR/verdict-blockers"
   nonblank=$(awk 'NF {n++} END {print n+0}' "$TMP_DIR/verdict-blockers")
   blockers=$(grep -cE '^- BLOCKER:[[:space:]]+.+[^[:space:]]$' "$TMP_DIR/verdict-blockers" || true)
-  malformed=$(grep -vE '^[[:space:]]*$|^- [^[:space:]](.*[^[:space:]])?$' "$TMP_DIR/verdict-blockers" || true)
   if [[ "$status" == 'PASS' ]]; then
     if [[ "$nonblank" -ne 1 ]] || ! grep -Fqx -- '- None' "$TMP_DIR/verdict-blockers"; then
       fail "$context: PASS verdict Blockers must be exactly '- None'"
       bad=1
     fi
-  elif [[ "$blockers" -lt 1 || -n "$malformed" ]] || grep -Fqx -- '- None' "$TMP_DIR/verdict-blockers"; then
-    fail "$context: BLOCKED verdict requires at least one '- BLOCKER:' item and must not contain '- None'"
-    bad=1
+  else
+    malformed=$(awk '
+      /^[[:space:]]*$/ {active=0; next}
+      /^- BLOCKER:[[:space:]]+.+[^[:space:]]$/ {active=1; next}
+      /^- / {print NR ":" $0; active=0; next}
+      active && /^[[:space:]]+[^[:space:]](.*[^[:space:]])?$/ {next}
+      {print NR ":" $0}
+    ' "$TMP_DIR/verdict-blockers")
+    if [[ "$blockers" -lt 1 || -n "$malformed" ]] || grep -Fqx -- '- None' "$TMP_DIR/verdict-blockers"; then
+      fail "$context: BLOCKED verdict requires canonical '- BLOCKER:' items with only contiguous indented continuation lines"
+      bad=1
+    fi
   fi
   for name in Observations Limitations; do
     receipt_section_body "$file" "$name" 'Verdict-SHA256' > "$TMP_DIR/verdict-section"
@@ -2642,14 +3775,19 @@ check_review_chain() {
   CHAIN_BASE=''
   CHAIN_SUBJECT=''
 
-  if [[ ! -d "$directory" ]]; then
-    fail "$id: review directory not found at .gatespec/reviews/$id"
+  if [[ ! -d "$directory" || -L "$directory" ]]; then
+    fail "$id: review root must be a regular directory at .gatespec/reviews/$id"
     return
   fi
-  invalid=$(find "$directory" -maxdepth 1 -type f \( -name 'round-*-request.md' -o -name 'round-*-verdict.md' \) -print \
-    | sed 's|.*/||' | grep -Ev '^round-(00|01|02)-(request|verdict)\.md$' || true)
+  invalid=$(find "$directory" -mindepth 1 -maxdepth 1 -print | while IFS= read -r file; do
+    rel=${file##*/}
+    if [[ ! -f "$file" || -L "$file" ]] ||
+       ! printf '%s\n' "$rel" | grep -Eq '^(round-(00|01|02)-(request|verdict)\.md|seal\.md)$'; then
+      printf '%s\n' "$rel"
+    fi
+  done)
   if [[ -n "$invalid" ]]; then
-    fail "$id: only review rounds 00, 01, and 02 are allowed"
+    fail "$id: review directory contains non-canonical, nested, or symlink receipt content"
     bad=1
   fi
   if [[ ! -f "$seal" ]]; then
@@ -2778,6 +3916,566 @@ resolve_git_feature_paths() {
   esac
 }
 
+append_retask_immutable_artifact_files() {
+  local manifest="$1" path
+  printf '%s\t%s\n' \
+    "$GIT_FEATURE_REL/spec.md" "$SPEC" \
+    "$GIT_FEATURE_REL/plan.md" "$PLAN" >> "$manifest"
+  for path in research.md data-model.md quickstart.md; do
+    [[ -f "$FEATURE_DIR/$path" ]] && printf '%s\t%s\n' "$GIT_FEATURE_REL/$path" "$FEATURE_DIR/$path" >> "$manifest"
+  done
+  if [[ -d "$FEATURE_DIR/contracts" ]]; then
+    while IFS= read -r path; do
+      [[ -f "$path" ]] || continue
+      printf '%s\t%s\n' "$GIT_FEATURE_REL/${path#"$FEATURE_DIR"/}" "$path" >> "$manifest"
+    done < <(find "$FEATURE_DIR/contracts" -type f -print)
+  fi
+  if [[ -d "$FEATURE_DIR/.gatespec/revalidations" ]]; then
+    while IFS= read -r path; do
+      [[ -f "$path" ]] || continue
+      printf '%s\t%s\n' "$GIT_FEATURE_REL/${path#"$FEATURE_DIR"/}" "$path" >> "$manifest"
+    done < <(find "$FEATURE_DIR/.gatespec/revalidations" -type f -print)
+  fi
+  if [[ -f "$SOURCE_ENTRY" ]]; then
+    append_review_chain_files REV-SOURCE "$manifest" || return 1
+  fi
+}
+
+retask_source_has_symlink_component() {
+  local source="$1" relative component current="$FEATURE_DIR" old_ifs
+  case "$source" in
+    "$FEATURE_DIR"/*) relative=${source#"$FEATURE_DIR"/} ;;
+    *) return 0 ;;
+  esac
+  old_ifs=$IFS
+  IFS='/'
+  for component in $relative; do
+    current="$current/$component"
+    if [[ -L "$current" ]]; then
+      IFS=$old_ifs
+      return 0
+    fi
+  done
+  IFS=$old_ifs
+  return 1
+}
+
+check_retask_archive_source_files() {
+  local source rel bad=0 sources="$TMP_DIR/retask-archive-sources"
+  local index_snapshot="$TMP_DIR/retask-archive-index-snapshot" index_tag
+  : > "$sources"
+  printf '%s\n' "$TASKS" >> "$sources"
+  if [[ ! -d "$FEATURE_DIR/.gatespec/reviews/REV-TASKS" ||
+        -L "$FEATURE_DIR/.gatespec/reviews/REV-TASKS" ]]; then
+    fail "retask eligibility: REV-TASKS archive source must be a regular directory"
+    bad=1
+  else
+    find "$FEATURE_DIR/.gatespec/reviews/REV-TASKS" -mindepth 1 -maxdepth 1 -print \
+      >> "$sources"
+  fi
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    printf '%s\n' "$EXECUTION_STATE" >> "$sources"
+    [[ -e "$IA_FILE" || -L "$IA_FILE" ]] && printf '%s\n' "$IA_FILE" >> "$sources"
+  fi
+  while IFS= read -r source; do
+    [[ -n "$source" ]] || continue
+    if [[ ! -f "$source" || -L "$source" ]] || retask_source_has_symlink_component "$source"; then
+      fail "retask eligibility: archive source '${source#"$FEATURE_DIR"/}' and every ancestor must be regular and non-symlink"
+      bad=1
+      continue
+    fi
+    rel="$GIT_FEATURE_REL/${source#"$FEATURE_DIR"/}"
+    if git -C "$GIT_ROOT" ls-files --stage -- "$rel" | grep -q .; then
+      index_tag=$(git -C "$GIT_ROOT" -c core.quotepath=false ls-files -v -- "$rel" | sed -n '1s/^\(.\).*/\1/p')
+      case "$index_tag" in
+        S|[a-z])
+          fail "retask eligibility: archive source '$rel' must not carry assume-unchanged or skip-worktree"
+          bad=1
+          ;;
+      esac
+      if ! git -C "$GIT_ROOT" show ":$rel" > "$index_snapshot" 2>/dev/null ||
+         ! cmp -s "$index_snapshot" "$source"; then
+        fail "retask eligibility: index and working-tree bytes differ for archive source '$rel'"
+        bad=1
+      fi
+    elif git -C "$GIT_ROOT" check-ignore -q -- "$rel" 2>/dev/null; then
+      fail "retask eligibility: untracked archive source '$rel' must not be ignored"
+      bad=1
+    fi
+  done < "$sources"
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: every archive source is regular, non-symlink, and recoverable"
+}
+
+check_retask_worktree_paths() {
+  local entry state path bad=0 index_snapshot="$TMP_DIR/retask-index-snapshot"
+  while IFS= read -r -d '' entry; do
+    state=${entry:0:2}
+    path=${entry:3}
+    if [[ "$state" == *R* || "$state" == *C* ]]; then
+      fail "retask eligibility: renamed/copied worktree paths are not allowed"
+      bad=1
+      continue
+    fi
+    if [[ "$state" == *D* ]]; then
+      fail "retask eligibility: archive source '$path' must not be deleted"
+      bad=1
+      continue
+    fi
+    case "$path" in
+      "$GIT_FEATURE_REL/tasks.md"|"$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/"*) ;;
+      "$GIT_FEATURE_REL/.gatespec/execution-state.md"|"$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md")
+        if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" != 2 ]]; then
+          fail "retask eligibility: Protocol v1 must not have execution-state/IA worktree changes"
+          bad=1
+        fi
+        ;;
+      *)
+        fail "retask eligibility: unrelated dirty or untracked path '$path'"
+        bad=1
+        continue
+        ;;
+    esac
+    if git -C "$GIT_ROOT" ls-files --stage -- "$path" | grep -q .; then
+      if [[ ! -f "$GIT_ROOT/$path" ]] ||
+         ! git -C "$GIT_ROOT" show ":$path" > "$index_snapshot" 2>/dev/null ||
+         ! cmp -s "$index_snapshot" "$GIT_ROOT/$path"; then
+        fail "retask eligibility: index and working-tree bytes differ for archive source '$path'"
+        bad=1
+      fi
+    fi
+  done < <(git -C "$GIT_ROOT" -c core.quotepath=false status --porcelain=v1 -z --untracked-files=all 2>/dev/null)
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: worktree changes are confined to replaceable task-review state"
+}
+
+check_retask_hidden_index_paths() {
+  local entry tag path source bad=0 hidden=0
+  local index_snapshot="$TMP_DIR/retask-hidden-index-snapshot"
+  while IFS= read -r -d '' entry; do
+    tag=${entry:0:1}
+    case "$tag" in
+      S|[a-z]) ;;
+      *) continue ;;
+    esac
+    hidden=$((hidden + 1))
+    path=${entry:2}
+    source="$GIT_ROOT/$path"
+    if [[ ! -f "$source" || -L "$source" ]] ||
+       ! git -C "$GIT_ROOT" show ":$path" > "$index_snapshot" 2>/dev/null ||
+       ! cmp -s "$index_snapshot" "$source"; then
+      fail "retask eligibility: index flag '$tag' hides working-tree drift or a non-regular path at '$path'"
+      bad=1
+    fi
+  done < <(git -C "$GIT_ROOT" -c core.quotepath=false ls-files -v -z)
+  if [[ "$bad" -eq 0 ]]; then
+    if [[ "$hidden" -eq 0 ]]; then
+      pass "retask eligibility: no assume-unchanged or skip-worktree path can hide worktree drift"
+    else
+      pass "retask eligibility: every index-flag-hidden path still matches its staged blob"
+    fi
+  fi
+}
+
+canonical_empty_ia_shape() {
+  local file="$1" invalid
+  invalid=$(awk '
+    /^[[:space:]]*$/ {next}
+    NR == 1 && $0 == "# GateSpec Implementation Adjustments" {next}
+    /^- \*\*(Execution-Epoch|Source-Design-Content-SHA256)\*\*: `[^`]+`$/ {next}
+    $0 == "## Adjustments" {next}
+    $0 == "- None — no bounded implementation adjustment has been recorded." {next}
+    {print}
+  ' "$file")
+  [[ -z "$invalid" ]] && awk '
+    /^[[:space:]]*$/ {next}
+    {
+      n++
+      if (n == 1 && $0 == "# GateSpec Implementation Adjustments") next
+      if (n == 2 && $0 ~ /^- \*\*Execution-Epoch\*\*: `E[1-9][0-9]*`$/) next
+      if (n == 3) {
+        value=$0
+        sub(/^- \*\*Source-Design-Content-SHA256\*\*: `/, "", value)
+        sub(/`$/, "", value)
+        if (length(value) == 64 && value !~ /[^0-9a-f]/) next
+      }
+      if (n == 4 && $0 == "## Adjustments") next
+      if (n == 5 && $0 == "- None — no bounded implementation adjustment has been recorded.") next
+      bad=1
+    }
+    END {exit bad || n != 5}
+  ' "$file"
+}
+
+check_retask_historical_content() {
+  local start="$1" include_start="${2:-no}" commits="$TMP_DIR/retask-history-content-commits"
+  local commit tasks_blob="$TMP_DIR/retask-history-tasks-blob"
+  local ia_blob="$TMP_DIR/retask-history-ia-blob" bad=0
+  : > "$commits"
+  [[ "$include_start" == yes ]] && printf '%s\n' "$start" >> "$commits"
+  git -C "$GIT_ROOT" rev-list --reverse "$start..HEAD" >> "$commits" 2>/dev/null || {
+    fail "retask eligibility: cannot inspect committed task/IA content history"
+    return
+  }
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    if git -C "$GIT_ROOT" show "$commit:$GIT_FEATURE_REL/tasks.md" > "$tasks_blob" 2>/dev/null &&
+       grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$tasks_blob"; then
+      fail "retask eligibility: commit $commit records completed task evidence"
+      bad=1
+      break
+    fi
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]] &&
+       git -C "$GIT_ROOT" show "$commit:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" \
+         > "$ia_blob" 2>/dev/null && ! canonical_empty_ia_shape "$ia_blob"; then
+      fail "retask eligibility: commit $commit records nonempty or non-canonical IA evidence"
+      bad=1
+      break
+    fi
+  done < "$commits"
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: committed task and IA history contains no implementation-start evidence"
+}
+
+check_v2_task_handoff_snapshot() {
+  local handoff="$CURRENT_TASK_HANDOFF" review="$FEATURE_DIR/.gatespec/reviews/REV-TASKS"
+  local round00="$review/round-00-request.md" manifest="$TMP_DIR/retask-handoff-manifest"
+  local blob="$TMP_DIR/retask-handoff-blob" tasks_blob="$TMP_DIR/retask-handoff-tasks"
+  local state_blob="$TMP_DIR/retask-handoff-state" ia_blob="$TMP_DIR/retask-handoff-ia"
+  local rel current invalid expected_tasks expected_epoch expected_source expected_ia expected_preserved bad=0
+  : > "$manifest"
+  if ! append_retask_immutable_artifact_files "$manifest"; then
+    fail "retask eligibility: cannot enumerate immutable Task-Handoff snapshot files"
+    return
+  fi
+  while IFS=$'\t' read -r rel current; do
+    [[ -n "$rel" ]] || continue
+    if ! git -C "$GIT_ROOT" show "$handoff:$rel" > "$blob" 2>/dev/null || ! cmp -s "$blob" "$current"; then
+      fail "retask eligibility: Task-Handoff snapshot does not contain current immutable blob '$rel'"
+      bad=1
+    fi
+  done < "$manifest"
+  expected_tasks=$(markdown_field_value "$round00" 'Tasks-Definition-SHA256')
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/tasks.md" > "$tasks_blob" 2>/dev/null ||
+     [[ $(normalized_tasks_hash "$tasks_blob") != "$expected_tasks" ]]; then
+    fail "retask eligibility: Task-Handoff tasks snapshot does not bind round-00 Tasks-Definition-SHA256"
+    bad=1
+  fi
+  expected_epoch=$(markdown_field_value "$round00" 'Execution-Epoch')
+  expected_source=$(markdown_field_value "$round00" 'Source-Design-Content-SHA256')
+  expected_ia=$(markdown_field_value "$round00" 'Implementation-Adjustments-SHA256')
+  expected_preserved=$(markdown_field_value "$round00" 'Preserved-Reviews-SHA256')
+  if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/.gatespec/execution-state.md" \
+      > "$state_blob" 2>/dev/null; then
+    fail "retask eligibility: Task-Handoff snapshot is missing pending execution-state.md"
+    bad=1
+  else
+    invalid=$(awk '
+      /^[[:space:]]*$/ {next}
+      NR == 1 && $0 == "# GateSpec Execution State" {next}
+      /^- \*\*(Protocol-Version|Execution-Epoch|Original-Implementation-Baseline|Task-Handoff-Commit|Source-Design-Content-SHA256|Preserved-Reviews-SHA256|Execution-State-SHA256)\*\*: `[^`]+`$/ {next}
+      {print NR ":" $0}
+    ' "$state_blob")
+    [[ -z "$invalid" ]] || { fail "retask eligibility: pending Task-Handoff execution state is non-canonical"; bad=1; }
+    [[ $(sed -n '1p' "$state_blob") == '# GateSpec Execution State' &&
+       $(grep -cFx '# GateSpec Execution State' "$state_blob" || true) -eq 1 ]] || {
+      fail "retask eligibility: pending Task-Handoff execution state requires its exact line-1 title"; bad=1;
+    }
+    check_ordered_fields "$state_blob" 'Task-Handoff execution-state snapshot' \
+      'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
+      'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
+    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == 2 &&
+       $(markdown_field_value "$state_blob" 'Execution-Epoch') == "$expected_epoch" &&
+       $(markdown_field_value "$state_blob" 'Original-Implementation-Baseline') == "$CURRENT_ORIGINAL_BASELINE" &&
+       $(markdown_field_value "$state_blob" 'Task-Handoff-Commit') == pending &&
+       $(markdown_field_value "$state_blob" 'Source-Design-Content-SHA256') == "$expected_source" &&
+       $(markdown_field_value "$state_blob" 'Preserved-Reviews-SHA256') == "$expected_preserved" ]] || {
+      fail "retask eligibility: pending Task-Handoff execution state does not bind round-00/current immutable state"; bad=1;
+    }
+    check_self_hash "$state_blob" 'Execution-State-SHA256' 'Task-Handoff execution-state snapshot'
+  fi
+  if [[ "$expected_source" == not-applicable ]]; then
+    [[ "$expected_ia" == not-applicable ]] || { fail "retask eligibility: no-Source round-00 IA must be not-applicable"; bad=1; }
+    if git -C "$GIT_ROOT" cat-file -e "$handoff:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" 2>/dev/null; then
+      fail "retask eligibility: no-Source Task-Handoff must not contain implementation-adjustments.md"
+      bad=1
+    fi
+  elif ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" \
+      > "$ia_blob" 2>/dev/null; then
+    fail "retask eligibility: Source Task-Handoff snapshot is missing empty IA"
+    bad=1
+  else
+    check_canonical_empty_ia "$ia_blob" 'Task-Handoff IA snapshot' "$expected_epoch" "$expected_source" || bad=1
+    [[ $(file_hash "$ia_blob") == "$expected_ia" ]] || {
+      fail "retask eligibility: Task-Handoff IA raw hash does not match round-00 request"; bad=1;
+    }
+  fi
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: Task-Handoff tree binds immutable artifacts, round-00 tasks, pending state, and empty IA"
+}
+
+check_retask_product_delta() {
+  local kind="$1" boundary='' scan_start='' seal_rel request_rel additions parent_fields path bad=0
+  local paths="$TMP_DIR/retask-committed-delta" raw_paths="$TMP_DIR/retask-committed-delta-raw"
+  local allowed="$TMP_DIR/retask-committed-allowlist"
+  local manifest="$TMP_DIR/retask-product-immutable" addition_count plan_rel plan_commit plan_additions
+  local boundary_fields boundary_paths="$TMP_DIR/retask-boundary-paths" include_scan_start=no
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    boundary=$CURRENT_TASK_HANDOFF
+    scan_start=$CURRENT_ORIGINAL_BASELINE
+  elif [[ "$kind" == pass ]]; then
+    seal_rel="$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/seal.md"
+    boundary=$(git -C "$GIT_ROOT" log -1 --format=%H -- "$seal_rel" 2>/dev/null || true)
+    [[ -n "$boundary" ]] || { fail "retask eligibility: current PASS seal has no tracked handoff commit"; return; }
+  else
+    request_rel="$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/round-00-request.md"
+    additions=$(git -C "$GIT_ROOT" log --diff-filter=A --format=%H -- "$request_rel" 2>/dev/null || true)
+    addition_count=$(printf '%s\n' "$additions" | awk 'NF {n++} END {print n+0}')
+    if [[ "$addition_count" -eq 1 ]]; then
+      parent_fields=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$additions" 2>/dev/null || true)
+      if [[ $(printf '%s\n' "$parent_fields" | awk '{print NF+0}') -ne 2 ]]; then
+        fail "retask eligibility: v1 round-00 first-add commit must have one provable parent"
+        return
+      fi
+      boundary=$(printf '%s\n' "$parent_fields" | awk '{print $2}')
+    elif [[ "$addition_count" -eq 0 ]]; then
+      if git -C "$GIT_ROOT" cat-file -e "HEAD:$GIT_FEATURE_REL/tasks.md" 2>/dev/null; then
+        fail "retask eligibility: v1 no-add fallback requires tasks and the complete review chain to be wholly untracked"
+        return
+      fi
+      while IFS= read -r file; do
+        path="$GIT_FEATURE_REL/${file#"$FEATURE_DIR"/}"
+        if git -C "$GIT_ROOT" cat-file -e "HEAD:$path" 2>/dev/null; then
+          fail "retask eligibility: v1 no-add fallback found tracked review path '$path'"
+          return
+        fi
+      done < <(find "$FEATURE_DIR/.gatespec/reviews/REV-TASKS" -type f -print)
+      boundary=$(git -C "$GIT_ROOT" rev-parse HEAD 2>/dev/null || true)
+    else
+      fail "retask eligibility: v1 round-00 request has ambiguous first-add history"
+      return
+    fi
+  fi
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 ]]; then
+    plan_rel="$GIT_FEATURE_REL/plan.md"
+    plan_additions=$(git -C "$GIT_ROOT" log --diff-filter=A --format=%H -- "$plan_rel" 2>/dev/null || true)
+    if [[ $(printf '%s\n' "$plan_additions" | awk 'NF {n++} END {print n+0}') -ne 1 ]]; then
+      fail "retask eligibility: v1 requires one unambiguous first-add commit for plan.md"
+      return
+    fi
+    plan_commit=$(printf '%s\n' "$plan_additions" | awk 'NF {print; exit}')
+    parent_fields=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$plan_commit" 2>/dev/null || true)
+    case $(printf '%s\n' "$parent_fields" | awk '{print NF+0}') in
+      1) scan_start=$plan_commit; include_scan_start=yes ;;
+      2) scan_start=$(printf '%s\n' "$parent_fields" | awk '{print $2}') ;;
+      *) fail "retask eligibility: v1 first Plan commit must be a root or one-parent commit"; return ;;
+    esac
+  fi
+  if ! is_git_oid "$boundary" || ! git -C "$GIT_ROOT" merge-base --is-ancestor "$boundary" HEAD 2>/dev/null ||
+     ! is_git_oid "$scan_start" || ! git -C "$GIT_ROOT" merge-base --is-ancestor "$scan_start" HEAD 2>/dev/null; then
+    fail "retask eligibility: pre-implementation boundary must be a HEAD ancestor"
+    return
+  fi
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    boundary_fields=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$boundary" 2>/dev/null || true)
+    if [[ $(printf '%s\n' "$boundary_fields" | awk '{print NF+0}') -ne 2 ]]; then
+      fail "retask eligibility: v2 Task-Handoff commit must have exactly one parent"
+      return
+    fi
+    : > "$manifest"
+    append_retask_immutable_artifact_files "$manifest" || true
+    cut -f1 "$manifest" > "$allowed"
+    printf '%s\n' \
+      "$GIT_FEATURE_REL/tasks.md" \
+      "$GIT_FEATURE_REL/.gatespec/execution-state.md" \
+      "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" >> "$allowed"
+    LC_ALL=C sort -u -o "$allowed" "$allowed"
+    if ! git -C "$GIT_ROOT" -c core.quotepath=false diff-tree --root --no-commit-id \
+        --name-only -r "$boundary" > "$boundary_paths" 2>/dev/null; then
+      fail "retask eligibility: cannot inspect the v2 Task-Handoff commit"
+      return
+    fi
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if ! grep -Fqx -- "$path" "$allowed"; then
+        fail "retask eligibility: v2 Task-Handoff commit contains product or unknown path '$path'"
+        bad=1
+      fi
+    done < "$boundary_paths"
+    check_v2_task_handoff_snapshot
+  fi
+  if git -C "$GIT_ROOT" rev-list --merges "$scan_start..HEAD" 2>/dev/null | grep -q .; then
+    fail "retask eligibility: pre-implementation evidence history must be linear and contain no merge commit"
+    return
+  fi
+  if ! git -C "$GIT_ROOT" -c core.quotepath=false log --format= --name-only --no-renames \
+      "$scan_start..HEAD" > "$raw_paths" 2>/dev/null; then
+    fail "retask eligibility: cannot inspect every committed path after the pre-implementation baseline"
+    return
+  fi
+  if [[ "$include_scan_start" == yes ]] &&
+     ! git -C "$GIT_ROOT" -c core.quotepath=false diff-tree --root --no-commit-id \
+       --name-only -r "$scan_start" >> "$raw_paths" 2>/dev/null; then
+    fail "retask eligibility: cannot inspect the root Plan commit"
+    return
+  fi
+  awk 'NF' "$raw_paths" | LC_ALL=C sort -u > "$paths"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+      case "$path" in
+        "$GIT_FEATURE_REL/spec.md"|"$GIT_FEATURE_REL/plan.md"|"$GIT_FEATURE_REL/tasks.md"|\
+        "$GIT_FEATURE_REL/research.md"|"$GIT_FEATURE_REL/data-model.md"|"$GIT_FEATURE_REL/quickstart.md"|\
+        "$GIT_FEATURE_REL/requirements-traceability.md"|\
+        "$GIT_FEATURE_REL/contracts/"*|"$GIT_FEATURE_REL/checklists/"*|\
+        "$GIT_FEATURE_REL/validation/"*|"$GIT_FEATURE_REL/archive/"*|\
+        "$GIT_FEATURE_REL/.gatespec/archive/"*|\
+        "$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/"*|\
+        "$GIT_FEATURE_REL/.gatespec/reviews/REV-SOURCE/"*|\
+        "$GIT_FEATURE_REL/.gatespec/revalidations/"*|\
+        "$GIT_FEATURE_REL/.gatespec/execution-state.md"|\
+        "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md") ;;
+        *) fail "retask eligibility: v2 product or unknown evidence path '$path' changed after Original Baseline"; bad=1 ;;
+      esac
+    else
+      case "$path" in
+        "$GIT_FEATURE_REL/spec.md"|"$GIT_FEATURE_REL/plan.md"|"$GIT_FEATURE_REL/tasks.md"|\
+        "$GIT_FEATURE_REL/research.md"|"$GIT_FEATURE_REL/data-model.md"|"$GIT_FEATURE_REL/quickstart.md"|\
+        "$GIT_FEATURE_REL/requirements-traceability.md"|\
+        "$GIT_FEATURE_REL/contracts/"*|"$GIT_FEATURE_REL/checklists/"*|\
+        "$GIT_FEATURE_REL/validation/"*|"$GIT_FEATURE_REL/archive/"*|\
+        "$GIT_FEATURE_REL/.gatespec/archive/"*|\
+        "$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/"*) ;;
+        *) fail "retask eligibility: v1 product or unknown evidence path '$path' changed after the first Plan boundary"; bad=1 ;;
+      esac
+    fi
+  done < "$paths"
+  check_retask_historical_content "$scan_start" "$include_scan_start"
+  [[ "$bad" -eq 0 ]] && pass "retask eligibility: no committed product delta exists after the reproducible pre-implementation baseline"
+}
+
+check_retask_eligibility() {
+  local before="$FAILURES" review="$FEATURE_DIR/.gatespec/reviews/REV-TASKS" kind protocol
+  local ref review_entry review_name latest_seal head seal_rel current_ia_hash current_source_hash
+  local manifest="$TMP_DIR/retask-immutable-files"
+  echo ""
+  echo "Retask Eligibility Gate: $FEATURE_DIR"
+  initialize_review_hashes
+  if [[ -z "$GIT_ROOT" ]] || ! resolve_git_feature_paths; then
+    fail "retask eligibility: feature must be inside a Git worktree"
+    return
+  fi
+  if [[ -L "$FEATURE_DIR" ]]; then
+    fail "retask eligibility: feature directory itself must not be a symlink"
+  fi
+  if [[ ! -f "$SOURCE_ENTRY" ]]; then
+    if [[ -d "$SOURCE_SHARDS" ]] && find "$SOURCE_SHARDS" -type f -print -quit | grep -q .; then
+      fail "retask eligibility: Source shards exist without contracts/source-design.md"
+    fi
+    if grep -E '^\*\*Source-Design-Content-SHA256\*\*: `[^`]+`$' "$TASKS" 2>/dev/null |
+       grep -Fv '`not-applicable`' >/dev/null 2>&1; then
+      fail "retask eligibility: tasks.md has an orphan Source Design binding"
+    fi
+  fi
+  ref=$(git -C "$GIT_ROOT" symbolic-ref -q HEAD 2>/dev/null || true)
+  case "$ref" in refs/heads/*) pass "retask eligibility: HEAD is attached to a local branch" ;;
+    *) fail "retask eligibility: HEAD must be attached to a local branch" ;; esac
+
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    check_execution_state downstream
+    [[ "$FAILURES" -eq "$before" ]] && check_implementation_adjustments yes
+  else
+    [[ ! -e "$EXECUTION_STATE" ]] || fail "retask eligibility: Protocol v1 must not create execution-state.md"
+    [[ ! -e "$IA_FILE" ]] || fail "retask eligibility: Protocol v1 must not create implementation-adjustments.md"
+  fi
+
+  if [[ -f "$review/seal.md" ]]; then
+    kind=pass
+    check_review_chain REV-TASKS TASKS
+    [[ "$FAILURES" -eq "$before" ]] && check_task_review_git_state
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 ]]; then
+      seal_rel="$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/seal.md"
+      latest_seal=$(git -C "$GIT_ROOT" log -1 --format=%H -- "$seal_rel" 2>/dev/null || true)
+      head=$(git -C "$GIT_ROOT" rev-parse HEAD 2>/dev/null || true)
+      if [[ -n "$latest_seal" && "$latest_seal" == "$head" ]]; then
+        check_baseline_task_seal "$head"
+      else
+        fail "retask eligibility: v1 PASS seal latest-touch commit must be HEAD"
+      fi
+    fi
+  else
+    kind=blocked
+    : > "$TMP_DIR/required-prior-findings"
+    HISTORICAL_FINDING_SERIAL=0
+    check_historical_task_chain "$review" ''
+    protocol=$HISTORICAL_CHAIN_PROTOCOL
+    if [[ "$HISTORICAL_CHAIN_TERMINAL_ROUND" != 02 || "$HISTORICAL_CHAIN_TERMINAL_STATUS" != BLOCKED ]]; then
+      fail "retask eligibility: an unsealed task review must exhaust round 02 with BLOCKED"
+    fi
+    [[ "$HISTORICAL_CHAIN_BASIS_MATCH" == yes ]] || fail "retask eligibility: BLOCKED task review artifact basis is stale"
+    [[ "$protocol" == "${ACTIVE_REVIEW_PROTOCOL:-1}" ]] || fail "retask eligibility: BLOCKED chain protocol is stale"
+    [[ "$HISTORICAL_CHAIN_TERMINAL_TASKS_HASH" == "$CURRENT_TASKS_HASH" ]] ||
+      fail "retask eligibility: terminal BLOCKED request does not bind the current tasks definition"
+    if [[ "$protocol" == 2 ]]; then
+      if [[ -f "$SOURCE_ENTRY" ]]; then
+        current_source_hash=$(source_design_content_hash) || current_source_hash=''
+        current_ia_hash=$(file_hash "$IA_FILE") || current_ia_hash=''
+      else
+        current_source_hash=not-applicable
+        current_ia_hash=not-applicable
+      fi
+      if [[ "$HISTORICAL_CHAIN_TERMINAL_EPOCH" != "${CURRENT_EXECUTION_EPOCH:-}" ||
+            "$HISTORICAL_CHAIN_TERMINAL_SOURCE_HASH" != "$current_source_hash" ||
+            "$HISTORICAL_CHAIN_TERMINAL_IA_HASH" != "$current_ia_hash" ||
+            "$HISTORICAL_CHAIN_TERMINAL_HANDOFF" != "${CURRENT_TASK_HANDOFF:-}" ||
+            "$HISTORICAL_CHAIN_TERMINAL_PRESERVED" != "${CURRENT_PRESERVED_HASH:-}" ]]; then
+        fail "retask eligibility: terminal BLOCKED request does not bind current v2 epoch, Source, IA, handoff, and preserved reviews"
+      fi
+    fi
+  fi
+
+  # Retask archives are part of the eligibility proof even when legacy tasks
+  # predate Closure tables. Revalidating them here prevents a preflight PASS
+  # followed by a guaranteed post-regeneration Closure failure.
+  collect_prior_review_findings
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && -n "${CURRENT_EXECUTION_EPOCH:-}" &&
+        -n "${CURRENT_ORIGINAL_BASELINE:-}" ]]; then
+    check_v2_execution_history_continuity
+  fi
+
+  if grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$TASKS"; then
+    fail "retask eligibility: every task checkbox must still be unchecked"
+  else
+    pass "retask eligibility: no task execution progress is recorded"
+  fi
+  if [[ -d "$FEATURE_DIR/.gatespec/reviews" ]]; then
+    while IFS= read -r review_entry; do
+      review_name=${review_entry##*/}
+      case "$review_name" in
+        REV-TASKS) [[ -d "$review_entry" ]] || fail "retask eligibility: REV-TASKS must be a review directory" ;;
+        REV-SOURCE)
+          if [[ ! -f "$SOURCE_ENTRY" || ! -d "$review_entry" ]]; then
+            fail "retask eligibility: REV-SOURCE is allowed only as the enabled Source review directory"
+          fi
+          ;;
+        *) fail "retask eligibility: forbidden non-task review entry '$review_name' already exists" ;;
+      esac
+    done < <(find "$FEATURE_DIR/.gatespec/reviews" -mindepth 1 -maxdepth 1 -print)
+  fi
+  [[ ! -e "$ACCEPTANCE" ]] || fail "retask eligibility: acceptance metadata already exists"
+  if [[ -d "$FEATURE_DIR/checklists" ]] && grep -R -nE '^- \[ \]' "$FEATURE_DIR/checklists" >/dev/null 2>&1; then
+    fail "retask eligibility: every checklist item must be complete"
+  fi
+
+  : > "$manifest"
+  if ! append_retask_immutable_artifact_files "$manifest"; then
+    fail "retask eligibility: cannot enumerate approved immutable artifacts"
+  elif check_head_tracked_manifest "$manifest" 'retask immutable basis'; then
+    pass "retask eligibility: approved basis and Source/revalidation evidence match tracked HEAD"
+  fi
+  check_retask_worktree_paths
+  check_retask_hidden_index_paths
+  check_retask_archive_source_files
+  check_retask_product_delta "$kind"
+  [[ "$FAILURES" -eq "$before" ]] && pass "retask eligibility: replacement is proven pre-implementation and archive-safe"
+}
+
 append_current_artifact_files() {
   local manifest="$1" path
   printf '%s\t%s\n' \
@@ -2803,6 +4501,9 @@ append_current_artifact_files() {
   fi
   if [[ -f "$SOURCE_ENTRY" ]]; then
     append_review_chain_files 'REV-SOURCE' "$manifest" || return 1
+  fi
+  if [[ -s "$TMP_DIR/prior-closure-archive-files" ]]; then
+    cat "$TMP_DIR/prior-closure-archive-files" >> "$manifest"
   fi
 }
 
@@ -2912,6 +4613,9 @@ check_baseline_task_seal() {
       [[ -f "$path" ]] || continue
       printf '%s\n' "$GIT_FEATURE_REL/${path#"$FEATURE_DIR"/}" >> "$allowed"
     done < <(find "$FEATURE_DIR/contracts" -type f -print)
+  fi
+  if [[ -s "$TMP_DIR/prior-closure-archive-files" ]]; then
+    cut -f1 "$TMP_DIR/prior-closure-archive-files" >> "$allowed"
   fi
   if ! git -C "$GIT_ROOT" -c core.quotepath=false diff-tree --root --no-commit-id --name-only -r "$baseline" > "$changed" 2>/dev/null; then
     fail "implementation baseline: cannot inspect checkpoint commit paths"
@@ -3285,7 +4989,7 @@ if [[ "$FAILURES" -eq 0 ]]; then
       [[ "$FAILURES" -eq 0 ]] && check_execution_state source-approved
       [[ "$FAILURES" -eq 0 ]] && check_source_review_chain
       ;;
-    tasks-structure|task-review|implementation-candidate|implementation-review|acceptance-candidate|acceptance)
+    tasks-structure|task-review|retask-eligible|implementation-candidate|implementation-review|acceptance-candidate|acceptance)
       if [[ -f "$SOURCE_ENTRY" ]]; then
         check_source_structure approved
         [[ "$FAILURES" -eq 0 ]] && check_source_review_chain
@@ -3297,6 +5001,12 @@ if [[ ( "$MODE" == 'tasks-structure' || "$MODE" == 'task-review' ||
         "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ||
         "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ) && "$FAILURES" -eq 0 ]]; then
   check_tasks_structure
+fi
+if [[ "$MODE" == 'retask-eligible' && "$FAILURES" -eq 0 ]]; then
+  check_tasks_structure optional
+fi
+if [[ "$MODE" == 'retask-eligible' && "$FAILURES" -eq 0 ]]; then
+  check_retask_eligibility
 fi
 if [[ "$MODE" == 'task-review' && "$FAILURES" -eq 0 ]]; then
   if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
