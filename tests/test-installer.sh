@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Renderer, manifest, and scratch extension-install smoke tests.
+# shellcheck disable=SC2016 # Assertions match literal Markdown backticks.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -197,6 +198,7 @@ for skill in "$claude_spec" "$codex_spec"; do
   grep -F 'deleting Technical basis identifiers' "$skill" >/dev/null && triage_contract_ok=0
 done
 for skill in "$claude_plan" "$codex_plan"; do
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   for rule in \
     '**Human decision**' \
     '**Engineering determination**' \
@@ -248,6 +250,53 @@ if [[ "$design_evidence_ok" -eq 1 ]]; then
   ok "plan/template/reviewer preserve the structured design-evidence contract"
 else
   not_ok "structured design-evidence contract"
+fi
+
+delivery_estimate_ok=1
+for skill in "$claude_spec" "$codex_spec"; do
+  for rule in \
+    '**Delivery Estimate Schema**: 1' \
+    'independently deliverable' \
+    'generated: <output path> <- <source path> via <generator>' \
+    'all three Delivery Estimate ranges and confidence'; do
+    grep -F "$rule" "$skill" >/dev/null || delivery_estimate_ok=0
+  done
+done
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    '**Delivery Estimate Schema**: 1' \
+    '`within`, `expanded`, or `reduced`' \
+    'There is no size, file-count, or checkpoint limit' \
+    'all three Design estimate ranges with confidence'; do
+    grep -F "$rule" "$skill" >/dev/null || delivery_estimate_ok=0
+  done
+done
+for skill in "$claude_source" "$codex_source" "$claude_refine" "$codex_refine" \
+             "$claude_review_tasks" "$codex_review_tasks"; do
+  grep -F 'new_upper * 100 >= design_upper * 125' "$skill" >/dev/null || delivery_estimate_ok=0
+  grep -F 'production path family' "$skill" >/dev/null || delivery_estimate_ok=0
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  grep -F 'new_upper * 100 >= design_upper * 125' "$reviewer" >/dev/null || delivery_estimate_ok=0
+  grep -F 'Growth below 25%' "$reviewer" >/dev/null || delivery_estimate_ok=0
+done
+for skill in "$claude_accept" "$codex_accept"; do
+  grep -F 'actual Production additions' "$skill" >/dev/null || delivery_estimate_ok=0
+  grep -F 'size alone' "$skill" >/dev/null || delivery_estimate_ok=0
+done
+for rule in \
+  '**Delivery Estimate Schema**: 1' \
+  '**Production additions**' \
+  '**Production churn**' \
+  '**Production files**' \
+  'generated: output/path <- source/path via generator'; do
+  grep -F "$rule" "$REPO/templates/gatespec-spec-template.md" >/dev/null || delivery_estimate_ok=0
+  grep -F "$rule" "$REPO/templates/gatespec-plan-template.md" >/dev/null || delivery_estimate_ok=0
+done
+if [[ "$delivery_estimate_ok" -eq 1 ]]; then
+  ok "rendered skills, templates, and both reviewer adapters preserve delivery estimates and the 25% boundary"
+else
+  not_ok "rendered delivery-estimate and drift-review contract"
 fi
 
 source_protocol_ok=1
@@ -478,7 +527,7 @@ hook_entry_count=$(awk '
   END {print count+0}
 ' extension.yml)
 
-if ! grep -F 'version: "0.7.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.8.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -496,9 +545,9 @@ if ! grep -F 'version: "0.7.0"' extension.yml >/dev/null ||
    [[ "$hook_entry_count" -ne 9 ]] ||
    [[ $(grep -c 'priority: 10' extension.yml || true) -ne 3 ]] ||
    [[ $(grep -c 'priority: 20' extension.yml || true) -ne 3 ]]; then
-  not_ok "0.7.0 manifest requirements and nine ordered hook entries"
+  not_ok "0.8.0 manifest requirements and nine ordered hook entries"
 else
-  ok "0.7.0 manifest preserves six events and registers nine ordered entries"
+  ok "0.8.0 manifest preserves six events and registers nine ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

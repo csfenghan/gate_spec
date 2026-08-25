@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 (2026-08-25)
+
+- Added Delivery Estimate Schema 1 to new/revised Requirements and Design with
+  aggregate Production additions, churn, and file ranges, explicit path/
+  exclusion basis, generated-output provenance, and confidence.
+- Added pre-clarification capability split decisions, Design re-estimation and
+  Requirements comparison, and existing-summary approval of disclosed scale
+  without LOC/file/checkpoint limits or another approval mechanism.
+- Added Source/task/REV-TASKS estimate drift review: ≥25% upper-bound growth or
+  a new production path family returns through Plan diff revision; a
+  scope-changing split returns to Requirements.
+- Added legacy Requirements warnings, pre-task migration for unstarted legacy
+  Design, warning-only compatibility after implementation progress, and final
+  Git additions/churn/file metrics beside Design estimates.
+- Expanded checker, renderer, reviewer, compatibility, generated-file, large-
+  estimate, threshold, legacy, and final-metric fixtures while preserving six
+  hook events, nine hook entries, Review Protocol v1/v2, and native execution.
+
 ## 0.7.0 (2026-08-24)
 
 - Added a bounded `after_tasks` refinement pass that may edit only native

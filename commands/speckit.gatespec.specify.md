@@ -59,7 +59,9 @@ If a current GateSpec spec exists:
 - Draft: continue in place. Never recopy the template or discard answers.
 - Valid Approved-Requirements and no workflow flag: keep it read-only, report
   that it is approved (including any user-constraint drift warning and the
-  `--refresh-constraints` option), and hand off to
+  `--refresh-constraints` option). If it is a legacy approval without
+  Delivery Estimate Schema 1, warn without editing it; Design must add the
+  first estimate. Then hand off to
   `__SPECKIT_COMMAND_GATESPEC_PLAN__`.
 - `--revise`: archive Source Design, `tasks.md`, current reviews,
   revalidations, execution state, IA, and acceptance before editing; change
@@ -129,6 +131,15 @@ known unknown into exactly one conversational bucket:
    answer and no material reason for individual discussion.
 3. **Technical matter deferred to Design** — the unknown changes only an
    implementation mechanism and has no Requirements-level consequence.
+
+As part of that same pass, identify independently deliverable capabilities
+that can also be validated alone. When at least one reasonable split preserves
+useful standalone value and materially changes delivery scope, present merge versus
+one or more concrete split boundaries as an ordinary blocking `R<n>` decision.
+State what each deliverable contains and what the user receives first. Do not
+create sibling specs automatically. A decision to split narrows this feature's
+Requirements now; a later split discovered after approval returns through
+`--revise`. If no reasonable independent split exists, record no decision.
 
 Technology choice alone never makes an item blocking. A conflicting or
 requirement-violating candidate is excluded rather than used as a foil. If
@@ -275,6 +286,22 @@ Requirements choices and no human-relevant consequence was hidden as a default
 or deferral. Resolve findings in the text or return/promote the affected item to
 the inventory and present the next legal batch. Run:
 
+Estimate the complete approved feature and write exact
+`**Delivery Estimate Schema**: 1` plus one `## Delivery Estimate`. Use
+non-negative `lower..upper` intervals for Production additions, Production
+churn, and Production files. Churn means additions + deletions. Production
+code includes handwritten runtime code, headers, protocols/schema,
+configuration, and build/packaging logic. Exclude tests, specification/review
+metadata, pure documentation, and reproducibly generated outputs. A generated
+output may be excluded only as
+`generated: <output path> <- <source path> via <generator>`; otherwise count it
+as production. Record the capability/analogy basis, production path families,
+all exclusions, and a candid confidence with reason. Requirements may use a
+wide range and low confidence. There is no size, file-count, or checkpoint
+limit: disclosure enables the user's existing scope approval or split choice.
+
+Then run:
+
 ```bash
 bash .specify/extensions/gatespec/scripts/bash/check-gate.sh spec <feature-dir>
 ```
@@ -285,11 +312,14 @@ must be resolved before summary approval.
 ## Step 5: Requirements approval
 
 Present at most 20 lines: goal (≤3 lines), P1 stories, key decisions, approved
-defaults, scope boundaries, material technical matters explicitly deferred to
-Design, and the mandatory line “what I am least confident about”. Remind the
-user that any classification can still be challenged before approval. Wait for
-unambiguous approval. On requested changes, update the Draft and show only the
-diff since the previously shown version.
+defaults, scope boundaries, all three Delivery Estimate ranges and confidence,
+material technical matters explicitly deferred to Design, and the mandatory
+line “what I am least confident about”. Make clear that normal Requirements
+approval also accepts the disclosed whole-feature size; this is not another
+approval mechanism. Remind the user that any classification can still be
+challenged before approval. Wait for unambiguous approval. On requested
+changes, update the Draft and show only the diff since the previously shown
+version.
 
 On explicit approval only:
 

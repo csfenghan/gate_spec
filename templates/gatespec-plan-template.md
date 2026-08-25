@@ -10,6 +10,8 @@
 
 **Design Evidence Schema**: 1
 
+**Delivery Estimate Schema**: 1
+
 <!--
   GATESPEC GATE FIELDS (do not remove):
   - **Status** transitions: Draft → Approved-Design (YYYY-MM-DD).
@@ -22,6 +24,30 @@
 ## Summary
 
 [Extract from feature spec: primary requirement, design intent, current-to-target change boundary, and technical approach from research]
+
+## Delivery Estimate *(gatespec: mandatory)*
+
+<!--
+  GATESPEC: Re-estimate the complete feature from inspected modules, callers,
+  generated inputs/outputs, build wiring, and test surface. Use exact
+  non-negative `lower..upper` ranges. Production code includes handwritten
+  runtime code, headers, protocol/schema, config, and build/packaging logic;
+  exclude tests, specification/review metadata, pure documentation, and only
+  reproducibly generated outputs. Generated exclusions use
+  `generated: output/path <- source/path via generator`.
+  Relation is `within`, `expanded`, or `reduced`. For a legacy approved
+  Requirements artifact with no estimate, use `not-applicable` and explain.
+-->
+
+- **Production additions**: `[lower..upper]`
+- **Production churn**: `[lower..upper]`
+- **Production files**: `[lower..upper]`
+- **Estimate basis**: [inspected modules, callers, analogous diffs, and uncertainty]
+- **Production path basis**: [repository-relative production path families separated by semicolons]
+- **Excluded paths**: [path pattern — exclusion reason; generated: output/path <- source/path via generator]
+- **Confidence**: [low, medium, or high — concise reason]
+- **Requirements estimate relation**: `[within|expanded|reduced]`
+- **Requirements estimate rationale**: [why Design stayed within or changed the Requirements estimate]
 
 ## Technical Context
 

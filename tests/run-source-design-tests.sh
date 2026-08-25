@@ -1227,7 +1227,16 @@ git -C "$REPO" commit -qm 'REV-FINAL PASS metadata'
 FINAL_REVIEW_COMMIT=$(git -C "$REPO" rev-parse HEAD)
 expect_review pass implementation-review "$FEATURE" REV-FINAL "v2 committed REV-FINAL passes without user checkpoint approval"
 expect fail acceptance "$FEATURE" "REV-FINAL alone cannot complete without acceptance" "explicit final user acceptance is missing"
-expect pass acceptance-candidate "$FEATURE" "final delivery is ready for one user acceptance"
+expect pass acceptance-candidate "$FEATURE" "final delivery is ready for one user acceptance" \
+  "Actual production files: 1"
+if grep -F 'Actual production additions: 1' "$TEST_TMP/out" >/dev/null &&
+   grep -F 'Actual production churn: 1' "$TEST_TMP/out" >/dev/null &&
+   grep -F 'Actual production files: 1' "$TEST_TMP/out" >/dev/null &&
+   grep -F 'Binary production files without line counts: 0' "$TEST_TMP/out" >/dev/null; then
+  PASS=$((PASS + 1)); echo "✓ final Git metrics exclude feature metadata and test paths"
+else
+  FAIL=$((FAIL + 1)); echo "✗ final Git delivery metrics"; sed 's/^/    /' "$TEST_TMP/out"
+fi
 
 FINAL_SEAL="$FEATURE/.gatespec/reviews/REV-FINAL/seal.md"
 IA_HASH=$(file_hash "$FEATURE/.gatespec/implementation-adjustments.md")

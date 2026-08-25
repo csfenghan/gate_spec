@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.7.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.8.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -123,6 +123,14 @@ In a scratch initialized project:
     reopens the plan as Draft, enriches structured evidence without rewriting
     unaffected decisions, and requires diff re-approval before task
     regeneration.
+19. Generate Requirements/Design Delivery Estimate Schema 1, including one
+    declared generated-output source. Confirm malformed intervals/fields fail,
+    a disclosed very large estimate passes, legacy Requirements warn, and an
+    unstarted legacy Design blocks. Re-estimate Source/tasks at 24% and exactly
+    25% upper-bound growth: 24% continues, 25% returns to Plan revision; a new
+    production path family does likewise. At final acceptance, confirm Git
+    actual additions/churn/files exclude tests/spec/review/docs and appear
+    beside Design without numeric variance becoming a failure.
 
 Run `bash tests/run-all.sh` on Linux and macOS and verify `git status` remains
 clean. If a hook or artifact contract changed, retain the old upper version

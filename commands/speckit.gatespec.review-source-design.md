@@ -98,6 +98,16 @@ missing path/symbol/flow/test, incompatibility with Spec/Plan, material
 uncertainty, or unbounded implementation choice is a BLOCKER. Reviewer PASS is
 engineering evidence, not user approval.
 
+Independently re-estimate aggregate Production additions, churn, and files
+from the Source manifest and inspected baseline. A Design-estimate upper bound
+of zero is exceeded by any positive value; otherwise block when any new upper
+bound satisfies `new_upper * 100 >= design_upper * 125` (exactly 25% counts),
+or when any Source production path family is absent from Design's Production
+path basis. Direct remediation to `gatespec.plan --revise`; if splitting would
+change approved scope, direct it to `gatespec.specify --revise`. Values below
+the threshold are observations, not blockers, and large estimates already
+disclosed in approved Design are valid.
+
 Return exactly this Protocol v2 verdict, self-hashed over all preceding bytes:
 
 ```markdown

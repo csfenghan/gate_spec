@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Deterministic fixtures for scripts/bash/check-gate.sh.
+# shellcheck disable=SC2016 # Fixture Markdown uses literal backticks.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -37,6 +38,16 @@ clone_good() {
   mkdir -p "$TEST_TMP/$1"
   cp "$TEST_TMP/good/spec.md" "$TEST_TMP/$1/spec.md"
   cp "$TEST_TMP/good/plan.md" "$TEST_TMP/$1/plan.md"
+}
+
+strip_delivery_estimate() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^\*\*Delivery Estimate Schema\*\*:/ {next}
+    /^## Delivery Estimate([[:space:]]|$)/ {skip=1; next}
+    skip && /^## / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
 sha_stream() {
@@ -372,6 +383,7 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 <!-- path: gatespec -->
 # Feature Specification: Config hot reload
 **Status**: Approved-Requirements (2026-08-07)
+**Delivery Estimate Schema**: 1
 ## Clarifications
 ### Session 2026-08-07
 - Q: [R1] What reload scope is required? → A: Replace values without dropping connections.
@@ -385,6 +397,14 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 - **User GateSpec constraints**: absent — SHA-256: `absent`
 - **Effective constraints**: portable watcher; connections remain active.
 - **Conflicts and resolutions**: None — sources do not conflict.
+## Delivery Estimate
+- **Production additions**: `120..220`
+- **Production churn**: `150..280`
+- **Production files**: `3..6`
+- **Estimate basis**: The watcher, store publication, lifecycle wiring, and build registration are comparable to one small subsystem change.
+- **Production path basis**: src/config/**; include/config/**; CMakeLists.txt
+- **Excluded paths**: tests/** — test; specs/** — specification/review; docs/** — documentation
+- **Confidence**: medium — repository modules are known but caller cleanup may widen churn.
 ## User Scenarios & Testing
 ### User Story 1 - Hot reload (Priority: P1)
 **Acceptance Scenarios**:
@@ -411,8 +431,19 @@ cat > "$TEST_TMP/good/plan.md" <<EOF
 **Status**: Approved-Design (2026-08-07)
 **Requirements Content-SHA256**: \`$SPEC_HASH\`
 **Design Evidence Schema**: 1
+**Delivery Estimate Schema**: 1
 ## Summary
 Add portable polling and atomic snapshot replacement.
+## Delivery Estimate
+- **Production additions**: \`140..210\`
+- **Production churn**: \`170..270\`
+- **Production files**: \`4..6\`
+- **Estimate basis**: Inspected ConfigService, ConfigStore, request handlers, build registration, and the required unit and integration surfaces.
+- **Production path basis**: src/config/**; include/config/**; CMakeLists.txt
+- **Excluded paths**: tests/** — test; specs/** — specification/review; docs/** — documentation
+- **Confidence**: high — concrete modules and callers are identified; only local helper layout remains free.
+- **Requirements estimate relation**: \`within\`
+- **Requirements estimate rationale**: Design narrows the additions range while retaining the Requirements churn and file ceilings.
 ## Technical Context
 **Language/Version**: C++20
 ## Constitution Check
@@ -491,6 +522,145 @@ seal "$TEST_TMP/good/plan.md"
 
 expect pass spec "$TEST_TMP/good" "approved requirements pass"
 expect pass design "$TEST_TMP/good" "approved requirements and design pass"
+
+# Delivery Estimate Schema ---------------------------------------------------
+clone_good estimate-missing-field
+rewrite "$TEST_TMP/estimate-missing-field/spec.md" '/^- \*\*Production additions\*\*:/d'
+seal "$TEST_TMP/estimate-missing-field/spec.md"
+expect fail spec "$TEST_TMP/estimate-missing-field" "delivery estimate requires every fixed field" "Production additions"
+
+clone_good estimate-duplicate-schema
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/estimate-duplicate-schema/spec.md" '/\*\*Delivery Estimate Schema\*\*: 1/a\
+**Delivery Estimate Schema**: 1'
+seal "$TEST_TMP/estimate-duplicate-schema/spec.md"
+expect fail spec "$TEST_TMP/estimate-duplicate-schema" "duplicate delivery estimate schema fails" "expected exactly one '**Delivery Estimate Schema**: 1'"
+
+clone_good estimate-duplicate-section
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/estimate-duplicate-section/spec.md" '/^## User Scenarios & Testing/i\
+## Delivery Estimate'
+seal "$TEST_TMP/estimate-duplicate-section/spec.md"
+expect fail spec "$TEST_TMP/estimate-duplicate-section" "duplicate delivery estimate section fails" "expected exactly one '## Delivery Estimate'"
+
+clone_good estimate-unknown-schema
+rewrite "$TEST_TMP/estimate-unknown-schema/spec.md" 's/\*\*Delivery Estimate Schema\*\*: 1/**Delivery Estimate Schema**: 2/'
+seal "$TEST_TMP/estimate-unknown-schema/spec.md"
+expect fail spec "$TEST_TMP/estimate-unknown-schema" "unknown delivery estimate schema fails closed" "unknown schemas are invalid"
+
+clone_good estimate-plan-unknown-schema
+rewrite "$TEST_TMP/estimate-plan-unknown-schema/plan.md" 's/\*\*Delivery Estimate Schema\*\*: 1/**Delivery Estimate Schema**: 9/'
+seal "$TEST_TMP/estimate-plan-unknown-schema/plan.md"
+expect fail design "$TEST_TMP/estimate-plan-unknown-schema" "unknown Plan delivery estimate schema fails closed" "unknown schemas are invalid"
+
+clone_good estimate-inverted
+rewrite "$TEST_TMP/estimate-inverted/spec.md" 's/`120\.\.220`/`220..120`/'
+seal "$TEST_TMP/estimate-inverted/spec.md"
+expect fail spec "$TEST_TMP/estimate-inverted" "inverted delivery estimate range fails" "lower bound exceeds"
+
+clone_good estimate-illegal
+rewrite "$TEST_TMP/estimate-illegal/spec.md" 's/`120\.\.220`/`-1..220`/'
+seal "$TEST_TMP/estimate-illegal/spec.md"
+expect fail spec "$TEST_TMP/estimate-illegal" "negative delivery estimate range fails" "non-negative 'lower..upper'"
+
+for empty_estimate_field in 'Estimate basis' 'Production path basis' 'Excluded paths' 'Confidence'; do
+  estimate_slug=$(printf '%s' "$empty_estimate_field" | tr '[:upper:] ' '[:lower:]-')
+  clone_good "estimate-empty-$estimate_slug"
+  rewrite "$TEST_TMP/estimate-empty-$estimate_slug/spec.md" "s/^- \*\*$empty_estimate_field\*\*:.*/- **$empty_estimate_field**: /"
+  seal "$TEST_TMP/estimate-empty-$estimate_slug/spec.md"
+  expect fail spec "$TEST_TMP/estimate-empty-$estimate_slug" \
+    "delivery estimate $empty_estimate_field cannot be empty" "nonempty '$empty_estimate_field'"
+done
+
+clone_good estimate-additions-over-churn
+rewrite "$TEST_TMP/estimate-additions-over-churn/spec.md" 's/`150\.\.280`/`100..200`/'
+seal "$TEST_TMP/estimate-additions-over-churn/spec.md"
+expect fail spec "$TEST_TMP/estimate-additions-over-churn" "additions cannot exceed churn bounds" "cannot exceed Production churn"
+
+clone_good estimate-generated-without-source
+rewrite "$TEST_TMP/estimate-generated-without-source/spec.md" 's|tests/\*\* — test; specs/\*\* — specification/review; docs/\*\* — documentation|generated: src/generated/config.cc — reproducible output|'
+seal "$TEST_TMP/estimate-generated-without-source/spec.md"
+expect fail spec "$TEST_TMP/estimate-generated-without-source" "generated exclusion requires its source" "generated exclusions must use"
+
+clone_good estimate-generated-valid
+rewrite "$TEST_TMP/estimate-generated-valid/spec.md" 's|tests/\*\* — test; specs/\*\* — specification/review; docs/\*\* — documentation|tests/** — test; generated: src/generated/config.cc <- schema/config.proto via protoc|'
+seal "$TEST_TMP/estimate-generated-valid/spec.md"
+expect pass spec "$TEST_TMP/estimate-generated-valid" "generated exclusion with output, source, and generator passes"
+
+clone_good estimate-large-disclosed
+rewrite "$TEST_TMP/estimate-large-disclosed/spec.md" 's/`120\.\.220`/`1000000..2000000`/'
+rewrite "$TEST_TMP/estimate-large-disclosed/spec.md" 's/`150\.\.280`/`1200000..3000000`/'
+rewrite "$TEST_TMP/estimate-large-disclosed/spec.md" 's/`3\.\.6`/`10000..20000`/'
+seal "$TEST_TMP/estimate-large-disclosed/spec.md"
+expect pass spec "$TEST_TMP/estimate-large-disclosed" "large xclaw-scale estimate passes when explicitly disclosed"
+
+for estimate_relation in expanded reduced; do
+  clone_good "estimate-relation-$estimate_relation"
+  rewrite "$TEST_TMP/estimate-relation-$estimate_relation/plan.md" "s/\`within\`/\`$estimate_relation\`/"
+  seal "$TEST_TMP/estimate-relation-$estimate_relation/plan.md"
+  expect pass design "$TEST_TMP/estimate-relation-$estimate_relation" \
+    "Design records a valid $estimate_relation Requirements estimate relation"
+done
+
+clone_good estimate-relation-invalid
+rewrite "$TEST_TMP/estimate-relation-invalid/plan.md" 's/`within`/`larger`/'
+seal "$TEST_TMP/estimate-relation-invalid/plan.md"
+expect fail design "$TEST_TMP/estimate-relation-invalid" "invalid Requirements estimate relation fails" "must be within, expanded, or reduced"
+
+clone_good legacy-requirements-estimate
+strip_delivery_estimate "$TEST_TMP/legacy-requirements-estimate/spec.md"
+seal "$TEST_TMP/legacy-requirements-estimate/spec.md"
+expect pass spec "$TEST_TMP/legacy-requirements-estimate" "legacy Approved Requirements without estimate remains warning-only" "legacy Approved Requirements"
+
+clone_good draft-missing-estimate
+strip_delivery_estimate "$TEST_TMP/draft-missing-estimate/spec.md"
+rewrite "$TEST_TMP/draft-missing-estimate/spec.md" 's/Approved-Requirements (2026-08-07)/Draft/'
+seal "$TEST_TMP/draft-missing-estimate/spec.md"
+expect fail spec "$TEST_TMP/draft-missing-estimate" "new or revised Draft cannot omit delivery estimate" "Delivery Estimate Schema 1"
+
+clone_good legacy-requirements-design-estimate
+strip_delivery_estimate "$TEST_TMP/legacy-requirements-design-estimate/spec.md"
+seal "$TEST_TMP/legacy-requirements-design-estimate/spec.md"
+legacy_spec_hash=$(hash_of "$TEST_TMP/legacy-requirements-design-estimate/spec.md")
+rewrite "$TEST_TMP/legacy-requirements-design-estimate/plan.md" \
+  "s/^\*\*Requirements Content-SHA256\*\*:.*/**Requirements Content-SHA256**: \`$legacy_spec_hash\`/"
+rewrite "$TEST_TMP/legacy-requirements-design-estimate/plan.md" 's/`within`/`not-applicable`/'
+seal "$TEST_TMP/legacy-requirements-design-estimate/plan.md"
+expect pass design "$TEST_TMP/legacy-requirements-design-estimate" "Design supplies the first estimate for legacy Requirements"
+
+clone_good legacy-design-estimate-no-progress
+strip_delivery_estimate "$TEST_TMP/legacy-design-estimate-no-progress/plan.md"
+seal "$TEST_TMP/legacy-design-estimate-no-progress/plan.md"
+expect fail design "$TEST_TMP/legacy-design-estimate-no-progress" \
+  "legacy Design without implementation progress must be revised" "run gatespec.plan --revise before tasks"
+
+clone_good draft-design-missing-estimate
+strip_delivery_estimate "$TEST_TMP/draft-design-missing-estimate/plan.md"
+rewrite "$TEST_TMP/draft-design-missing-estimate/plan.md" 's/Approved-Design (2026-08-07)/Draft/'
+seal "$TEST_TMP/draft-design-missing-estimate/plan.md"
+expect fail design "$TEST_TMP/draft-design-missing-estimate" \
+  "new or revised Design Draft cannot omit delivery estimate" "Delivery Estimate Schema 1"
+
+clone_good legacy-design-estimate-progress
+strip_delivery_estimate "$TEST_TMP/legacy-design-estimate-progress/plan.md"
+seal "$TEST_TMP/legacy-design-estimate-progress/plan.md"
+make_tasks "$TEST_TMP/legacy-design-estimate-progress"
+rewrite "$TEST_TMP/legacy-design-estimate-progress/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+expect pass design "$TEST_TMP/legacy-design-estimate-progress" \
+  "legacy Design with checked implementation progress remains valid" "implementation progress already exists"
+
+legacy_product_repo="$TEST_TMP/legacy-design-product-progress-repo"
+legacy_product_feature=$(init_feature_repo "$legacy_product_repo")
+strip_delivery_estimate "$legacy_product_feature/plan.md"
+seal "$legacy_product_feature/plan.md"
+git -C "$legacy_product_repo" add -- specs/001-hot-reload
+git -C "$legacy_product_repo" commit -qm 'Approve legacy design before implementation'
+mkdir -p "$legacy_product_repo/src"
+printf '%s\n' 'int implemented_after_plan = 1;' > "$legacy_product_repo/src/runtime.cc"
+git -C "$legacy_product_repo" add -- src/runtime.cc
+git -C "$legacy_product_repo" commit -qm 'Begin product implementation'
+expect pass design "$legacy_product_feature" \
+  "legacy Design with a committed product delta remains valid" "implementation progress already exists"
 
 clone_good legacy-clarification
 rewrite "$TEST_TMP/legacy-clarification/spec.md" 's/\[R1\] //'

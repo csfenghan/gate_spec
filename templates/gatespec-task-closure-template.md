@@ -1,6 +1,12 @@
 <!--
   Replace every bracketed value before tasks.md leaves refinement.
 
+  Before finalizing these matrices, re-estimate aggregate Production
+  additions/churn/files from all concrete task paths and build work. At 25%
+  upper-bound growth (or positive from zero) or a new Design-undeclared
+  production path family, stop for Plan revision; do not encode or conceal the
+  drift in a matrix row.
+
   These must be the final two H2 sections before the first `## Phase` heading.
   The Checkpoint rows exactly follow the Plan's Required Checkpoints. Each row
   partitions the non-checkpoint task interval ending at that checkpoint: every

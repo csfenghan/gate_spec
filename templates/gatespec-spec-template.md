@@ -9,6 +9,8 @@
 
 **Input**: User description: "$ARGUMENTS"
 
+**Delivery Estimate Schema**: 1
+
 <!--
   GATESPEC GATE FIELDS (do not remove):
   - Line 1 marker `<!-- path: gatespec -->` identifies this spec as gatespec-track.
@@ -74,6 +76,26 @@
 - **User GateSpec constraints**: [源路径或 absent] — SHA-256: `[哈希或 absent]`
 - **Effective constraints**: [按优先级排列的中文有效约束，包含已批准的豁免]
 - **Conflicts and resolutions**: [用中文逐项记录冲突、胜出规则与原因，或 无 — 原因]
+
+## Delivery Estimate *(gatespec: mandatory)*
+
+<!--
+  GATESPEC: Estimate the whole approved feature, not only its P1 slice or next
+  checkpoint. Ranges use exact non-negative `lower..upper` syntax. Production
+  code includes handwritten runtime code, headers, protocol/schema, config,
+  and build/packaging logic. Exclude tests, specification/review metadata,
+  pure documentation, and reproducibly generated outputs. A generated-output
+  exclusion must use this auditable form inside Excluded paths:
+  `generated: output/path <- source/path via generator`.
+-->
+
+- **Production additions**: `[lower..upper]`
+- **Production churn**: `[lower..upper]`
+- **Production files**: `[lower..upper]`
+- **Estimate basis**: [capabilities, analogous changes, and uncertainty behind the ranges]
+- **Production path basis**: [repository-relative production path families separated by semicolons]
+- **Excluded paths**: [path pattern — exclusion reason; generated: output/path <- source/path via generator]
+- **Confidence**: [low, medium, or high — concise reason]
 
 ## User Scenarios & Testing *(mandatory)*
 

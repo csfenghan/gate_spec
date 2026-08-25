@@ -291,6 +291,9 @@ chain: never copy the Gate Approval hash field as a substitute.
 The current structured design-evidence contract is identified by the exact
 field `**Design Evidence Schema**: 1`. If a plan declares another non-empty
 schema version, stop rather than downgrade or guess how to rewrite it.
+New and actively revised Plans also require exact
+`**Delivery Estimate Schema**: 1` and one complete Delivery Estimate section.
+An unknown or partial estimate schema is corruption and must not be guessed.
 
 Resume behavior:
 
@@ -302,9 +305,16 @@ Resume behavior:
   place from repository facts and existing attachments; preserve every D ID,
   answer, and unaffected design statement.
 - Valid Approved-Design with a valid Implementation Review Contract and no
-  flag, plus Design Evidence Schema 1: keep every design artifact read-only and
-  offer exactly two next steps—`__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__` or
-  native `__SPECKIT_COMMAND_TASKS__`. Do not select Source Design implicitly.
+  flag, plus Design Evidence Schema 1 and Delivery Estimate Schema 1: keep
+  every design artifact read-only and offer exactly two next steps—
+  `__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__` or native
+  `__SPECKIT_COMMAND_TASKS__`. Do not select Source Design implicitly.
+- A legacy Approved-Design without Delivery Estimate remains read-only and
+  warning-only only if implementation progress already exists: at least one
+  checked task, an implementation-review receipt, or a product-code change
+  after the reproducible Plan/task baseline. If none exists, archive stale
+  downstream work, apply `--revise`, add the estimate, and require diff-only
+  Design re-approval before tasks. Never fabricate progress to preserve it.
 - Approved-Design created before the Implementation Review Contract or Design
   Evidence Schema 1 existed must not hand off. There is no legacy bypass:
   automatically archive tasks and non-archive review contents, apply the
@@ -487,6 +497,26 @@ behavior contracts; setup/runtime/teardown. Constraints may add dimensions
 but cannot remove, rename, or replace these six. Write exact
 `**Design Evidence Schema**: 1` once near the Requirements content hash.
 
+Re-estimate the entire feature from repository facts: actual modules and
+callers, contract/schema/config/build changes, generated inputs and outputs,
+and the full verification surface. Write Delivery Estimate Schema 1 with exact
+non-negative `lower..upper` Production additions, churn (additions +
+deletions), and production-file ranges; substantive estimate basis; explicit
+production path families and excluded paths; and confidence with reason.
+Production code includes handwritten runtime code, headers, protocol/schema,
+configuration, and build/packaging logic. Exclude tests, specification/review
+metadata, pure documentation, and only reproducibly generated outputs. Every
+generated exclusion must say
+`generated: <output path> <- <source path> via <generator>`.
+
+Compare the Design estimate with Requirements and record exactly
+`within`, `expanded`, or `reduced` plus a substantive rationale. If the approved legacy
+Requirements has no estimate, record `not-applicable` with the legacy reason.
+Design should narrow Requirements uncertainty where repository evidence
+allows, or explicitly explain why it cannot.
+There is no size, file-count, or checkpoint limit; no range is a hard budget
+or gate.
+
 Each core dimension is either one inline `N/A — <specific reason>` /
 `无额外约束 — <具体原因>` or the exact structured child fields in the template:
 
@@ -577,10 +607,12 @@ after tasks, when tasks.md exists.
 Present at most 20 lines: technical approach and current-to-target change
 boundary, primary runtime flow, material concurrency/ownership rules, approved
 human decisions, material engineering determinations, explicit implementation
-freedoms, validation approach, and mandatory “what I am least confident
-about”. Remind the user that any determination/freedom may still be promoted
-before approval. Wait for unambiguous approval. Changes produce a diff-only
-re-approval round.
+freedoms, all three Design estimate ranges with confidence and the Requirements
+comparison, validation approach, and mandatory “what I am least confident
+about”. State that normal Design approval also accepts the disclosed scale; it
+does not create another approval. Remind the user that any
+determination/freedom may still be promoted before approval. Wait for
+unambiguous approval. Changes produce a diff-only re-approval round.
 
 On explicit approval only:
 

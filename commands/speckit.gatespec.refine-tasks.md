@@ -116,7 +116,13 @@ finding. Complete each category in this order:
    story/acceptance and failure scenario, contract/test mapping, and Design
    Evidence Schema 1 dimension without inventing scope. With Source enabled,
    also cover every approved SD<n>, SD-F/SD-U/SD-FLOW/SD-ALG/SD-FAIL/SD-TEST
-   ID and every Source Change Manifest path.
+   ID and every Source Change Manifest path. Re-estimate the complete task
+   plan's aggregate Production additions, churn, and production-file count
+   from its concrete paths/symbols/build work. If any upper bound satisfies
+   `new_upper * 100 >= design_upper * 125` (or becomes positive from zero), or
+   a production path family is absent from Design's Production path basis, this is a Design
+   gap; do not edit tasks to conceal it. Growth below 25% remains task-local
+   and does not require re-approval.
 9. **Prior-blocker closure** — inspect every basis-matching finding
    independently, identify concrete remediation tasks, and confirm those tasks
    close the full finding by its required checkpoint. A restatement, matrix
@@ -142,6 +148,13 @@ Classify each audit gap before writing:
   missing/contradictory boundary. Never edit an approved artifact, invent a
   human answer, widen an Implementation Freedom, or disguise a material Source
   departure as a task.
+
+An estimate-drift Design gap routes specifically to
+`__SPECKIT_COMMAND_GATESPEC_PLAN__ --revise` so the aggregate estimate is
+updated and diff-only re-confirmed. If the user instead chooses a split that
+changes the approved feature boundary, route to
+`__SPECKIT_COMMAND_GATESPEC_SPECIFY__ --revise`. There is no automatic split,
+LOC limit, per-task estimate, or checkpoint size cap.
 
 ## Mandatory closure sections
 

@@ -1,9 +1,11 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.7.0 is a personal spec-kit extension with human approval gates for
+GateSpec 0.8.0 is a personal spec-kit extension with human approval gates for
 Requirements and Design, optional reviewed Source Design, independent-context
 task/implementation reviews, bounded checked task closure, and one final
-whole-delivery acceptance. Read this file before changing the repository.
+whole-delivery acceptance. Requirements/Design disclose aggregate delivery
+size and later reviews catch material estimate drift. Read this file before
+changing the repository.
 
 ## Product invariants
 
@@ -30,6 +32,11 @@ whole-delivery acceptance. Read this file before changing the repository.
    for a non-UI feature. Supporting constraints and evidence are integrated
    only where material or expanded on request. The Design artifact retains its
    structured evidence fields.
+6. **Scale disclosure, not budgeting**: Requirements and Design show aggregate
+   Production additions, churn, and file ranges plus basis/exclusions/
+   confidence. There is no LOC/file/checkpoint cap. Existing summary approval
+   accepts the disclosed size; Source/tasks/REV-TASKS return to Design revision
+   at ≥25% upper-bound growth or a new production path family.
 
 Feature content has exactly three approval mechanisms: a decision answer, the
 defaults batch, and final summary/diff approval. “Proceed” cannot seal unresolved
@@ -62,6 +69,11 @@ perform one bounded tasks.md-only closure refinement; the second validates it.
   Content-SHA256. Status and approval dates agree.
 - plan.md records the approved Requirements content hash. A re-approved spec
   invalidates an old plan and its tasks.
+- New or revised spec/plan use Delivery Estimate Schema 1. Production includes
+  handwritten runtime/header/schema/config/build/packaging code and excludes
+  tests, spec/review metadata, pure docs, and only source-declared reproducible
+  generated outputs. Legacy Requirements warn; legacy Design blocks before
+  tasks unless implementation progress already exists.
 - REV-SOURCE binds the reviewed manifest hash that excludes entry Status/Gate
   Approval; downstream binds the approved content manifest hash. Both include
   raw shard hashes. Design Attachments always exclude the Source bundle.
@@ -83,6 +95,9 @@ perform one bounded tasks.md-only closure refinement; the second validates it.
 - IA is limited to bounded internal adjustments and belongs in each Subject;
   material or uncertain Source departure blocks. Final acceptance is a
   metadata-only local commit after REV-FINAL and never substitutes for CI.
+- Final acceptance reports actual additions, churn, and unique production files
+  from the bound Original-Baseline-to-Final-Subject Git diff beside Design's
+  estimate. Numeric variance alone never rejects a conforming delivery.
 - Closure partitions every non-checkpoint task by strict checkpoint interval,
   covers all approved artifact IDs, and hashes every basis-matching current or
   `*-retask` archived REV-TASKS blocker. Missing both sections is grandfathered
@@ -121,7 +136,7 @@ after tasks.
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.7.0 manifest, 6 hook events / 9 ordered entries |
+| `extension.yml` | 0.8.0 manifest, 6 hook events / 9 ordered entries |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/` | spec/plan, Source Design, IA, and task Closure templates |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |

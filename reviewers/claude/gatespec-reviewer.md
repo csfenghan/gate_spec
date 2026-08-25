@@ -210,6 +210,12 @@ manifest, complete critical SD-U declarations, SD-FLOW lifecycle/state/data
 flows, SD-ALG invariants/complexity/bounds, SD-FAIL propagation/recovery/
 observability, SD-TEST Requirement-to-file/symbol/test trace, every operational
 dimension, bounded freedoms, and no unapproved material source choice.
+Independently re-estimate aggregate Production additions, churn, and files.
+Block to `gatespec.plan --revise` if any Source upper bound becomes positive
+from an approved zero, satisfies `new_upper * 100 >= design_upper * 125`
+(exactly 25% counts), or introduces a production path family absent from the
+Design basis. Smaller drift is an observation. A scope-changing split instead
+requires `gatespec.specify --revise`; disclosed size alone is never a blocker.
 
 For REV-TASKS, require all approved requirements, stories, acceptance and
 failure scenarios, approved human decisions, recorded engineering
@@ -224,6 +230,14 @@ gold-plating. Require every plan checkpoint exactly once, non-parallel,
 phase-final, in declared order, mapped to executable tests, with no work
 crossing it. Missing coverage, an unbounded or human-relevant
 implementation-time decision, or material uncertainty is a blocker.
+Independently re-estimate aggregate Production additions, churn, and files
+from concrete task paths, symbols, callers, schema/config/build work, and test
+surface. Block to `gatespec.plan --revise` if any upper bound becomes positive
+from an approved zero, satisfies `new_upper * 100 >= design_upper * 125`
+(exactly 25% counts), or adds a production path family absent from Design's
+Production path basis. Growth below 25% continues. A scope-changing split
+requires `gatespec.specify --revise`; there is no LOC, file, task, or checkpoint
+limit.
 For source-enabled tasks, every SD-F/SD-U/SD-FLOW/SD-ALG/SD-FAIL/SD-TEST and
 manifest path must map to executable non-checkpoint tasks with precise paths.
 

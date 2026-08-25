@@ -127,6 +127,14 @@ esac
 
 FAILURES=0
 WARNINGS=0
+LEGACY_SPEC_ESTIMATE=0
+LEGACY_PLAN_ESTIMATE=0
+DESIGN_ADDITIONS_LOWER=''
+DESIGN_ADDITIONS_UPPER=''
+DESIGN_CHURN_LOWER=''
+DESIGN_CHURN_UPPER=''
+DESIGN_FILES_LOWER=''
+DESIGN_FILES_UPPER=''
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gatespec-check.XXXXXX") || exit 1
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
@@ -360,6 +368,11 @@ check_template_remnants() {
     '[externally observable success' '[versioning, migration' \
     '[states, transition authority' '[ordered setup, runtime' \
     '[partial startup, rollback' \
+    '[lower..upper]' '[capabilities, analogous changes' \
+    '[repository-relative production path families' \
+    '[path pattern — exclusion reason' '[low, medium, or high' \
+    '[inspected modules, callers' '[within|expanded|reduced]' \
+    '[why Design stayed within' \
     '[Document the selected' '[current need]' '[why 3 projects' \
     '[REMOVE IF UNUSED]'; do
     if grep -Fn "$token" "$file" >/dev/null 2>&1; then
@@ -372,6 +385,283 @@ check_template_remnants() {
     found=1
   fi
   [[ "$found" -eq 0 ]] && pass "$(basename "$file"): no known template remnants"
+}
+
+delivery_field_values() {
+  local file="$1" label="$2"
+  awk -v prefix="- **${label}**:" '
+    index($0, prefix) == 1 {
+      value=substr($0, length(prefix) + 1)
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      print value
+    }
+  ' "$file"
+}
+
+delivery_field_line_numbers() {
+  local file="$1" label="$2"
+  awk -v prefix="- **${label}**:" 'index($0, prefix) == 1 {print NR}' "$file"
+}
+
+decimal_le() {
+  local left="$1" right="$2"
+  left=$(printf '%s' "$left" | sed 's/^0*//')
+  right=$(printf '%s' "$right" | sed 's/^0*//')
+  [[ -n "$left" ]] || left=0
+  [[ -n "$right" ]] || right=0
+  if [[ ${#left} -lt ${#right} ]]; then
+    return 0
+  fi
+  if [[ ${#left} -gt ${#right} ]]; then
+    return 1
+  fi
+  [[ "$left" == "$right" || "$left" < "$right" ]]
+}
+
+parse_delivery_range() {
+  printf '%s\n' "$1" | sed -n 's/^`\([0-9][0-9]*\)\.\.\([0-9][0-9]*\)`$/\1 \2/p'
+}
+
+check_generated_exclusions() {
+  local value="$1" context="$2"
+  if printf '%s\n' "$value" | awk '
+    BEGIN {bad=0}
+    {
+      count=split($0, entries, ";")
+      for (i=1; i<=count; i++) {
+        item=entries[i]
+        sub(/^[[:space:]]*/, "", item)
+        sub(/[[:space:]]*$/, "", item)
+        lower=tolower(item)
+        generated=index(lower, "generated:")
+        looks_generated=(lower ~ /(^|\/)generated(\/|[.])|[.]pb[.](cc|h|go|java|py)|_generated[.]/)
+        if (generated && generated != 1) bad=1
+        if (generated == 1 && item !~ /^generated:[[:space:]]*[^[:space:]].*[[:space:]]+<-[[:space:]]+[^[:space:]].*[[:space:]]+via[[:space:]]+[^[:space:]].*$/) bad=1
+        if (looks_generated && generated != 1) bad=1
+      }
+    }
+    END {exit bad}
+  '; then
+    pass "$context: generated exclusions bind output, source, and generator"
+    return 0
+  else
+    fail "$context: generated exclusions must use 'generated: output/path <- source/path via generator'"
+    return 1
+  fi
+}
+
+check_delivery_estimate() {
+  local file="$1" kind="$2" context section
+  local exact_schema all_schema section_count field value lines count previous=0 line bad=0
+  local additions_lower additions_upper churn_lower churn_upper files_lower files_upper parsed
+  local fields relation
+  section="$TMP_DIR/delivery-estimate-${kind}"
+  context="$(basename "$file") Delivery Estimate"
+  exact_schema=$(grep -cFx '**Delivery Estimate Schema**: 1' "$file" || true)
+  all_schema=$(grep -cF '**Delivery Estimate Schema**:' "$file" || true)
+  section_count=$(h2_count "$file" 'Delivery Estimate')
+
+  if [[ "$all_schema" -eq 0 && "$section_count" -eq 0 ]]; then
+    if [[ "$kind" == requirements ]] &&
+       grep -Eq '^\*\*Status\*\*: Approved-Requirements \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$file"; then
+      LEGACY_SPEC_ESTIMATE=1
+      warn "spec.md: legacy Approved Requirements has no Delivery Estimate; the next Design must add one"
+    elif [[ "$kind" == design ]] &&
+         grep -Eq '^\*\*Status\*\*: Approved-Design \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$file"; then
+      LEGACY_PLAN_ESTIMATE=1
+      warn "plan.md: legacy Approved Design has no Delivery Estimate"
+    else
+      fail "$context: Delivery Estimate Schema 1 and one Delivery Estimate section are required"
+    fi
+    return
+  fi
+
+  if [[ "$exact_schema" -ne 1 || "$all_schema" -ne 1 ]]; then
+    fail "$context: expected exactly one '**Delivery Estimate Schema**: 1' field; missing, duplicate, and unknown schemas are invalid"
+    bad=1
+  else
+    pass "$context: Delivery Estimate Schema 1 is declared exactly once"
+  fi
+  if [[ "$section_count" -ne 1 ]]; then
+    fail "$context: expected exactly one '## Delivery Estimate' section"
+    return
+  fi
+  section_body "$file" 'Delivery Estimate' > "$section"
+
+  fields=$'Production additions\nProduction churn\nProduction files\nEstimate basis\nProduction path basis\nExcluded paths\nConfidence'
+  if [[ "$kind" == design ]]; then
+    fields="${fields}"$'\nRequirements estimate relation\nRequirements estimate rationale'
+  fi
+  while IFS= read -r field; do
+    [[ -n "$field" ]] || continue
+    lines=$(delivery_field_line_numbers "$section" "$field")
+    count=$(printf '%s\n' "$lines" | awk 'NF {n++} END {print n+0}')
+    value=$(delivery_field_values "$section" "$field")
+    if [[ "$count" -ne 1 || $(printf '%s\n' "$value" | awk 'NF {n++} END {print n+0}') -ne 1 ]]; then
+      fail "$context: expected exactly one nonempty '$field' field"
+      bad=1
+      continue
+    fi
+    line=$lines
+    if [[ "$line" -le "$previous" ]]; then
+      fail "$context: field '$field' is out of order"
+      bad=1
+    fi
+    previous=$line
+    if [[ "$value" == \[* ]]; then
+      fail "$context: field '$field' still contains a placeholder"
+      bad=1
+    fi
+  done <<< "$fields"
+
+  while IFS= read -r field; do
+    [[ -n "$field" ]] || continue
+    if ! printf '%s\n' "$fields" | grep -Fqx -- "$field"; then
+      fail "$context: unknown structured field '$field'"
+      bad=1
+    fi
+  done < <(sed -n 's/^- \*\*\([^*][^*]*\)\*\*:.*/\1/p' "$section")
+
+  parsed=$(parse_delivery_range "$(delivery_field_values "$section" 'Production additions')")
+  if [[ -z "$parsed" ]]; then
+    fail "$context: Production additions must be a non-negative 'lower..upper' range in backticks"
+    bad=1
+  else
+    read -r additions_lower additions_upper <<< "$parsed"
+    if ! decimal_le "$additions_lower" "$additions_upper"; then
+      fail "$context: Production additions lower bound exceeds its upper bound"
+      bad=1
+    fi
+  fi
+  parsed=$(parse_delivery_range "$(delivery_field_values "$section" 'Production churn')")
+  if [[ -z "$parsed" ]]; then
+    fail "$context: Production churn must be a non-negative 'lower..upper' range in backticks"
+    bad=1
+  else
+    read -r churn_lower churn_upper <<< "$parsed"
+    if ! decimal_le "$churn_lower" "$churn_upper"; then
+      fail "$context: Production churn lower bound exceeds its upper bound"
+      bad=1
+    fi
+  fi
+  parsed=$(parse_delivery_range "$(delivery_field_values "$section" 'Production files')")
+  if [[ -z "$parsed" ]]; then
+    fail "$context: Production files must be a non-negative 'lower..upper' range in backticks"
+    bad=1
+  else
+    read -r files_lower files_upper <<< "$parsed"
+    if ! decimal_le "$files_lower" "$files_upper"; then
+      fail "$context: Production files lower bound exceeds its upper bound"
+      bad=1
+    fi
+  fi
+  if [[ -n "${additions_lower:-}" && -n "${churn_lower:-}" ]] &&
+     { ! decimal_le "$additions_lower" "$churn_lower" || ! decimal_le "$additions_upper" "$churn_upper"; }; then
+    fail "$context: Production additions cannot exceed Production churn at either interval bound"
+    bad=1
+  fi
+
+  value=$(delivery_field_values "$section" 'Excluded paths')
+  if [[ -n "$value" ]] && ! check_generated_exclusions "$value" "$context"; then
+    bad=1
+  fi
+
+  if [[ "$kind" == design ]]; then
+    relation=$(delivery_field_values "$section" 'Requirements estimate relation')
+    case "$relation" in
+      '`within`'|'`expanded`'|'`reduced`')
+        if [[ "$LEGACY_SPEC_ESTIMATE" -eq 1 ]]; then
+          fail "$context: legacy Requirements without an estimate require a not-applicable relation in backticks"
+          bad=1
+        fi
+        ;;
+      '`not-applicable`')
+        if [[ "$LEGACY_SPEC_ESTIMATE" -ne 1 ]]; then
+          fail "$context: Requirements estimate relation may be 'not-applicable' only for legacy Requirements without an estimate"
+          bad=1
+        fi
+        ;;
+      *)
+        fail "$context: Requirements estimate relation must be within, expanded, or reduced in backticks"
+        bad=1
+        ;;
+    esac
+    DESIGN_ADDITIONS_LOWER=${additions_lower:-}
+    DESIGN_ADDITIONS_UPPER=${additions_upper:-}
+    DESIGN_CHURN_LOWER=${churn_lower:-}
+    DESIGN_CHURN_UPPER=${churn_upper:-}
+    DESIGN_FILES_LOWER=${files_lower:-}
+    DESIGN_FILES_UPPER=${files_upper:-}
+  fi
+  [[ "$bad" -eq 0 ]] && pass "$context: ranges, bases, exclusions, confidence, and comparison fields are valid"
+}
+
+legacy_progress_path_is_production() {
+  local path="$1" feature_rel="$2"
+  case "$path" in
+    "$feature_rel"|"$feature_rel"/*|specs/*|test/*|tests/*|doc/*|docs/*|\
+    */test/*|*/tests/*|*/doc/*|*/docs/*|README|README.*|CHANGELOG|CHANGELOG.*|LICENSE|LICENSE.*|\
+    *.md|*.rst|*.adoc|*.txt)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+legacy_design_has_implementation_progress() {
+  local repo feature_rel baseline='' seal_rel plan_rel path review review_name receipt
+  if [[ -f "$TASKS" ]] && grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$TASKS"; then
+    return 0
+  fi
+  if [[ -d "$FEATURE_DIR/.gatespec/reviews" ]]; then
+    while IFS= read -r review; do
+      review_name=$(basename "$review")
+      case "$review_name" in REV-FOUNDATION|REV-FINAL) ;;
+        *) printf '%s\n' "$review_name" | grep -Eq '^REV-US[1-9][0-9]*$' || continue ;;
+      esac
+      while IFS= read -r receipt; do
+        case "$(basename "$receipt")" in
+          round-00-request.md|round-00-verdict.md|round-01-request.md|round-01-verdict.md|\
+          round-02-request.md|round-02-verdict.md|seal.md) return 0 ;;
+        esac
+      done < <(find "$review" -mindepth 1 -maxdepth 1 -type f -print 2>/dev/null)
+    done < <(find "$FEATURE_DIR/.gatespec/reviews" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)
+  fi
+
+  repo=$(git -C "$FEATURE_DIR" rev-parse --show-toplevel 2>/dev/null || true)
+  [[ -n "$repo" ]] || return 1
+  feature_rel=$(git -C "$FEATURE_DIR" rev-parse --show-prefix 2>/dev/null || true)
+  feature_rel=${feature_rel%/}
+  [[ -n "$feature_rel" ]] || return 1
+  seal_rel="$feature_rel/.gatespec/reviews/REV-TASKS/seal.md"
+  plan_rel="$feature_rel/plan.md"
+
+  if [[ -f "$EXECUTION_STATE" ]]; then
+    baseline=$(markdown_field_value "$EXECUTION_STATE" 'Original-Implementation-Baseline')
+    is_git_oid "$baseline" || baseline=''
+  fi
+  if [[ -z "$baseline" ]]; then
+    baseline=$(git -C "$repo" log -1 --format=%H -- "$seal_rel" 2>/dev/null || true)
+  fi
+  if [[ -z "$baseline" ]]; then
+    baseline=$(git -C "$repo" log -1 --format=%H -- "$plan_rel" 2>/dev/null || true)
+  fi
+  if [[ -n "$baseline" ]] && git -C "$repo" cat-file -e "$baseline^{commit}" 2>/dev/null; then
+    while IFS= read -r -d '' path; do
+      legacy_progress_path_is_production "$path" "$feature_rel" && return 0
+    done < <(git -C "$repo" -c core.quotepath=false diff --name-only -z --no-renames "$baseline" HEAD 2>/dev/null)
+  fi
+  while IFS= read -r -d '' path; do
+    legacy_progress_path_is_production "$path" "$feature_rel" && return 0
+  done < <(git -C "$repo" -c core.quotepath=false diff --name-only -z --no-renames HEAD 2>/dev/null)
+  while IFS= read -r -d '' path; do
+    legacy_progress_path_is_production "$path" "$feature_rel" && return 0
+  done < <(git -C "$repo" -c core.quotepath=false diff --cached --name-only -z --no-renames HEAD 2>/dev/null)
+  while IFS= read -r -d '' path; do
+    legacy_progress_path_is_production "$path" "$feature_rel" && return 0
+  done < <(git -C "$repo" -c core.quotepath=false ls-files --others --exclude-standard -z 2>/dev/null)
+  return 1
 }
 
 check_gate_approval() {
@@ -697,6 +987,7 @@ check_spec_gate() {
   check_clarifications
   check_defaults
   check_constraint_basis "$SPEC"
+  check_delivery_estimate "$SPEC" requirements
   check_fr_traceability
   check_template_remnants "$SPEC"
   check_gate_approval "$SPEC" 'Approved-Requirements'
@@ -1633,6 +1924,119 @@ git_final_delta_hash() {
   local repo="$1" original="$2" subject="$3"
   git -C "$repo" diff-tree --raw -z --no-abbrev --no-renames "$original" "$subject" 2>/dev/null \
     | portable_sha256 | awk '{print $1}'
+}
+
+collect_delivery_exclusion_patterns() {
+  local body="$TMP_DIR/delivery-estimate-metric" value
+  : > "$TMP_DIR/delivery-exclusion-patterns"
+  [[ "$LEGACY_PLAN_ESTIMATE" -eq 0 ]] || return
+  section_body "$PLAN" 'Delivery Estimate' > "$body"
+  value=$(delivery_field_values "$body" 'Excluded paths')
+  printf '%s\n' "$value" | awk '
+    {
+      count=split($0, entries, ";")
+      for (i=1; i<=count; i++) {
+        item=entries[i]
+        sub(/^[[:space:]]*/, "", item)
+        sub(/[[:space:]]*$/, "", item)
+        lower=tolower(item)
+        if (lower ~ /^none[[:space:]]/) continue
+        if (lower ~ /^generated:/) {
+          sub(/^[^:]*:[[:space:]]*/, "", item)
+          sub(/[[:space:]]+<-.*/, "", item)
+        } else if ((separator=index(item, " — ")) > 0) {
+          item=substr(item, 1, separator - 1)
+        }
+        sub(/^[[:space:]`]+/, "", item)
+        sub(/[[:space:]`]+$/, "", item)
+        if (item != "") print item
+      }
+    }
+  ' > "$TMP_DIR/delivery-exclusion-patterns"
+}
+
+delivery_path_is_production() {
+  local path="$1" pattern
+  case "$path" in
+    "$GIT_FEATURE_REL"|"$GIT_FEATURE_REL"/*|specs/*|test/*|tests/*|doc/*|docs/*|\
+    */test/*|*/tests/*|*/doc/*|*/docs/*|README|README.*|CHANGELOG|CHANGELOG.*|LICENSE|LICENSE.*|\
+    *.md|*.rst|*.adoc|*.txt)
+      return 1
+      ;;
+  esac
+  while IFS= read -r pattern; do
+    [[ -n "$pattern" ]] || continue
+    # The right side is intentionally unquoted: [[ ]] applies the recorded
+    # repository-relative glob without pathname expansion or eval.
+    # shellcheck disable=SC2053
+    if [[ "$path" == $pattern ]]; then return 1; fi
+  done < "$TMP_DIR/delivery-exclusion-patterns"
+  return 0
+}
+
+actual_within_estimate() {
+  local actual="$1" lower="$2" upper="$3"
+  decimal_le "$lower" "$actual" && decimal_le "$actual" "$upper"
+}
+
+report_actual_delivery_metrics() {
+  local final_dir="$FEATURE_DIR/.gatespec/reviews/REV-FINAL" request round
+  local protocol original subject record additions deletions path
+  local total_additions=0 total_churn=0 total_files=0 binary_files=0 confidence
+  round=$(markdown_field_value "$final_dir/seal.md" 'Round')
+  request="$final_dir/round-${round}-request.md"
+  [[ -f "$request" ]] || { fail "Delivery Size: sealed REV-FINAL request is missing"; return; }
+  protocol=$(markdown_field_value "$request" 'Protocol-Version')
+  subject=$(markdown_field_value "$request" 'Subject-Commit')
+  if [[ "$protocol" == 2 ]]; then
+    original=$CURRENT_ORIGINAL_BASELINE
+  else
+    original=$(markdown_field_value "$request" 'Implementation-Baseline')
+  fi
+  if ! is_git_oid "$original" || ! is_git_oid "$subject" || ! resolve_git_feature_paths; then
+    fail "Delivery Size: cannot resolve the bound Original Baseline and REV-FINAL Subject"
+    return
+  fi
+  collect_delivery_exclusion_patterns
+  if ! git -C "$GIT_ROOT" -c core.quotepath=false diff --numstat -z --no-renames \
+       "$original" "$subject" > "$TMP_DIR/delivery-numstat" 2>/dev/null; then
+    fail "Delivery Size: cannot read the bound Git numstat delta"
+    return
+  fi
+  while IFS= read -r -d '' record; do
+    additions=${record%%$'\t'*}
+    record=${record#*$'\t'}
+    deletions=${record%%$'\t'*}
+    path=${record#*$'\t'}
+    delivery_path_is_production "$path" || continue
+    total_files=$((total_files + 1))
+    if [[ "$additions" == '-' || "$deletions" == '-' ]]; then
+      binary_files=$((binary_files + 1))
+      continue
+    fi
+    total_additions=$((total_additions + additions))
+    total_churn=$((total_churn + additions + deletions))
+  done < "$TMP_DIR/delivery-numstat"
+
+  echo ""
+  echo "Delivery Size: $original..$subject"
+  echo "  Actual production additions: $total_additions"
+  echo "  Actual production churn: $total_churn"
+  echo "  Actual production files: $total_files"
+  echo "  Binary production files without line counts: $binary_files"
+  if [[ "$LEGACY_PLAN_ESTIMATE" -eq 1 ]]; then
+    echo "  Approved Design estimate: unavailable (legacy Design)"
+    return
+  fi
+  confidence=$(delivery_field_values "$TMP_DIR/delivery-estimate-design" 'Confidence')
+  echo "  Approved Design: additions ${DESIGN_ADDITIONS_LOWER}..${DESIGN_ADDITIONS_UPPER}; churn ${DESIGN_CHURN_LOWER}..${DESIGN_CHURN_UPPER}; files ${DESIGN_FILES_LOWER}..${DESIGN_FILES_UPPER}; confidence $confidence"
+  if ! actual_within_estimate "$total_additions" "$DESIGN_ADDITIONS_LOWER" "$DESIGN_ADDITIONS_UPPER" ||
+     ! actual_within_estimate "$total_churn" "$DESIGN_CHURN_LOWER" "$DESIGN_CHURN_UPPER" ||
+     ! actual_within_estimate "$total_files" "$DESIGN_FILES_LOWER" "$DESIGN_FILES_UPPER"; then
+    warn "Delivery Size: actual metrics fall outside the approved Design intervals; size alone does not fail acceptance"
+  else
+    pass "Delivery Size: actual metrics are within the approved Design intervals"
+  fi
 }
 
 check_source_final_paths() {
@@ -4961,6 +5365,14 @@ check_design_gate() {
   done
   check_requirements_basis
   check_design_evidence_schema
+  check_delivery_estimate "$PLAN" design
+  if [[ "$LEGACY_PLAN_ESTIMATE" -eq 1 ]]; then
+    if legacy_design_has_implementation_progress; then
+      warn "plan.md: legacy Design remains valid because implementation progress already exists; final acceptance must still report actual delivery size"
+    else
+      fail "plan.md: legacy Approved Design has no Delivery Estimate and no implementation progress; run gatespec.plan --revise before tasks"
+    fi
+  fi
   check_decisions
   check_design_detailing
   check_implementation_review_contract
@@ -5036,6 +5448,9 @@ if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-revi
     case "$MODE" in acceptance-candidate|acceptance) REVIEW_ID='REV-FINAL' ;; esac
     check_implementation_review_gate
   fi
+fi
+if [[ "$MODE" == 'acceptance-candidate' && "$FAILURES" -eq 0 ]]; then
+  report_actual_delivery_metrics
 fi
 if [[ "$MODE" == 'acceptance' && "$FAILURES" -eq 0 ]]; then
   check_acceptance_gate

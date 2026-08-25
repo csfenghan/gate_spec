@@ -196,7 +196,13 @@ Complete all of these fixed categories even after finding a blocker:
 8. complete trace for every FR, story/scenario, SC, approved D, engineering
    determination, bounded Implementation Freedom, Design Evidence Schema 1
    component/API/flow/thread/resource/external/lifecycle contract, test
-   mapping, and checkpoint; and
+   mapping, and checkpoint; independently re-estimate aggregate Production
+   additions, churn, and production files from concrete task paths/symbols/
+   build work, blocking to `gatespec.plan --revise` when any upper bound is
+   positive from an approved zero or satisfies
+   `new_upper * 100 >= design_upper * 125`, or when a production path family
+   is absent from Design's Production path basis; values below 25% continue;
+   and
 9. every basis-matching prior BLOCKER, including repeated or reintroduced
    findings, with concrete closure rather than hash churn or restatement.
 
@@ -210,6 +216,10 @@ raw preserved manifest without requiring immutable old items to claim the new
 task-cycle epoch. A missing task, unexecutable test, late placement,
 unbounded implementation choice, material uncertainty, gold-plating, or
 approved-contract mismatch is a BLOCKER, not an inferred default.
+Estimate size alone is not a blocker when it was disclosed by approved Design.
+If the chosen response to drift is a scope-changing split, require
+`gatespec.specify --revise`; never create sibling specs or impose LOC/file/
+checkpoint limits.
 
 Accumulate all independently actionable blockers across every matrix row and
 all nine categories before returning one verdict. Do not stop at the first

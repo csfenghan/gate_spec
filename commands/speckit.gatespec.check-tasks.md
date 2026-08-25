@@ -59,3 +59,8 @@ matrix and task coverage of every approved SD<n>, every
 SD-F/SD-U/SD-FLOW/SD-ALG/SD-FAIL/SD-TEST ID, and every Source Change Manifest
 path. This remains structural; earliest-checkpoint placement, executable
 closure, and semantic sufficiency belong to fresh REV-TASKS.
+
+Aggregate estimate drift is handled by the preceding task refinement and the
+fresh REV-TASKS semantic review: reaching 25% upper-bound growth or discovering
+a new production path family returns to Design revision. This structural hook
+does not infer LOC from task prose or impose a size limit.

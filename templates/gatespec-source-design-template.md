@@ -14,6 +14,12 @@
   The entry file is authoritative. Large details may be split into regular
   Markdown files below contracts/source-design/; every shard is part of both
   Source Design hashes and must be referenced from this entry.
+
+  Before REV-SOURCE, re-estimate aggregate Production additions/churn/files
+  from this complete bundle. Return to Plan revision when any upper bound is
+  positive from zero, reaches 125% of approved Design, or a production path
+  family is absent from Design. This is a review rule, not another stored field
+  or approval mechanism.
 -->
 
 ## Maintainer Scenario

@@ -119,6 +119,21 @@ template. A not-applicable area needs a concrete reason. List only real
 repository-relative paths and complete declarations without bodies. State
 bounded IA freedoms and prohibited material boundaries explicitly.
 
+Before requesting review, independently re-estimate whole-feature Production
+additions, churn, and files from the complete Source manifest, declarations,
+callers, build/configuration work, and test obligations. Compare each new upper
+bound with the approved Design upper bound using integer arithmetic:
+`new_upper * 100 >= design_upper * 125` is material drift; when the Design
+upper bound is zero, any positive new upper bound is material. Exactly 25%
+growth blocks; smaller growth does not. Also block when Source introduces a
+production path family not covered by Design's Production path basis,
+regardless of numeric size. Return to
+`__SPECKIT_COMMAND_GATESPEC_PLAN__ --revise` to record the new estimate and
+obtain diff-only Design re-confirmation. If the proposed remedy is to split in
+a way that changes approved feature scope, return instead to
+`__SPECKIT_COMMAND_GATESPEC_SPECIFY__ --revise`. Size by itself is never a
+hard rejection; the block exists only to prevent silent estimate drift.
+
 Run `check-gate.sh source-candidate <feature-dir>` until it passes. Then invoke
 `__SPECKIT_COMMAND_GATESPEC_REVIEW_SOURCE_DESIGN__`. Same-context review is forbidden.
 REV-SOURCE binds Source-Design-Reviewed-SHA256, whose entry digest excludes the
@@ -131,10 +146,12 @@ their C-sorted byte stream.
 
 After a current fresh REV-SOURCE PASS, present at most 20 lines: maintainer
 scenario, before/after, principal success/failure flows, actual file/symbol/
-algorithm/error/test boundary, source decisions, freedoms, risks, and mandatory
-“what I am least confident about”. Wait for unambiguous user approval. Reviewer
-PASS never substitutes for it. Requested changes return to Draft and require a
-new reviewed hash; a revision shows only the diff.
+algorithm/error/test boundary, the estimate recheck result against Design,
+source decisions, freedoms, risks, and mandatory “what I am least confident
+about”. Wait for unambiguous user approval. This remains the existing whole-
+Source summary approval, not a size-specific approval. Reviewer PASS never
+substitutes for it. Requested changes return to Draft and require a new
+reviewed hash; a revision shows only the diff.
 
 On explicit approval only:
 

@@ -1,4 +1,4 @@
-# GateSpec 0.7.0 Gate Protocol
+# GateSpec 0.8.0 Gate Protocol
 
 This document defines Requirements/Design gates, optional Source Design,
 native-task and implementation reviews, final delivery acceptance, hooks,
@@ -133,6 +133,58 @@ an Acceptance Scenario; every scenario references a defined FR. The third and
 final human feature-content approval mechanism is the explicit approval of a
 ≤20-line Requirements summary containing “what I am least confident about”.
 Revision rounds show only the diff.
+
+## Delivery Estimate protocol
+
+New or actively revised spec.md and plan.md declare exact
+`**Delivery Estimate Schema**: 1` and one `## Delivery Estimate`. Requirements
+records these seven ordered fields; Design adds the final comparison pair:
+
+```markdown
+- **Production additions**: `100..200`
+- **Production churn**: `140..280`
+- **Production files**: `4..8`
+- **Estimate basis**: <substantive basis and uncertainty>
+- **Production path basis**: <repository-relative path families>
+- **Excluded paths**: <patterns and reasons>
+- **Confidence**: <level and reason>
+- **Requirements estimate relation**: `within|expanded|reduced`
+- **Requirements estimate rationale**: <substantive reason>
+```
+
+Every range is non-negative, lower ≤ upper, and additions ≤ churn at both
+bounds. Churn is additions + deletions. Production includes handwritten
+runtime code, headers, protocol/schema, configuration, and build/packaging
+logic. It excludes tests, specification/review metadata, pure documentation,
+and reproducibly generated output. A generated exclusion is valid only as
+`generated: <output> <- <source> via <generator>`; undeclared generated output
+is counted as production.
+
+Specify identifies independently deliverable capability boundaries before
+detailed clarification. A meaningful merge/split choice is an ordinary
+`R<n>` decision; no sibling spec is created automatically. Requirements may
+use wide ranges and low confidence. Design inspects real modules, callers,
+schemas/config/build wiring, and test surface, narrows or explains uncertainty,
+and records its relation to Requirements. Legacy Requirements without an
+estimate allow Design relation `not-applicable` with a reason.
+
+The three metrics and confidence appear in both existing ≤20-line approval
+summaries. Their acceptance is part of the normal Requirements/Design summary
+approval, not a fourth mechanism. No LOC, file, task, or checkpoint ceiling
+exists; a disclosed large estimate is valid.
+
+Source Design, task refinement, and fresh REV-TASKS independently re-estimate
+the complete feature. Any upper bound satisfying
+`new_upper * 100 >= design_upper * 125`, any positive upper bound against an
+approved zero, or any production path family outside Design's path basis
+blocks to `gatespec.plan --revise`. Exactly 25% blocks; less does not. A
+scope-changing split returns to `gatespec.specify --revise`. This is a drift
+re-confirmation, not a size limit.
+
+Legacy Approved Requirements missing the structure pass with a warning and
+remain immutable. Legacy Approved Design missing it blocks before tasks unless
+checked tasks, implementation-review receipts, or product-code delta proves
+implementation progress; progressed legacy delivery passes with a warning.
 
 ## Design protocol
 
@@ -473,8 +525,14 @@ commits is pushed. REV-FINAL independently reviews the full final subject and
 runs Final Validation. The fixed `after_implement` hook defaults to REV-FINAL
 and withholds completion until its current final check passes. Non-final PASS
 continues automatically with no user question. A second after hook presents
-one ≤20-line whole-delivery summary; explicit acceptance alone writes the
-self-hashed `.gatespec/acceptance.md` metadata-only local commit.
+one ≤20-line whole-delivery summary. It computes actual additions, churn, and
+unique handwritten production files from Git `--numstat --no-renames` over the
+bound Original Baseline to REV-FINAL Subject, excluding tests, feature/review
+metadata, docs, and Design-declared generated outputs. Binary production files
+count as files and are disclosed without line counts. Actuals appear beside
+Design ranges/confidence; variance alone does not fail delivery. Explicit
+acceptance alone writes the self-hashed `.gatespec/acceptance.md` metadata-only
+local commit.
 
 ## Safe reruns
 
@@ -483,6 +541,9 @@ self-hashed `.gatespec/acceptance.md` metadata-only local commit.
 | Draft, no flag | Continue in place; enrich missing Schema 1 fields without recopying or renumbering decisions. |
 | Valid Approved artifact, Schema 1, and current review contract | Read-only; hand off. |
 | Approved plan missing review contract or Schema 1 | Archive downstream work once, reopen via revise, enrich, diff re-approve. |
+| Legacy Approved Requirements missing Delivery Estimate | Warn, keep immutable, and require the next Design to supply the first estimate. |
+| Legacy Approved Design missing Delivery Estimate | Revise before tasks; if implementation progress already exists, retain with warning and report final actuals. |
+| Source/tasks estimate reaches 25% growth or a new path family | Return to Plan revision and diff-only estimate re-confirmation; scope-changing split returns to Requirements. |
 | Plan declares an unknown design-evidence schema | Stop; never downgrade or guess a rewrite. |
 | First Source enable | Before code only; archive stale tasks/REV-TASKS and regenerate. |
 | Source revise after code | Preserve patch, compensate to safe Subject, archive, fresh review/approval/revalidation; keep Original Baseline. |
@@ -571,14 +632,16 @@ acceptance.md and requires a clean worktree.
 
 ## Machine-check boundary
 
-Requirements checks cover the marker, mandatory sections,
+Requirements checks cover the marker, mandatory sections, Delivery Estimate
+Schema 1 uniqueness/ranges/bases/exclusions/confidence and legacy warning,
 clarification/default formats, residual markers, FR/scenario scoping, approval
 structure/date/hash, constraint drift, and warning-only vague wording.
 
 Design includes Requirements and then checks the Requirements hash chain,
 Decision Log, the exact Design Evidence Schema 1 field and structured child
 fields for all six Design Detailing dimensions, mandatory upstream sections,
-Implementation Review Contract, template remnants, and approval snapshot. The
+Delivery Estimate comparison, legacy-progress compatibility, Implementation
+Review Contract, template remnants, and approval snapshot. The
 checker validates syntax, reasoned N/A, and code-fence presence; it never claims
 to prove architectural sufficiency.
 
@@ -599,7 +662,8 @@ Source modes validate marker, Plan basis, schema/IDs, dual manifests,
 REV-SOURCE and orphan behavior. V2 additionally validates execution/IA blobs,
 Task Handoff, preserved reviews, Original Baseline ancestry, Source/IA path
 reconciliation and raw final delta. Acceptance validates explicit record,
-parent/metadata-only commit, clean tree, and every final binding.
+parent/metadata-only commit, clean tree, every final binding, and reports final
+Git delivery metrics without turning estimate variance into failure.
 
 Semantic sufficiency, review judgment, reviewer isolation, and test truth remain
 prompt/operator responsibilities. An external runner is needed for signed
