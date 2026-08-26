@@ -206,6 +206,15 @@ Complete all of these fixed categories even after finding a blocker:
 9. every basis-matching prior BLOCKER, including repeated or reintroduced
    findings, with concrete closure rather than hash churn or restatement.
 
+Independently enforce Scope Contract conservation across that pass. All
+non-deferred CAPs must be covered through their FR/SC refs and executable tasks;
+CAP IDs do not enter Closure matrices. No task may implement a deferred CAP,
+add unapproved external behavior, change Primary outcome, or silently remove a
+Retained baseline behavior or burden. Gold-plating and “helpful” adjacent
+optimization are blockers even when the implementation would be technically
+clean. Route a scope change only to `gatespec.specify --revise`; never infer
+admission from task detail.
+
 For source-enabled v2, the same exhaustive pass includes every approved SD<n>,
 every SD-F path, SD-U declaration/symbol, SD-FLOW, SD-ALG invariant/bound,
 SD-FAIL behavior, SD-TEST trace, Source Change Manifest path, current Source

@@ -1,4 +1,4 @@
-# GateSpec 0.8.0 Gate Protocol
+# GateSpec 0.9.0 Gate Protocol
 
 This document defines Requirements/Design gates, optional Source Design,
 native-task and implementation reviews, final delivery acceptance, hooks,
@@ -134,6 +134,50 @@ final human feature-content approval mechanism is the explicit approval of a
 ≤20-line Requirements summary containing “what I am least confident about”.
 Revision rounds show only the diff.
 
+## Scope Contract protocol
+
+New or actively revised spec.md declares exact
+`**Scope Contract Schema**: 1` and one `## Scope Contract`:
+
+```markdown
+- **Primary outcome**: <participant, current state, trigger, one observable result>
+- **Core completion refs**: `SC-001, SC-002`
+- **Retained baseline**: <unchanged behavior/burden, or None — reason>
+
+| Capability | Admission | Spec refs | Boundary rationale |
+|---|---|---|---|
+| CAP-001 — <capability> | `core` | `FR-001, SC-001` | <failed outcome if omitted> |
+| CAP-002 — <capability> | `deferred` | `none` | <outside this delivery> |
+```
+
+Specify establishes the unique Primary outcome before capability admission.
+Removing `core` makes it fail; `committed` is an explicit same-delivery user
+request; `constraint` is forced by an effective MUST. Every other capability
+defaults to `deferred`, which is neither this delivery nor a future promise.
+Pure implementation mechanisms create no CAP. Adjacent features are recorded
+or discussed only when user-raised, reasonably ambiguous in the request, or
+likely to be introduced accidentally by Design; AI-discovered improvements do
+not receive item-by-item approval invitations.
+
+Every current FR/SC maps to a non-deferred CAP, every non-deferred CAP maps at
+least one FR and SC, every Core completion SC maps to a core CAP, and deferred
+Spec refs are exact `none`. CAP IDs never enter tasks Closure; navigation stays
+CAP → FR/SC → task.
+
+Scope decisions use a concrete current workflow and one gap. They state what
+burden the minimum sufficient option retains and which external interface,
+caller flow, or compatibility behavior a broader option changes. They do not
+expose CAP classifications, sources/classes/threads, or per-option LOC. The
+recommendation is the smallest delivery that fully achieves Primary outcome;
+completeness, elegance, or extensibility alone cannot expand scope. Scope
+Contract and the Delivery Estimate are accepted by the existing ≤20-line
+Requirements summary, not another approval.
+
+Legacy Approved Requirements without this contract block before Design when
+no implementation progress exists. A checked task, implementation-review
+receipt, or real production delta makes the legacy artifact warning-only and
+read-only. Draft absence, partial structure, or an unknown schema always fails.
+
 ## Delivery Estimate protocol
 
 New or actively revised spec.md and plan.md declare exact
@@ -160,8 +204,8 @@ and reproducibly generated output. A generated exclusion is valid only as
 `generated: <output> <- <source> via <generator>`; undeclared generated output
 is counted as production.
 
-Specify identifies independently deliverable capability boundaries before
-detailed clarification. A meaningful merge/split choice is an ordinary
+Specify considers independently deliverable boundaries under the Scope
+Contract discovery rules. A meaningful merge/split choice is an ordinary
 `R<n>` decision; no sibling spec is created automatically. Requirements may
 use wide ranges and low confidence. Design inspects real modules, callers,
 schemas/config/build wiring, and test surface, narrows or explains uncertainty,
@@ -181,7 +225,7 @@ blocks to `gatespec.plan --revise`. Exactly 25% blocks; less does not. A
 scope-changing split returns to `gatespec.specify --revise`. This is a drift
 re-confirmation, not a size limit.
 
-Legacy Approved Requirements missing the structure pass with a warning and
+Legacy Approved Requirements missing the Delivery Estimate structure pass with a warning and
 remain immutable. Legacy Approved Design missing it blocks before tasks unless
 checked tasks, implementation-review receipts, or product-code delta proves
 implementation progress; progressed legacy delivery passes with a warning.
@@ -193,6 +237,13 @@ content hash computed before its Gate Approval H2. Spec re-approval therefore
 invalidates an old plan. Current plans also contain exactly one
 `**Design Evidence Schema**: 1`; another declared version fails closed rather
 than being downgraded.
+
+Plan never copies Scope Contract schema or table; its Requirements hash already
+binds them. Every design element and Technical basis traces to a non-deferred
+CAP and FR, all admitted CAPs remain covered, deferred CAPs remain absent, and
+Retained baseline remains explicit. Activating deferred scope, adding external
+behavior, changing Primary outcome, or removing a retained burden returns to
+`gatespec.specify --revise`.
 
 Every design choice requiring individual human approval uses an exact
 `### D<n>: <topic>` block with one shared scenario, fixed boundary, why human
@@ -374,6 +425,8 @@ appears globally exactly once in file order; Production may be exact `none`,
 Verification is nonempty. Contract refs use original IDs, no ranges, C-sorted
 and joined only by comma-space. Collectively they cover all FR-###, SC-###,
 approved D<n>, and, with Source, approved SD<n> plus every SD-* ID.
+CAP IDs are intentionally absent; fresh review follows CAP → FR/SC → task and
+rejects deferred work or a Retained-baseline violation.
 
 Prior findings come only from current REV-TASKS and
 `.gatespec/archive/*-retask/reviews/REV-TASKS`. A verdict is relevant when its
@@ -401,7 +454,9 @@ work crosses a checkpoint without its matching PASS seal.
 Native `speckit.analyze` then runs unchanged. Its after hook obtains the
 separate `REV-TASKS` semantic review. That review checks coverage, ordering,
 dependency/parallel safety, exact test/checkpoint mapping, and absence of new
-unclassified human choices. Approved decisions, recorded engineering
+unclassified human choices. It also covers all non-deferred CAPs through
+FR/SC/tasks, rejects deferred CAPs and new external behavior, and preserves
+Primary outcome plus Retained baseline. Approved decisions, recorded engineering
 determinations, and bounded Implementation Freedoms are all valid task inputs;
 an unbounded or human-relevant implementation-time choice is a blocker. The
 tasks-definition hash normalizes only checkbox progress (`[ ]`, `[x]`, `[X]`)
@@ -541,6 +596,7 @@ local commit.
 | Draft, no flag | Continue in place; enrich missing Schema 1 fields without recopying or renumbering decisions. |
 | Valid Approved artifact, Schema 1, and current review contract | Read-only; hand off. |
 | Approved plan missing review contract or Schema 1 | Archive downstream work once, reopen via revise, enrich, diff re-approve. |
+| Legacy Approved Requirements missing Scope Contract | Revise before Design; if implementation progress already exists, retain read-only with warning. |
 | Legacy Approved Requirements missing Delivery Estimate | Warn, keep immutable, and require the next Design to supply the first estimate. |
 | Legacy Approved Design missing Delivery Estimate | Revise before tasks; if implementation progress already exists, retain with warning and report final actuals. |
 | Source/tasks estimate reaches 25% growth or a new path family | Return to Plan revision and diff-only estimate re-confirmation; scope-changing split returns to Requirements. |
@@ -632,8 +688,10 @@ acceptance.md and requires a clean worktree.
 
 ## Machine-check boundary
 
-Requirements checks cover the marker, mandatory sections, Delivery Estimate
-Schema 1 uniqueness/ranges/bases/exclusions/confidence and legacy warning,
+Requirements checks cover the marker, mandatory sections, Scope Contract
+Schema 1 uniqueness/fields/CAP IDs/admissions/canonical FR-SC coverage/core
+closure and legacy progress split, Delivery Estimate Schema 1 uniqueness/
+ranges/bases/exclusions/confidence and legacy warning,
 clarification/default formats, residual markers, FR/scenario scoping, approval
 structure/date/hash, constraint drift, and warning-only vague wording.
 
@@ -641,9 +699,10 @@ Design includes Requirements and then checks the Requirements hash chain,
 Decision Log, the exact Design Evidence Schema 1 field and structured child
 fields for all six Design Detailing dimensions, mandatory upstream sections,
 Delivery Estimate comparison, legacy-progress compatibility, Implementation
-Review Contract, template remnants, and approval snapshot. The
-checker validates syntax, reasoned N/A, and code-fence presence; it never claims
-to prove architectural sufficiency.
+Review Contract, template remnants, and approval snapshot. The checker also
+rejects a duplicated Plan scope table. It validates syntax, reasoned N/A, and
+code-fence presence; it never claims to prove architectural sufficiency or
+semantic scope necessity.
 
 Tasks-structure checks cover exact contract fields, Closure placement/schema,
 checkpoint intervals and ref coverage, prior-finding identity/remediation,

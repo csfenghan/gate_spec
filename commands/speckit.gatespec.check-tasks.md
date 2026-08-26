@@ -41,7 +41,9 @@ order with canonical `, ` separators. Contract refs are known original artifact
 IDs, de-duplicated and C-sorted within a cell, never ranges, and collectively
 cover every FR-###, SC-###, and approved D<n>. A ref may occur at more than one
 checkpoint; mechanical coverage is not proof that its placement or tasks are
-semantically sufficient.
+semantically sufficient. CAP-### never appears in Closure; Scope Contract
+coverage remains the CAP → FR/SC → task chain and is judged semantically by
+REV-TASKS.
 
 Prior Review Closure is exactly the all-`none` row when no basis-matching
 BLOCKER exists. Otherwise there is no `none` row and every BLOCKER item from

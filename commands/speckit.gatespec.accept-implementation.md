@@ -24,8 +24,9 @@ against a different commit pair or path filter.
 ## One final user acceptance
 
 From the validated final request/subject and repository diff, present at most
-20 lines covering: delivered observable behavior; actual product/test/build
-paths; material symbols/flows; Source manifest conformance when enabled;
+20 lines covering: Primary outcome delivery; admitted CAP coverage through
+FR/SC/tasks; confirmation that deferred CAPs remain absent and Retained baseline
+is preserved; actual product/test/build paths; material symbols/flows; Source manifest conformance when enabled;
 bounded IA entries; exact tests and results; and actual Production additions,
 churn, and unique files beside the approved Design ranges and confidence.
 Production additions/deletions come from Git `--numstat --no-renames` over the

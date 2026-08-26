@@ -128,6 +128,14 @@ finding. Complete each category in this order:
    close the full finding by its required checkpoint. A restatement, matrix
    row, new hash, or unrelated task is not remediation evidence.
 
+As part of artifact trace closure, use Scope Contract only as the admission
+source: every non-deferred CAP must reach executable tasks through its FR/SC
+refs, no task may implement a deferred CAP, and Retained baseline must remain
+unchanged. CAP IDs themselves do not enter either Closure matrix; the existing
+CAP → FR/SC → task chain is the closure. Any task that adds external behavior,
+activates deferred scope, changes Primary outcome, or removes a retained burden
+is a Requirements gap and routes to specify revision rather than task repair.
+
 ## Refinement outcomes
 
 Classify each audit gap before writing:

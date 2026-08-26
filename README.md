@@ -1,12 +1,13 @@
 # GateSpec
 
-GateSpec 0.8.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.9.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension with explicit Requirements/Design gates, optional reviewed Source
 Design, bounded native-task closure, fresh task/implementation receipts, and
 one final whole-delivery user acceptance around the unchanged native execution
-path. Requirements and Design disclose whole-feature delivery-size estimates;
-later reviews prevent silent estimate expansion. It does not fork or modify
-upstream commands.
+path. Requirements bind delivery to one observable Primary outcome through a
+versioned Scope Contract; Requirements and Design also disclose whole-feature
+delivery-size estimates. Later reviews prevent silent scope or estimate
+expansion. It does not fork or modify upstream commands.
 
 Its operating principles are human-led constraints, low auto-inference,
 discussion before execution, bounded review artifacts, and scenario-first
@@ -44,8 +45,8 @@ Clarifications, Defaults, and Decision Log sections use explicit
 Requirements approval records a content SHA-256. Design records both its own
 approval hash and the exact approved Requirements content hash. A changed spec
 therefore invalidates an old plan, and revision/restart archives stale tasks.
-The same normal summary approvals accept the disclosed delivery estimate; size
-does not add an approval mechanism.
+The same normal Requirements summary approval accepts its Scope Contract and
+disclosed delivery estimate; neither adds an approval mechanism.
 
 Task and implementation review PASS verdicts are not additional human approval
 mechanisms. A reviewer cannot introduce a requirement, design choice, waiver,
@@ -56,6 +57,39 @@ fresh REV-SOURCE PASS is engineering evidence. Implementation checkpoints do
 not ask the user. After REV-FINAL, the user explicitly accepts the complete
 delivered implementation once; rejection records nothing and does not infer a
 remediation choice.
+
+## Outcome-based scope admission
+
+New or actively revised Requirements declare exact
+`**Scope Contract Schema**: 1` and one `## Scope Contract`. The contract fixes:
+
+- one Primary outcome with participant, current state, trigger, and observable
+  result delivered now;
+- Core completion SC refs and the existing behavior or burden deliberately
+  retained;
+- one table of capabilities admitted as `core`, `committed`, `constraint`, or
+  `deferred`, with canonical FR/SC refs and a boundary rationale.
+
+Removing a `core` capability defeats the Primary outcome. A `committed`
+capability is an explicit same-delivery user request; `constraint` is reserved
+for an effective MUST. Everything else is deferred by default: it is outside
+this delivery and is not a future commitment. Pure implementation mechanisms
+do not create CAP rows. GateSpec does not proactively enumerate adjacent
+features or ask the user to approve AI-discovered improvements one by one.
+
+Every FR and SC maps to a non-deferred CAP, every non-deferred CAP has at least
+one FR and SC, and every Core completion SC belongs to a core CAP. CAP IDs stay
+out of task Closure; closure remains CAP → FR/SC → task. Plan binds the approved
+contract through Requirements Content-SHA256 instead of copying a second scope
+table. Design, Source, task, and implementation reviews require all admitted
+scope, reject deferred scope and new external behavior, and preserve Retained
+baseline. A scope change returns to `gatespec.specify --revise`.
+
+A Scope decision describes the current workflow, one concrete gap, the burden
+the minimum sufficient option retains, and any external interface/caller-flow/
+compatibility change caused by a broader option. The recommendation is the
+smallest delivery that completely achieves the Primary outcome; elegance or
+extensibility alone does not justify expansion.
 
 ## Delivery estimates
 
@@ -74,9 +108,10 @@ documentation, and reproducibly generated outputs are excluded. A generated
 output is excludable only when its output path, source path, and generator are
 declared as `generated: output <- source via generator`.
 
-Specify identifies independently deliverable capability boundaries before
-detailed clarification. A reasonable merge-versus-split choice uses the normal
-`R<n>` decision mechanism; GateSpec never creates sibling specs automatically.
+Specify considers independently deliverable capability boundaries only when
+the user raised them, the request is reasonably ambiguous, or Design could
+otherwise cross the boundary accidentally. A genuine merge-versus-split choice
+uses the normal `R<n>` decision mechanism; GateSpec never creates sibling specs automatically.
 There is no LOC, file, task, or checkpoint ceiling. Large disclosed estimates
 remain approvable.
 
@@ -92,6 +127,11 @@ their next Design supplies the first estimate. A legacy Approved Design must
 add an estimate before tasks unless checked work, implementation reviews, or a
 product delta proves implementation is already underway; progressed legacy
 delivery remains valid and warning-only.
+
+Legacy Approved Requirements without Scope Contract block before Design and
+require `gatespec.specify --revise` when no implementation progress exists. A
+checked task, implementation-review receipt, or real production delta preserves
+the legacy artifact as warning-only and byte-for-byte read-only.
 
 ## Scenario-first decision triage
 
@@ -314,6 +354,8 @@ constraints into the constitution.
 ## Safe resume controls
 
 - default: continue a Draft in place; keep a valid approved artifact read-only;
+- an old Approved Requirements artifact without Scope Contract must be revised
+  before Design unless implementation progress makes it warning-only/read-only;
 - an old Approved-Design plan without Implementation Review Contract or Design
   Evidence Schema 1 is archived downstream, reopened as Draft, enriched, and
   diff re-approved before tasks;
@@ -391,12 +433,13 @@ Hooks never infer mode:
   (fixed to REV-FINAL);
 - `after_implement` priority 20 → `speckit.gatespec.accept-implementation`.
 
-The portable checker validates estimate schemas/ranges, structure,
+The portable checker validates Scope Contract schema/fields/CAP IDs/admissions,
+canonical FR/SC coverage and core closure, estimate schemas/ranges, structure,
 Closure/finding identity, hash chains, freshness, retask eligibility, PASS
 seals, legacy compatibility, and final Git metrics. Semantic estimate rechecks,
-review quality, and fresh-context behavior remain prompt and operator
-contracts. Missing or invalid receipts fail; they are never manufactured by a
-checker.
+scope necessity, review quality, and fresh-context behavior remain prompt and
+operator contracts. Missing or invalid receipts fail; they are never
+manufactured by a checker.
 
 Native implement exposes no per-task hook, so REV-FOUNDATION/REV-US stage stops
 are a cooperative prompt/task contract. With hooks registered, the fixed
@@ -412,7 +455,7 @@ skipping GateSpec's own entries to avoid recursion.
 bash tests/run-all.sh
 ```
 
-This runs Bash syntax checks, ShellCheck, estimate/legacy/Closure/retask and
+This runs Bash syntax checks, ShellCheck, Scope/estimate/legacy/Closure/retask and
 Source/v2/acceptance checker fixtures, final Git-metric fixtures, Claude/Codex
 renderer checks, manifest checks, and an extension-install smoke test when the
 `specify` CLI is available. Ubuntu and macOS CI run the same suite and assert
@@ -420,7 +463,8 @@ that it leaves the worktree clean.
 
 Static tests cannot prove model batching behavior. Before publishing a release
 that changes Specify/Plan interaction, run the Claude and Codex behavioral
-cases in steps 6–7 of the upstream compatibility ritual; both must pass.
+cases in steps 6–7 and the Scope calibration in step 20 of the upstream
+compatibility ritual; both platforms must pass.
 
 See [the full gate protocol](docs/gate-protocol.md) and
 [the upstream compatibility ritual](docs/upstream-sync.md).

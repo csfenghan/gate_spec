@@ -205,6 +205,14 @@ material; a material or uncertain departure is BLOCKED and exits normal
 implement for Source revision. Tests Run contains evidence for every Required
 Tests bullet: include that exact approved string plus non-empty result text.
 
+Also reconstruct Scope Contract coverage from CAP → FR/SC → bound Task-IDs and
+the diff. Require every implemented behavior to belong to a non-deferred CAP;
+block implementation of deferred CAPs, new unapproved external behavior,
+Primary outcome drift, and any opportunistic elimination of a Retained baseline
+burden or behavior. A technically sound adjacent improvement is still scope
+deviation. Reviewers report the violation and route it to
+`gatespec.specify --revise`; they never admit scope themselves.
+
 The adapter, or a manual fresh session whose returned text is supplied back to
 the original `--scope` coordinator, returns exactly the request's protocol
 (`1` shown for legacy; use `2` for a v2 request):

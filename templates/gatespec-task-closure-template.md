@@ -14,7 +14,9 @@
   Verification tasks, production may be `none`, and verification is nonempty.
   Contract refs use original FR-###, SC-###, approved D<n>, and, when Source is
   enabled, approved SD<n> and all SD-* IDs. C-sort refs and separate them only
-  with `, `; never use a range or invented umbrella ID.
+  with `, `; never use a range or invented umbrella ID. CAP-### remains in the
+  Requirements Scope Contract and never appears here; its closure is proven by
+  the existing CAP → FR/SC → task chain.
 
   When no basis-matching prior BLOCKER exists, retain the one exact all-`none`
   row. Otherwise remove it and add one row per complete prior `- BLOCKER: ...`

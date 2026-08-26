@@ -224,6 +224,57 @@ else
   not_ok "rendered engineering-scenario decision triage contract"
 fi
 
+scope_contract_ok=1
+for skill in "$claude_spec" "$codex_spec"; do
+  for rule in \
+    '**Scope Contract Schema**: 1' \
+    'Primary outcome' \
+    'deferred by default' \
+    'current workflow' \
+    'smallest option that fully delivers' \
+    'CAP IDs do not enter tasks Closure'; do
+    grep -F "$rule" "$skill" >/dev/null || scope_contract_ok=0
+  done
+done
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    'Do not copy its schema or table into plan.md' \
+    'non-deferred CAP and an FR' \
+    'Retained baseline' \
+    'deferred CAPs remain absent'; do
+    grep -F "$rule" "$skill" >/dev/null || scope_contract_ok=0
+  done
+done
+for skill in "$claude_source" "$codex_source" "$claude_refine" "$codex_refine" \
+             "$claude_review_source" "$codex_review_source" \
+             "$claude_review_tasks" "$codex_review_tasks" \
+             "$claude_review_implementation" "$codex_review_implementation"; do
+  grep -F 'non-deferred CAP' "$skill" >/dev/null || scope_contract_ok=0
+  grep -F 'Retained baseline' "$skill" >/dev/null || scope_contract_ok=0
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  grep -F 'An AI-discovered adjacent improvement remains deferred' "$reviewer" >/dev/null || scope_contract_ok=0
+  grep -F 'concrete Primary outcome scenario' "$reviewer" >/dev/null || scope_contract_ok=0
+  grep -F 'opportunistically removing a retained' "$reviewer" >/dev/null || scope_contract_ok=0
+done
+for rule in \
+  '**Scope Contract Schema**: 1' \
+  '## Scope Contract *(gatespec: mandatory)*' \
+  '**Primary outcome**' \
+  '**Core completion refs**' \
+  '**Retained baseline**' \
+  '| Capability | Admission | Spec refs | Boundary rationale |'; do
+  grep -F "$rule" "$REPO/templates/gatespec-spec-template.md" >/dev/null || scope_contract_ok=0
+done
+if grep -F '**Scope Contract Schema**:' "$REPO/templates/gatespec-plan-template.md" >/dev/null; then
+  scope_contract_ok=0
+fi
+if [[ "$scope_contract_ok" -eq 1 ]]; then
+  ok "rendered skills, reviewers, and templates preserve scope admission and conservation"
+else
+  not_ok "rendered Scope Contract and conservation rules"
+fi
+
 design_evidence_ok=1
 for skill in "$claude_plan" "$codex_plan"; do
   for rule in \
@@ -527,7 +578,7 @@ hook_entry_count=$(awk '
   END {print count+0}
 ' extension.yml)
 
-if ! grep -F 'version: "0.8.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.9.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -545,9 +596,9 @@ if ! grep -F 'version: "0.8.0"' extension.yml >/dev/null ||
    [[ "$hook_entry_count" -ne 9 ]] ||
    [[ $(grep -c 'priority: 10' extension.yml || true) -ne 3 ]] ||
    [[ $(grep -c 'priority: 20' extension.yml || true) -ne 3 ]]; then
-  not_ok "0.8.0 manifest requirements and nine ordered hook entries"
+  not_ok "0.9.0 manifest requirements and nine ordered hook entries"
 else
-  ok "0.8.0 manifest preserves six events and registers nine ordered entries"
+  ok "0.9.0 manifest preserves six events and registers nine ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

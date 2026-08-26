@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 (2026-08-26)
+
+- Added Scope Contract Schema 1 to new/revised Requirements, binding one
+  concrete Primary outcome, Core completion refs, Retained baseline, and
+  canonical `core`/`committed`/`constraint`/`deferred` capability admissions.
+- Made AI-discovered adjacent improvements deferred by default, kept
+  implementation mechanisms out of Requirements scope, and calibrated scope
+  decisions around current workflow, one gap, retained burden, and the minimum
+  sufficient delivery.
+- Made Design inherit scope only through the approved Requirements hash and
+  added Source/task/implementation review conservation of admitted CAPs,
+  deferred exclusions, and Retained baseline through CAP → FR/SC → task.
+- Added deterministic Scope schema/table/ref/coverage/core-closure checks,
+  legacy pre-Design revision versus progressed read-only compatibility, and
+  positive/counterexample/renderer fixtures without adding an approval or
+  Closure identifier.
+- Preserved Delivery Estimate Schema 1, six hook events, nine ordered entries,
+  spec-kit `>=0.16.0,<0.17.0`, and the native tasks → analyze → implement path.
+
 ## 0.8.0 (2026-08-25)
 
 - Added Delivery Estimate Schema 1 to new/revised Requirements and Design with

@@ -119,6 +119,14 @@ template. A not-applicable area needs a concrete reason. List only real
 repository-relative paths and complete declarations without bodies. State
 bounded IA freedoms and prohibited material boundaries explicitly.
 
+Before review, trace every Source element to a non-deferred CAP and FR. Cover
+all admitted CAPs through their FR/SC obligations, preserve Retained baseline,
+and reject any Source path, symbol, API, flow, or test whose only purpose is a
+deferred CAP or adjacent optimization. If Source would activate deferred scope,
+add external behavior, change Primary outcome, or remove a retained burden,
+return to `__SPECKIT_COMMAND_GATESPEC_SPECIFY__ --revise`; do not disguise the
+change as an SD decision, engineering determination, or bounded freedom.
+
 Before requesting review, independently re-estimate whole-feature Production
 additions, churn, and files from the complete Source manifest, declarations,
 callers, build/configuration work, and test obligations. Compare each new upper
@@ -148,7 +156,8 @@ After a current fresh REV-SOURCE PASS, present at most 20 lines: maintainer
 scenario, before/after, principal success/failure flows, actual file/symbol/
 algorithm/error/test boundary, the estimate recheck result against Design,
 source decisions, freedoms, risks, and mandatory “what I am least confident
-about”. Wait for unambiguous user approval. This remains the existing whole-
+about”. Include the admitted-CAP coverage, deferred exclusions, and Retained
+baseline conservation. Wait for unambiguous user approval. This remains the existing whole-
 Source summary approval, not a size-specific approval. Reviewer PASS never
 substitutes for it. Requested changes return to Draft and require a new
 reviewed hash; a revision shows only the diff.

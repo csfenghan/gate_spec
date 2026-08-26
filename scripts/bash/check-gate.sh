@@ -373,6 +373,10 @@ check_template_remnants() {
     '[path pattern — exclusion reason' '[low, medium, or high' \
     '[inspected modules, callers' '[within|expanded|reduced]' \
     '[why Design stayed within' \
+    '[participant, current state' '[existing behavior or burden' \
+    '[observable capability]' '[adjacent capability]' \
+    '[which part of the Primary outcome' '[why it is outside this delivery' \
+    '[non-deferred CAP/FR/D/constraint' \
     '[Document the selected' '[current need]' '[why 3 projects' \
     '[REMOVE IF UNUSED]'; do
     if grep -Fn "$token" "$file" >/dev/null 2>&1; then
@@ -597,6 +601,280 @@ check_delivery_estimate() {
   [[ "$bad" -eq 0 ]] && pass "$context: ranges, bases, exclusions, confidence, and comparison fields are valid"
 }
 
+scope_definitions() {
+  local kind="$1" outer section heading
+  case "$kind" in
+    FR)
+      outer='Requirements'
+      heading='Functional Requirements'
+      ;;
+    SC)
+      outer='Success Criteria'
+      heading='Measurable Outcomes'
+      ;;
+    *) return 1 ;;
+  esac
+  section="$TMP_DIR/scope-${kind}-outer"
+  section_body "$SPEC" "$outer" > "$section"
+  awk -v heading="### ${heading}" '
+    index($0, heading) == 1 {inside=1; next}
+    inside && (/^### / || /^## /) {exit}
+    inside {print}
+  ' "$section" | grep -oE "^-[[:space:]]+\\*\\*${kind}-[0-9]+\\*\\*:" | grep -oE "${kind}-[0-9]+" || true
+}
+
+check_scope_contract() {
+  local exact_schema all_schema section_count section fields field lines count value
+  local previous=0 line bad=0 header divider table_lines scope_sep cap admission refs rationale id
+  local cap_count=0 core_count=0 fr_count sc_count ref inner duplicate definitions kind outside
+  section="$TMP_DIR/scope-contract"
+  exact_schema=$(grep -cFx '**Scope Contract Schema**: 1' "$SPEC" || true)
+  all_schema=$(grep -cF '**Scope Contract Schema**:' "$SPEC" || true)
+  section_count=$(h2_count "$SPEC" 'Scope Contract')
+
+  if [[ "$all_schema" -eq 0 && "$section_count" -eq 0 ]]; then
+    if grep -Eq '^\*\*Status\*\*: Approved-Requirements \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$SPEC"; then
+      if legacy_design_has_implementation_progress; then
+        warn "spec.md: legacy Approved Requirements has no Scope Contract; implementation progress already exists, so the artifact remains read-only"
+      else
+        fail "spec.md: legacy Approved Requirements has no Scope Contract and no implementation progress; run gatespec.specify --revise before Design"
+      fi
+    else
+      fail "spec.md Scope Contract: Scope Contract Schema 1 and one Scope Contract section are required"
+    fi
+    return
+  fi
+
+  if [[ "$exact_schema" -ne 1 || "$all_schema" -ne 1 ]]; then
+    fail "spec.md Scope Contract: expected exactly one '**Scope Contract Schema**: 1' field; missing, duplicate, and unknown schemas are invalid"
+    bad=1
+  else
+    pass "spec.md Scope Contract: Scope Contract Schema 1 is declared exactly once"
+  fi
+  if [[ "$section_count" -ne 1 ]]; then
+    fail "spec.md Scope Contract: expected exactly one '## Scope Contract' section"
+    return
+  fi
+  section_body "$SPEC" 'Scope Contract' > "$section"
+
+  fields=$'Primary outcome\nCore completion refs\nRetained baseline'
+  while IFS= read -r field; do
+    lines=$(delivery_field_line_numbers "$section" "$field")
+    count=$(printf '%s\n' "$lines" | awk 'NF {n++} END {print n+0}')
+    value=$(delivery_field_values "$section" "$field")
+    if [[ "$count" -ne 1 || $(printf '%s\n' "$value" | awk 'NF {n++} END {print n+0}') -ne 1 ]]; then
+      fail "spec.md Scope Contract: expected exactly one nonempty '$field' field"
+      bad=1
+      continue
+    fi
+    line=$lines
+    if [[ "$line" -le "$previous" ]]; then
+      fail "spec.md Scope Contract: field '$field' is out of order"
+      bad=1
+    fi
+    previous=$line
+    if [[ "$value" == \[* ]]; then
+      fail "spec.md Scope Contract: field '$field' still contains a placeholder"
+      bad=1
+    fi
+  done <<< "$fields"
+  while IFS= read -r field; do
+    [[ -n "$field" ]] || continue
+    if ! printf '%s\n' "$fields" | grep -Fqx -- "$field"; then
+      fail "spec.md Scope Contract: unknown structured field '$field'"
+      bad=1
+    fi
+  done < <(sed -n 's/^- \*\*\([^*][^*]*\)\*\*:.*/\1/p' "$section")
+
+  value=$(delivery_field_values "$section" 'Retained baseline')
+  if printf '%s\n' "$value" | grep -Eq '^(None|无)([[:space:]]|$)' &&
+     ! printf '%s\n' "$value" | grep -Eq '^(None|无)[[:space:]]+—[[:space:]]*[^[:space:]].*$'; then
+    fail "spec.md Scope Contract: Retained baseline empty state requires 'None — <reason>'"
+    bad=1
+  fi
+
+  value=$(delivery_field_values "$section" 'Core completion refs')
+  : > "$TMP_DIR/scope-core-completion"
+  if ! printf '%s\n' "$value" | grep -Eq '^`SC-[0-9]{3}(, SC-[0-9]{3})*`$'; then
+    fail "spec.md Scope Contract: Core completion refs must be canonical SC-### IDs in backticks joined by comma-space"
+    bad=1
+  else
+    inner=${value#\`}
+    inner=${inner%\`}
+    while IFS= read -r ref; do
+      ref=${ref# }
+      if grep -Fxq "$ref" "$TMP_DIR/scope-core-completion"; then
+        fail "spec.md Scope Contract: Core completion ref $ref is duplicated"
+        bad=1
+      else
+        printf '%s\n' "$ref" >> "$TMP_DIR/scope-core-completion"
+      fi
+    done < <(printf '%s\n' "$inner" | tr ',' '\n')
+  fi
+
+  header=$(grep -cE '^\|[[:space:]]*Capability[[:space:]]*\|[[:space:]]*Admission[[:space:]]*\|[[:space:]]*Spec refs[[:space:]]*\|[[:space:]]*Boundary rationale[[:space:]]*\|[[:space:]]*$' "$section" || true)
+  divider=$(grep -cE '^\|[[:space:]]*-+[[:space:]]*\|[[:space:]]*-+[[:space:]]*\|[[:space:]]*-+[[:space:]]*\|[[:space:]]*-+[[:space:]]*\|[[:space:]]*$' "$section" || true)
+  table_lines=$(grep -c '^|' "$section" || true)
+  if [[ "$header" -ne 1 || "$divider" -ne 1 ]]; then
+    fail "spec.md Scope Contract: capability rows require the exact four-column table header"
+    bad=1
+  fi
+
+  scope_sep=$(printf '\034')
+  awk -F '|' -v sep="$scope_sep" '
+    function trim(value) {
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      return value
+    }
+    /^\|/ {
+      if ($0 ~ /^\|[[:space:]]*Capability[[:space:]]*\|/ ||
+          $0 ~ /^\|[[:space:]]*-+[[:space:]]*\|/) next
+      if (NF != 6) {print "__MALFORMED__" sep NR sep "" sep ""; next}
+      print trim($2) sep trim($3) sep trim($4) sep trim($5)
+    }
+  ' "$section" > "$TMP_DIR/scope-rows"
+  : > "$TMP_DIR/scope-cap-ids"
+  : > "$TMP_DIR/scope-nondeferred-refs"
+  : > "$TMP_DIR/scope-core-cap-refs"
+  while IFS="$scope_sep" read -r cap admission refs rationale; do
+    cap_count=$((cap_count + 1))
+    if [[ "$cap" == '__MALFORMED__' ]]; then
+      fail "spec.md Scope Contract: malformed capability table row"
+      bad=1
+      continue
+    fi
+    if ! printf '%s\n' "$cap" | grep -Eq '^CAP-[0-9]{3} — [^[:space:]].*$'; then
+      fail "spec.md Scope Contract: Capability must use 'CAP-### — <nonempty capability>'"
+      bad=1
+      id=''
+    else
+      id=${cap%% *}
+      if grep -Fxq "$id" "$TMP_DIR/scope-cap-ids"; then
+        fail "spec.md Scope Contract: capability ID $id is duplicated"
+        bad=1
+      else
+        printf '%s\n' "$id" >> "$TMP_DIR/scope-cap-ids"
+      fi
+    fi
+    case "$admission" in
+      '`core`') admission='core'; core_count=$((core_count + 1)) ;;
+      '`committed`') admission='committed' ;;
+      '`constraint`') admission='constraint' ;;
+      '`deferred`') admission='deferred' ;;
+      *) fail "spec.md Scope Contract: Admission must be core, committed, constraint, or deferred in backticks"; bad=1; admission='invalid' ;;
+    esac
+    if [[ -z "$rationale" || "$rationale" == \[* ]]; then
+      fail "spec.md Scope Contract: $id Boundary rationale is empty or still a placeholder"
+      bad=1
+    fi
+    if [[ "$admission" == deferred ]]; then
+      if [[ "$refs" != '`none`' ]]; then
+        fail "spec.md Scope Contract: deferred $id must use exactly 'none' in backticks for Spec refs"
+        bad=1
+      fi
+      continue
+    fi
+    [[ "$admission" != invalid ]] || continue
+    if ! printf '%s\n' "$refs" | grep -Eq '^`(FR|SC)-[0-9]{3}(, (FR|SC)-[0-9]{3})*`$'; then
+      fail "spec.md Scope Contract: non-deferred $id Spec refs must be canonical FR-###/SC-### IDs in backticks joined by comma-space"
+      bad=1
+      continue
+    fi
+    inner=${refs#\`}
+    inner=${inner%\`}
+    : > "$TMP_DIR/scope-row-refs"
+    fr_count=0
+    sc_count=0
+    while IFS= read -r ref; do
+      ref=${ref# }
+      if grep -Fxq "$ref" "$TMP_DIR/scope-row-refs"; then
+        fail "spec.md Scope Contract: $id repeats Spec ref $ref"
+        bad=1
+        continue
+      fi
+      printf '%s\n' "$ref" >> "$TMP_DIR/scope-row-refs"
+      printf '%s\n' "$ref" >> "$TMP_DIR/scope-nondeferred-refs"
+      case "$ref" in
+        FR-*) fr_count=$((fr_count + 1)) ;;
+        SC-*) sc_count=$((sc_count + 1)) ;;
+      esac
+      if [[ "$admission" == core && "$ref" == SC-* ]]; then
+        printf '%s\n' "$ref" >> "$TMP_DIR/scope-core-cap-refs"
+      fi
+    done < <(printf '%s\n' "$inner" | tr ',' '\n')
+    if [[ "$fr_count" -eq 0 || "$sc_count" -eq 0 ]]; then
+      fail "spec.md Scope Contract: non-deferred $id requires at least one FR and one SC"
+      bad=1
+    fi
+  done < "$TMP_DIR/scope-rows"
+
+  if [[ "$cap_count" -eq 0 || "$table_lines" -lt 3 ]]; then
+    fail "spec.md Scope Contract: at least one capability row is required"
+    bad=1
+  fi
+  if [[ "$core_count" -eq 0 ]]; then
+    fail "spec.md Scope Contract: at least one core capability is required"
+    bad=1
+  fi
+
+  for kind in FR SC; do
+    definitions="$TMP_DIR/scope-${kind}-definitions"
+    scope_definitions "$kind" > "$definitions"
+    if [[ ! -s "$definitions" ]]; then
+      fail "spec.md Scope Contract: no $kind definitions found in the canonical section"
+      bad=1
+      continue
+    fi
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] || continue
+      duplicate=$(grep -Fxc "$ref" "$definitions")
+      if [[ "$duplicate" -ne 1 ]]; then
+        fail "spec.md Scope Contract: $ref is defined $duplicate times"
+        bad=1
+      fi
+      if ! grep -Fxq "$ref" "$TMP_DIR/scope-nondeferred-refs"; then
+        fail "spec.md Scope Contract: $ref is not mapped by any non-deferred capability"
+        bad=1
+      fi
+    done < <(sort -u "$definitions")
+  done
+
+  outside=$(awk '
+    /^## Success Criteria([[:space:]]|$)/ {success=1; next}
+    success && /^## / {success=0}
+    success && /^### Measurable Outcomes([[:space:]]|$)/ {measurable=1; next}
+    measurable && (/^### / || /^## /) {measurable=0}
+    /^-[[:space:]]+\*\*SC-[0-9]+\*\*:/ && !measurable {print NR ":" $0}
+  ' "$SPEC")
+  if [[ -n "$outside" ]]; then
+    fail "spec.md Scope Contract: SC definitions found outside '### Measurable Outcomes'"
+    bad=1
+  fi
+
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    if ! grep -Fxq "$ref" "$TMP_DIR/scope-SC-definitions"; then
+      fail "spec.md Scope Contract: Core completion refs references undefined $ref"
+      bad=1
+    elif ! grep -Fxq "$ref" "$TMP_DIR/scope-core-cap-refs"; then
+      fail "spec.md Scope Contract: Core completion ref $ref is not mapped by a core capability"
+      bad=1
+    fi
+  done < "$TMP_DIR/scope-core-completion"
+
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    kind=${ref%%-*}
+    if ! grep -Fxq "$ref" "$TMP_DIR/scope-${kind}-definitions"; then
+      fail "spec.md Scope Contract: capability table references undefined $ref"
+      bad=1
+    fi
+  done < <(sort -u "$TMP_DIR/scope-nondeferred-refs")
+
+  [[ "$bad" -eq 0 ]] && pass "spec.md Scope Contract: fields, admissions, canonical refs, complete coverage, and core closure are valid"
+}
+
 legacy_progress_path_is_production() {
   local path="$1" feature_rel="$2"
   case "$path" in
@@ -610,7 +888,7 @@ legacy_progress_path_is_production() {
 }
 
 legacy_design_has_implementation_progress() {
-  local repo feature_rel baseline='' seal_rel plan_rel path review review_name receipt
+  local repo feature_rel baseline='' seal_rel plan_rel spec_rel path review review_name receipt
   if [[ -f "$TASKS" ]] && grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$TASKS"; then
     return 0
   fi
@@ -636,6 +914,7 @@ legacy_design_has_implementation_progress() {
   [[ -n "$feature_rel" ]] || return 1
   seal_rel="$feature_rel/.gatespec/reviews/REV-TASKS/seal.md"
   plan_rel="$feature_rel/plan.md"
+  spec_rel="$feature_rel/spec.md"
 
   if [[ -f "$EXECUTION_STATE" ]]; then
     baseline=$(markdown_field_value "$EXECUTION_STATE" 'Original-Implementation-Baseline')
@@ -646,6 +925,9 @@ legacy_design_has_implementation_progress() {
   fi
   if [[ -z "$baseline" ]]; then
     baseline=$(git -C "$repo" log -1 --format=%H -- "$plan_rel" 2>/dev/null || true)
+  fi
+  if [[ -z "$baseline" ]]; then
+    baseline=$(git -C "$repo" log -1 --format=%H -- "$spec_rel" 2>/dev/null || true)
   fi
   if [[ -n "$baseline" ]] && git -C "$repo" cat-file -e "$baseline^{commit}" 2>/dev/null; then
     while IFS= read -r -d '' path; do
@@ -987,11 +1269,23 @@ check_spec_gate() {
   check_clarifications
   check_defaults
   check_constraint_basis "$SPEC"
+  check_scope_contract
   check_delivery_estimate "$SPEC" requirements
   check_fr_traceability
   check_template_remnants "$SPEC"
   check_gate_approval "$SPEC" 'Approved-Requirements'
   check_vague_words "$SPEC"
+}
+
+check_design_scope_boundary() {
+  local schema_count section_count
+  schema_count=$(grep -cF '**Scope Contract Schema**:' "$PLAN" || true)
+  section_count=$(h2_count "$PLAN" 'Scope Contract')
+  if [[ "$schema_count" -eq 0 && "$section_count" -eq 0 ]]; then
+    pass "plan.md: Scope Contract remains single-source in approved Requirements"
+  else
+    fail "plan.md: do not duplicate Scope Contract schema or table; Requirements Content-SHA256 already binds it"
+  fi
 }
 
 check_decisions() {
@@ -5364,6 +5658,7 @@ check_design_gate() {
     check_h2_once "$PLAN" "$section"
   done
   check_requirements_basis
+  check_design_scope_boundary
   check_design_evidence_schema
   check_delivery_estimate "$PLAN" design
   if [[ "$LEGACY_PLAN_ESTIMATE" -eq 1 ]]; then

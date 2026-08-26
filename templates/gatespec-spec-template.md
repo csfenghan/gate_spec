@@ -9,6 +9,8 @@
 
 **Input**: User description: "$ARGUMENTS"
 
+**Scope Contract Schema**: 1
+
 **Delivery Estimate Schema**: 1
 
 <!--
@@ -76,6 +78,30 @@
 - **User GateSpec constraints**: [源路径或 absent] — SHA-256: `[哈希或 absent]`
 - **Effective constraints**: [按优先级排列的中文有效约束，包含已批准的豁免]
 - **Conflicts and resolutions**: [用中文逐项记录冲突、胜出规则与原因，或 无 — 原因]
+
+## Scope Contract *(gatespec: mandatory)*
+
+<!--
+  GATESPEC: Fix one concrete observable outcome before admitting capabilities.
+  Admission is a Requirements artifact classification, not conversational
+  vocabulary. Use `core` only when removing the capability defeats the Primary
+  outcome; `committed` only for an explicit same-delivery user request;
+  `constraint` only for an effective MUST; otherwise use `deferred`.
+  Deferred means neither this delivery nor a future commitment and its Spec
+  refs cell is exactly `none`. Pure implementation mechanisms create no CAP.
+  Every non-deferred row contains at least one canonical FR-### and SC-### ref;
+  collectively those rows cover every current FR and SC. Every Core completion
+  ref belongs to a `core` row. CAP IDs do not enter tasks Closure matrices.
+-->
+
+- **Primary outcome**: [participant, current state, trigger, and one observable result delivered now]
+- **Core completion refs**: `[SC-001, SC-002]`
+- **Retained baseline**: [existing behavior or burden deliberately unchanged; or None — specific reason]
+
+| Capability | Admission | Spec refs | Boundary rationale |
+|---|---|---|---|
+| CAP-001 — [observable capability] | `core` | `FR-001, SC-001` | [which part of the Primary outcome fails if omitted] |
+| CAP-002 — [adjacent capability] | `deferred` | `none` | [why it is outside this delivery and remains uncommitted] |
 
 ## Delivery Estimate *(gatespec: mandatory)*
 

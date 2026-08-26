@@ -288,6 +288,13 @@ Compute the approved spec content hash using the same scoped formula and write
 it once as `**Requirements Content-SHA256**` in plan.md. This is a load-bearing
 chain: never copy the Gate Approval hash field as a substitute.
 
+Read Scope Contract Schema 1 from the approved spec as the single scope source.
+Do not copy its schema or table into plan.md: the Requirements content hash
+already binds it. A legacy Approved Requirements artifact without that contract
+cannot begin Design unless the Requirements gate reports warning-only
+compatibility because implementation progress already exists; in that case it
+remains read-only and Design must not invent a replacement scope table.
+
 The current structured design-evidence contract is identified by the exact
 field `**Design Evidence Schema**: 1`. If a plan declares another non-empty
 schema version, stop rather than downgrade or guess how to rewrite it.
@@ -374,6 +381,14 @@ return that higher-level choice to Requirements. When classification is
 uncertain, use a human decision. The user may cheaply request `explain <topic>`
 or `discuss <topic>` at any point; expose the rationale or promote the item to a
 human decision without creating a workflow flag or fourth approval mechanism.
+
+The Scope Contract is a fixed boundary for every design bucket. Each proposed
+design element must trace to both a non-deferred CAP and an FR, and the design
+must preserve Retained baseline. A deferred CAP cannot be activated through an
+engineering determination or Implementation Freedom. Any newly required
+external behavior, change to Primary outcome, removal of a retained burden, or
+activation of deferred scope stops planning and returns to
+`__SPECKIT_COMMAND_GATESPEC_SPECIFY__ --revise`.
 
 Build an ephemeral dependency graph only for human decisions; never persist the
 graph, classification inventory, or batch state as a workflow artifact.
@@ -546,7 +561,7 @@ Each core dimension is either one inline `N/A — <specific reason>` /
    when applicable.
 
 Every populated dimension ends with `Technical basis` that cites the relevant
-FRs, approved D IDs, constraints, inspected repository anchors, and exact
+non-deferred CAPs, FRs, approved D IDs, constraints, inspected repository anchors, and exact
 research/data-model/contracts references. References supplement rather than
 replace the core fact: do not write only “see research.md”. Keep relationships
 directional and explicit enough that a later documentation tool can derive a
@@ -555,8 +570,12 @@ flow or `A -> B`/`A → B` edges are sufficient; Mermaid and other diagrams are
 optional. This is design evidence, not a per-file edit list or production-ready
 implementation draft.
 
-Ensure every FR has a technical home and every design element traces to an FR
-or approved decision. Remove unapproved gold-plating. Conduct an implementer's
+Ensure every FR has a technical home and every design element traces to a
+non-deferred CAP and FR; an approved D does not independently admit scope.
+Confirm each committed/constraint CAP is designed, each core CAP preserves its
+Core completion SC, no deferred CAP is implemented, and every Retained baseline
+burden or behavior remains explicit in compatibility/change boundaries. Remove
+unapproved gold-plating. Conduct an implementer's
 walkthrough using only spec + design artifacts; close every non-trivial fork
 as an approved human decision, a reasoned engineering determination in Design
 Detailing/research.md, or a bounded Implementation Freedom. If the walkthrough
@@ -598,14 +617,18 @@ Immediately before the final summary, internally compare spec.md, plan.md,
 research.md, data-model.md, contracts/, and quickstart.md for terminology,
 interfaces, constraints, traceability, contradictions, and bucket correctness.
 Confirm no human-relevant fork was hidden as an engineering determination or
-Implementation Freedom. Resolve findings or obtain the appropriate decision
+Implementation Freedom. Re-run the Scope Contract conservation check: all
+non-deferred CAPs are covered through FRs, deferred CAPs remain absent, Primary
+outcome is unchanged, Retained baseline is preserved, and plan.md contains no
+second scope table. Resolve findings or obtain the appropriate decision
 approval. Do **not** call upstream analyze during plan: native analyze belongs
 after tasks, when tasks.md exists.
 
 ## Step 4: Design approval
 
-Present at most 20 lines: technical approach and current-to-target change
-boundary, primary runtime flow, material concurrency/ownership rules, approved
+Present at most 20 lines: Primary outcome and retained baseline, admitted-scope
+coverage, technical approach and current-to-target change boundary, primary
+runtime flow, material concurrency/ownership rules, approved
 human decisions, material engineering determinations, explicit implementation
 freedoms, all three Design estimate ranges with confidence and the Requirements
 comparison, validation approach, and mandatory “what I am least confident

@@ -98,6 +98,14 @@ missing path/symbol/flow/test, incompatibility with Spec/Plan, material
 uncertainty, or unbounded implementation choice is a BLOCKER. Reviewer PASS is
 engineering evidence, not user approval.
 
+Reconstruct Scope Contract Schema 1 before judging the Source bundle. Every
+Source element must trace to a non-deferred CAP and FR, all admitted CAPs must
+be covered through their FR/SC obligations, deferred CAPs must stay absent, and
+Retained baseline must remain unchanged. Activating deferred scope, adding
+external behavior, changing Primary outcome, or opportunistically removing a
+retained burden is a BLOCKER routed to `gatespec.specify --revise`; the reviewer
+cannot admit the change.
+
 Independently re-estimate aggregate Production additions, churn, and files
 from the Source manifest and inspected baseline. A Design-estimate upper bound
 of zero is exceeded by any positive value; otherwise block when any new upper

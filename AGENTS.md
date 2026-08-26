@@ -1,11 +1,12 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.8.0 is a personal spec-kit extension with human approval gates for
+GateSpec 0.9.0 is a personal spec-kit extension with human approval gates for
 Requirements and Design, optional reviewed Source Design, independent-context
 task/implementation reviews, bounded checked task closure, and one final
 whole-delivery acceptance. Requirements/Design disclose aggregate delivery
-size and later reviews catch material estimate drift. Read this file before
-changing the repository.
+size; Requirements also bind one observable Primary outcome through a Scope
+Contract. Later reviews catch material scope or estimate drift. Read this file
+before changing the repository.
 
 ## Product invariants
 
@@ -37,6 +38,13 @@ changing the repository.
    confidence. There is no LOC/file/checkpoint cap. Existing summary approval
    accepts the disclosed size; Source/tasks/REV-TASKS return to Design revision
    at ≥25% upper-bound growth or a new production path family.
+7. **Outcome-based scope admission**: new/revised Requirements use Scope
+   Contract Schema 1. Removing `core` defeats the Primary outcome; `committed`
+   is an explicit same-delivery request; `constraint` requires an effective
+   MUST; everything else is `deferred` and uncommitted. AI-discovered adjacent
+   improvements default to deferred without item-by-item approval. Plan copies
+   no scope table; Design/Source/tasks/implementation preserve admitted CAPs,
+   deferred exclusions, and Retained baseline through CAP → FR/SC → task.
 
 Feature content has exactly three approval mechanisms: a decision answer, the
 defaults batch, and final summary/diff approval. “Proceed” cannot seal unresolved
@@ -74,6 +82,12 @@ perform one bounded tasks.md-only closure refinement; the second validates it.
   tests, spec/review metadata, pure docs, and only source-declared reproducible
   generated outputs. Legacy Requirements warn; legacy Design blocks before
   tasks unless implementation progress already exists.
+- New or revised spec uses Scope Contract Schema 1 with one Primary outcome,
+  Core completion refs, Retained baseline, and canonical CAP table. Every FR/SC
+  maps to a non-deferred CAP; every non-deferred CAP maps an FR and SC; core
+  completion SCs map to core CAPs; deferred refs are `none`. Legacy Approved
+  Requirements without it block before Design unless checked tasks,
+  implementation-review evidence, or real production delta already exists.
 - REV-SOURCE binds the reviewed manifest hash that excludes entry Status/Gate
   Approval; downstream binds the approved content manifest hash. Both include
   raw shard hashes. Design Attachments always exclude the Source bundle.
@@ -103,6 +117,7 @@ perform one bounded tasks.md-only closure refinement; the second validates it.
   `*-retask` archived REV-TASKS blocker. Missing both sections is grandfathered
   only by a current tracked clean legacy PASS; partial/malformed never is.
   The matrices are navigation evidence; fresh review still judges semantics.
+  CAP IDs never enter Closure matrices.
 - The repository is the source of truth. Edit `commands/`, never rendered
   global skills.
 
@@ -128,15 +143,16 @@ snapshot ambiguity blocks rather than choosing one copy implicitly.
 
 The six Design Detailing dimensions are exact mandatory core fields and record
 reasoned engineering determinations where applicable. Constraints may add
-fields, never replace them. Plan performs its own attachment consistency and
-decision-classification walkthrough before summary; upstream analyze runs only
-after tasks.
+fields, never replace them. Every design element traces to a non-deferred CAP
+and FR while preserving Retained baseline. Plan performs its own attachment
+consistency, decision-classification, and scope-conservation walkthrough before
+summary; upstream analyze runs only after tasks.
 
 ## Repository map
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.8.0 manifest, 6 hook events / 9 ordered entries |
+| `extension.yml` | 0.9.0 manifest, 6 hook events / 9 ordered entries |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/` | spec/plan, Source Design, IA, and task Closure templates |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |

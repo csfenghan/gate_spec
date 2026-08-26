@@ -204,6 +204,19 @@ never infer closure from a new subject hash alone.
 
 ## Review criteria
 
+When Scope Contract Schema 1 is present, reconstruct its concrete Primary outcome scenario
+(participant, current state, trigger, observable result), CAP
+admissions, FR/SC links, and Retained baseline before judging any scope.
+Require every Source element, task, and implemented behavior to trace through
+a non-deferred CAP and FR/SC. Cover every admitted CAP; never put CAP IDs in
+tasks Closure. An AI-discovered adjacent improvement remains deferred unless
+Requirements admitted it. Implementing a deferred CAP, adding external
+behavior, changing Primary outcome, or opportunistically removing a retained
+burden is a blocker routed to `gatespec.specify --revise`, even when technically
+clean. The reviewer cannot admit it. For warning-only legacy Requirements
+without the contract, do not invent a Scope Contract; enforce their approved
+observable Requirements and boundaries as written.
+
 For REV-SOURCE, inspect the baseline repository and require a self-contained
 maintainer scenario, before/after, success/failure flow, complete SD-F path
 manifest, complete critical SD-U declarations, SD-FLOW lifecycle/state/data

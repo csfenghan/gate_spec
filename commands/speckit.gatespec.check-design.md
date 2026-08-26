@@ -14,3 +14,5 @@ to requirements-only mode based on whether plan.md happens to exist. A legacy
 Approved Design without Delivery Estimate blocks before tasks unless checked
 tasks, implementation-review metadata, or a product-code delta proves
 implementation progress; progressed legacy delivery is warning-only.
+Plan must not copy a Scope Contract table: its Requirements content hash binds
+the single approved contract in spec.md.

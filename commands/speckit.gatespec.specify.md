@@ -35,6 +35,9 @@ Consider non-empty user input before proceeding.
    legal unresolved batch; never seal it.
 5. Once all blocking items and defaults are resolved, write/update the Draft
    automatically. Do not require a separate “write it” confirmation.
+6. Establish one concrete Primary outcome before admitting scope. Complete that
+   outcome with the smallest sufficient delivery; adjacent improvements are
+   deferred by default and never receive item-by-item approval invitations.
 
 ## Step 0: run peer extension hooks
 
@@ -59,9 +62,13 @@ If a current GateSpec spec exists:
 - Draft: continue in place. Never recopy the template or discard answers.
 - Valid Approved-Requirements and no workflow flag: keep it read-only, report
   that it is approved (including any user-constraint drift warning and the
-  `--refresh-constraints` option). If it is a legacy approval without
-  Delivery Estimate Schema 1, warn without editing it; Design must add the
-  first estimate. Then hand off to
+  `--refresh-constraints` option). If it is a legacy approval without Scope
+  Contract Schema 1, the Requirements gate blocks Design and requires
+  `--revise` unless a checked task, implementation-review receipt, or real
+  production delta proves implementation is already underway. Progressed
+  legacy delivery is warning-only and remains byte-for-byte read-only. If it
+  is a legacy approval without Delivery Estimate Schema 1, warn without
+  editing it; Design must add the first estimate. Then hand off to
   `__SPECKIT_COMMAND_GATESPEC_PLAN__`.
 - `--revise`: archive Source Design, `tasks.md`, current reviews,
   revalidations, execution state, IA, and acceptance before editing; change
@@ -131,6 +138,31 @@ known unknown into exactly one conversational bucket:
    answer and no material reason for individual discussion.
 3. **Technical matter deferred to Design** — the unknown changes only an
    implementation mechanism and has no Requirements-level consequence.
+
+In the same pass, first write one unique, specific Primary outcome in terms of
+the participant, current state, trigger, and one observable result delivered
+now. Requirements stay at the level of concrete user workflow, external
+behavior, and retained restrictions. Source files, classes, threads, and other
+implementation choices remain Design matters and never create a capability
+row by themselves.
+
+Apply this counterfactual admission test to each capability that is actually in
+view:
+
+1. If removing it makes the Primary outcome fail, admit it as `core`.
+2. Otherwise, if the user explicitly requested it in the same delivery, admit
+   it as `committed`.
+3. Otherwise, if an effective `MUST` requires it, admit it as `constraint`.
+4. Otherwise record it, when material, as `deferred`: it is outside this
+   delivery and is not a promise to implement it later.
+
+Do not expose the CAP ID or admission vocabulary in conversation. Do not
+proactively enumerate neighboring features. Record or discuss an adjacent
+capability only when the user raised it, the original request has reasonable
+scope ambiguity, or Design is likely to introduce it accidentally unless the
+boundary is explicit. An AI-discovered improvement that is unnecessary for the
+Primary outcome is deferred by default without an individual question. A user
+can still challenge any admission before the final Requirements approval.
 
 As part of that same pass, identify independently deliverable capabilities
 that can also be validated alone. When at least one reasonable split preserves
@@ -233,6 +265,15 @@ explicit warning
 and its concrete reason; high-risk authorization is the exception that must
 remain visibly separate.
 
+For a scope decision, describe the current workflow, its one concrete gap, and
+the existing burden or behavior the minimum sufficient option deliberately
+retains. A broader option must state which external interface, caller flow, or
+compatibility behavior changes. Never show CAP classifications, source paths,
+classes, threads, or per-option LOC in the Requirements card. Recommend the
+smallest option that fully delivers the Primary outcome; “more complete”,
+“more elegant”, or “more extensible” is not by itself a reason to expand this
+delivery.
+
 Wait for the batch response. Accept an ID mapped to an option letter, exact
 option label, or `recommended`, for example `R1=A; R2=recommended`. “Accept all
 recommendations in this batch” explicitly answers every non-high-risk card in
@@ -279,6 +320,17 @@ and Assumptions. Acceptance Scenario lines each carry `(covers FR-xxx)`;
 every unique FR is defined exactly once in Functional Requirements and has at
 least one scenario. Remove all template examples and residual markers.
 
+Write exact `**Scope Contract Schema**: 1` and one `## Scope Contract`. Record
+Primary outcome, canonical Core completion SC refs, and Retained baseline
+(including `None — <reason>` when nothing material is retained). The table has
+one stable `CAP-###` row for each material in-view capability and uses only
+`core`, `committed`, `constraint`, or `deferred`. Every current FR and SC maps
+to at least one non-deferred CAP; every non-deferred CAP maps at least one FR
+and one SC; every Core completion SC belongs to a core CAP; deferred rows use
+exactly `none` for Spec refs. A constraint CAP must cite a real effective MUST
+in its rationale rather than laundering an engineering preference. CAP IDs do not enter tasks Closure:
+downstream closure remains CAP → FR/SC → task.
+
 Perform a fresh-eyes adversarial read for contradictions, terminology drift,
 hidden guesses, and misclassification. Map every clarification, default, and
 effective constraint to the body. Confirm technical-only matters did not become
@@ -311,13 +363,15 @@ must be resolved before summary approval.
 
 ## Step 5: Requirements approval
 
-Present at most 20 lines: goal (≤3 lines), P1 stories, key decisions, approved
-defaults, scope boundaries, all three Delivery Estimate ranges and confidence,
+Present at most 20 lines: Primary outcome, retained baseline, P1 stories, key
+decisions, approved defaults, explicitly committed delivery items, important
+deferred capabilities, all three Delivery Estimate ranges and confidence,
 material technical matters explicitly deferred to Design, and the mandatory
-line “what I am least confident about”. Make clear that normal Requirements
-approval also accepts the disclosed whole-feature size; this is not another
-approval mechanism. Remind the user that any classification can still be
-challenged before approval. Wait for unambiguous approval. On requested
+line “what I am least confident about”. Make clear that this one normal
+Requirements summary approval accepts both the Scope Contract and disclosed
+whole-feature size; neither adds another approval mechanism. Remind the user
+that any admission or classification can still be challenged before approval.
+Wait for unambiguous approval. On requested
 changes, update the Draft and show only the diff since the previously shown
 version.
 

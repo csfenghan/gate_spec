@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.8.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.9.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -15,6 +15,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 |---|---|---|
 | Extension primary name `speckit.{ext}.{command}` | manifest commands | scratch install/schema validation |
 | `spec.md` User Scenarios & Testing / Requirements / Success Criteria | native tasks/implement | Requirements checker |
+| GateSpec spec Scope Contract Schema 1 | Design/Source/tasks/review scope boundary | Scope checker + rendered/manual conservation smoke |
 | `plan.md` Technical Context / Constitution Check / Project Structure | native tasks | Design checker |
 | tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows | tasks-structure fixtures |
 | `.specify/feature.json.feature_directory` | checker/commands | jq → python3 → restricted single-line parser tests |
@@ -131,6 +132,19 @@ In a scratch initialized project:
     production path family does likewise. At final acceptance, confirm Git
     actual additions/churn/files exclude tests/spec/review/docs and appear
     beside Design without numeric variance becoming a failure.
+20. Generate Scope Contract Schema 1 with core-only, core+committed+deferred,
+    and MUST-backed constraint examples. Confirm missing/duplicate/unknown
+    schema, malformed CAP/Admission/ref rows, incomplete FR/SC coverage,
+    deferred refs, and non-core Core completion refs fail. An unstarted legacy
+    Approved Requirements artifact must return to `specify --revise`; checked
+    tasks, implementation review, or real production delta make it warning-only
+    and read-only. Confirm Plan has no copied scope table and Source/tasks/
+    implementation reviewers cover every admitted CAP through FR/SC, reject
+    deferred CAPs, and preserve Retained baseline. In both Claude and Codex,
+    ask whether an existing `SessionStream` should add Resume or also replace
+    the complete typed API: the card must state that the current `request_id`
+    burden remains under the minimum option, recommend Resume only, and defer
+    the complete interface refactor without an item-by-item approval prompt.
 
 Run `bash tests/run-all.sh` on Linux and macOS and verify `git status` remains
 clean. If a hook or artifact contract changed, retain the old upper version

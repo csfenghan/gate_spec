@@ -50,6 +50,16 @@ strip_delivery_estimate() {
   ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+strip_scope_contract() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^\*\*Scope Contract Schema\*\*:/ {next}
+    /^## Scope Contract([[:space:]]|$)/ {skip=1; next}
+    skip && /^## / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 sha_stream() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum
@@ -383,6 +393,7 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 <!-- path: gatespec -->
 # Feature Specification: Config hot reload
 **Status**: Approved-Requirements (2026-08-07)
+**Scope Contract Schema**: 1
 **Delivery Estimate Schema**: 1
 ## Clarifications
 ### Session 2026-08-07
@@ -397,6 +408,13 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 - **User GateSpec constraints**: absent — SHA-256: `absent`
 - **Effective constraints**: portable watcher; connections remain active.
 - **Conflicts and resolutions**: None — sources do not conflict.
+## Scope Contract
+- **Primary outcome**: An operator saving a supported configuration while the daemon is running observes the complete new values within one second without disconnecting active clients.
+- **Core completion refs**: `SC-001`
+- **Retained baseline**: Existing configuration syntax plus network and CLI surfaces remain unchanged.
+| Capability | Admission | Spec refs | Boundary rationale |
+|---|---|---|---|
+| CAP-001 — Apply saved configuration without connection loss | `core` | `FR-001, FR-002, SC-001` | Without reload timing or connection continuity, the operator does not receive the stated runtime outcome. |
 ## Delivery Estimate
 - **Production additions**: `120..220`
 - **Production churn**: `150..280`
@@ -433,7 +451,7 @@ cat > "$TEST_TMP/good/plan.md" <<EOF
 **Design Evidence Schema**: 1
 **Delivery Estimate Schema**: 1
 ## Summary
-Add portable polling and atomic snapshot replacement.
+Add portable polling and atomic snapshot replacement for CAP-001 while retaining existing configuration, network, and CLI behavior.
 ## Delivery Estimate
 - **Production additions**: \`140..210\`
 - **Production churn**: \`170..270\`
@@ -459,17 +477,17 @@ All effective constraints are satisfied.
    - **Execution contexts**: The existing main request thread reads snapshots; a new ConfigWatcher worker owns polling.
    - **Cross-context flow**: ConfigWatcher -> ConfigStore publishes one immutable snapshot; readers only acquire the published handle.
    - **Synchronization contract**: One atomic shared-pointer exchange publishes a fully validated snapshot; teardown cancels and joins the watcher before store destruction.
-   - **Technical basis**: FR-001, FR-002, the existing request loop, and research.md#portable-watching.
+   - **Technical basis**: CAP-001, FR-001, FR-002, the existing request loop, and research.md#portable-watching.
 2. **Object lifetimes & ownership**:
    - **Owned resources**: ConfigService uniquely owns ConfigWatcher and ConfigStore; readers temporarily share immutable ConfigSnapshot values.
    - **Lifetime flow**: Setup constructs the store then watcher; publishing moves a validated snapshot into shared ownership; teardown joins before releasing either owner.
    - **Resource contract**: At most the current and reader-retained prior snapshots remain live; failed parses release their unpublished candidate immediately.
-   - **Technical basis**: FR-002 and data-model.md#config-snapshot.
+   - **Technical basis**: CAP-001, FR-002, and data-model.md#config-snapshot.
 3. **Key modules & classes**:
    - **Repository anchors**: Existing ConfigService is the startup entry point and existing request handlers read ConfigStore.
    - **Change map**: modified ConfigService wires dependencies; new ConfigWatcher detects changes; modified ConfigStore validates and publishes; request handlers remain behaviorally unchanged.
    - **Dependency contract**: ConfigService -> ConfigWatcher -> ConfigStore; handlers -> ConfigStore; ConfigStore never depends on handlers or the watcher.
-   - **Technical basis**: FR-001, FR-002, D1, and the inspected src/config integration surface.
+   - **Technical basis**: CAP-001, FR-001, FR-002, D1, and the inspected src/config integration surface.
 4. **Key internal APIs & interactions**:
    - **Existing entry points**: ConfigService::Start and ConfigStore::Current remain the integration entry points.
    - **Core contract skeleton**:
@@ -479,17 +497,17 @@ All effective constraints are satisfied.
      \`\`\`
    - **Primary interaction**: Success: watcher thread -> ConfigStore::Reload -> validate -> atomic publish -> readers observe next snapshot. Failure: validation returns an error, retains the prior snapshot, and emits one diagnostic.
    - **Semantic contract**: Reload never exposes a partial snapshot; Current is thread-safe and non-blocking; Stop is idempotent and joins the worker.
-   - **Technical basis**: FR-001, FR-002, D1, and contracts/config-store.md.
+   - **Technical basis**: CAP-001, FR-001, FR-002, D1, and contracts/config-store.md.
 5. **External interface behavior contracts**:
    - **Affected surfaces**: Existing configuration files gain hot-reload behavior; network and CLI surfaces remain unchanged.
    - **Behavior contract**: A valid save becomes visible within one second; an invalid save preserves active connections and the prior values while emitting one diagnostic.
    - **Compatibility contract**: Existing configuration syntax and startup validation remain unchanged; no migration or fallback mode is introduced.
-   - **Technical basis**: FR-001, FR-002, SC-001, and contracts/config-reload.md.
+   - **Technical basis**: CAP-001, FR-001, FR-002, SC-001, and contracts/config-reload.md.
 6. **Setup / runtime / teardown phase interactions**:
    - **States & owner**: ConfigService owns Stopped, Starting, Running, and Stopping transitions; ConfigWatcher cannot transition service state.
    - **Phase flow**: Setup loads once then starts polling; runtime validates and publishes candidates; teardown requests stop, joins, then destroys store state.
    - **Failure / recovery contract**: Initial-load failure aborts startup; runtime reload failure retains Running state; repeated Stop calls perform no extra work.
-   - **Technical basis**: FR-001, FR-002, quickstart.md, and the existing service lifecycle.
+   - **Technical basis**: CAP-001, FR-001, FR-002, quickstart.md, and the existing service lifecycle.
 ## Implementation Freedoms
 - Poll interval representation — constraints: preserve the one-second acceptance bound.
 ## Implementation Review Contract
@@ -522,6 +540,211 @@ seal "$TEST_TMP/good/plan.md"
 
 expect pass spec "$TEST_TMP/good" "approved requirements pass"
 expect pass design "$TEST_TMP/good" "approved requirements and design pass"
+
+# Scope Contract Schema ------------------------------------------------------
+clone_good scope-core-committed-deferred
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-core-committed-deferred/spec.md" '/^| CAP-001/a\
+| CAP-002 — Preserve an explicitly requested compatibility diagnostic | `committed` | `FR-002, SC-001` | The Primary outcome survives without it, but the user explicitly requested it in this delivery. |\
+| CAP-003 — Replace the complete configuration API | `deferred` | `none` | It is outside this delivery and is not a future commitment. |'
+seal "$TEST_TMP/scope-core-committed-deferred/spec.md"
+expect pass spec "$TEST_TMP/scope-core-committed-deferred" \
+  "core, committed, and deferred capabilities share one valid Scope Contract"
+
+clone_good scope-constraint
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-constraint/spec.md" '/^| CAP-001/a\
+| CAP-002 — Emit the mandated audit event | `constraint` | `FR-002, SC-001` | An effective MUST requires the event even though the Primary outcome does not. |'
+seal "$TEST_TMP/scope-constraint/spec.md"
+expect pass spec "$TEST_TMP/scope-constraint" "constraint admission is structurally valid"
+
+clone_good scope-schema-missing
+rewrite "$TEST_TMP/scope-schema-missing/spec.md" '/^\*\*Scope Contract Schema\*\*:/d'
+seal "$TEST_TMP/scope-schema-missing/spec.md"
+expect fail spec "$TEST_TMP/scope-schema-missing" "Scope Contract schema is mandatory" \
+  "expected exactly one '**Scope Contract Schema**: 1'"
+
+clone_good scope-schema-duplicate
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-schema-duplicate/spec.md" '/\*\*Scope Contract Schema\*\*: 1/a\
+**Scope Contract Schema**: 1'
+seal "$TEST_TMP/scope-schema-duplicate/spec.md"
+expect fail spec "$TEST_TMP/scope-schema-duplicate" "duplicate Scope Contract schema fails" \
+  "expected exactly one '**Scope Contract Schema**: 1'"
+
+clone_good scope-schema-unknown
+rewrite "$TEST_TMP/scope-schema-unknown/spec.md" \
+  's/\*\*Scope Contract Schema\*\*: 1/**Scope Contract Schema**: 2/'
+seal "$TEST_TMP/scope-schema-unknown/spec.md"
+expect fail spec "$TEST_TMP/scope-schema-unknown" "unknown Scope Contract schema fails closed" \
+  "unknown schemas are invalid"
+
+clone_good scope-section-duplicate
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-section-duplicate/spec.md" '/^## Delivery Estimate/i\
+## Scope Contract'
+seal "$TEST_TMP/scope-section-duplicate/spec.md"
+expect fail spec "$TEST_TMP/scope-section-duplicate" "duplicate Scope Contract section fails" \
+  "expected exactly one '## Scope Contract'"
+
+clone_good scope-section-missing
+strip_scope_contract "$TEST_TMP/scope-section-missing/spec.md"
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-section-missing/spec.md" '/^\*\*Status\*\*:/a\
+**Scope Contract Schema**: 1'
+seal "$TEST_TMP/scope-section-missing/spec.md"
+expect fail spec "$TEST_TMP/scope-section-missing" "partial Scope Contract fails closed" \
+  "expected exactly one '## Scope Contract'"
+
+for scope_field in 'Primary outcome' 'Core completion refs' 'Retained baseline'; do
+  scope_slug=$(printf '%s' "$scope_field" | tr '[:upper:] ' '[:lower:]-')
+  clone_good "scope-empty-$scope_slug"
+  rewrite "$TEST_TMP/scope-empty-$scope_slug/spec.md" \
+    "s/^- \*\*$scope_field\*\*:.*/- **$scope_field**: /"
+  seal "$TEST_TMP/scope-empty-$scope_slug/spec.md"
+  expect fail spec "$TEST_TMP/scope-empty-$scope_slug" \
+    "Scope Contract $scope_field cannot be empty" "nonempty '$scope_field'"
+done
+
+clone_good scope-retained-none-without-reason
+rewrite "$TEST_TMP/scope-retained-none-without-reason/spec.md" \
+  's/^- \*\*Retained baseline\*\*:.*/- **Retained baseline**: None/'
+seal "$TEST_TMP/scope-retained-none-without-reason/spec.md"
+expect fail spec "$TEST_TMP/scope-retained-none-without-reason" \
+  "Retained baseline None state requires a reason" "None — <reason>"
+
+clone_good scope-duplicate-cap
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-duplicate-cap/spec.md" '/^| CAP-001/a\
+| CAP-001 — Duplicate reload capability | `committed` | `FR-001, SC-001` | The user requested this duplicate row. |'
+seal "$TEST_TMP/scope-duplicate-cap/spec.md"
+expect fail spec "$TEST_TMP/scope-duplicate-cap" "duplicate CAP ID fails" "CAP-001 is duplicated"
+
+clone_good scope-invalid-cap
+rewrite "$TEST_TMP/scope-invalid-cap/spec.md" 's/CAP-001 —/CAP-01 —/'
+seal "$TEST_TMP/scope-invalid-cap/spec.md"
+expect fail spec "$TEST_TMP/scope-invalid-cap" "CAP IDs require canonical three digits" \
+  "CAP-### — <nonempty capability>"
+
+clone_good scope-invalid-admission
+rewrite "$TEST_TMP/scope-invalid-admission/spec.md" 's/`core`/`optional`/'
+seal "$TEST_TMP/scope-invalid-admission/spec.md"
+expect fail spec "$TEST_TMP/scope-invalid-admission" "unknown Admission fails" \
+  "Admission must be core, committed, constraint, or deferred"
+
+clone_good scope-noncanonical-ref
+rewrite "$TEST_TMP/scope-noncanonical-ref/spec.md" \
+  's/`FR-001, FR-002, SC-001`/`FR-1, FR-002, SC-001`/'
+seal "$TEST_TMP/scope-noncanonical-ref/spec.md"
+expect fail spec "$TEST_TMP/scope-noncanonical-ref" "Scope refs require canonical three-digit IDs" \
+  "must be canonical FR-###/SC-### IDs"
+
+clone_good scope-undefined-ref
+rewrite "$TEST_TMP/scope-undefined-ref/spec.md" \
+  's/`FR-001, FR-002, SC-001`/`FR-001, FR-999, SC-001`/'
+seal "$TEST_TMP/scope-undefined-ref/spec.md"
+expect fail spec "$TEST_TMP/scope-undefined-ref" "undefined Scope Contract ref fails" \
+  "references undefined FR-999"
+
+clone_good scope-undefined-sc
+rewrite "$TEST_TMP/scope-undefined-sc/spec.md" \
+  's/`FR-001, FR-002, SC-001`/`FR-001, FR-002, SC-999`/'
+seal "$TEST_TMP/scope-undefined-sc/spec.md"
+expect fail spec "$TEST_TMP/scope-undefined-sc" "undefined Scope Contract SC ref fails" \
+  "references undefined SC-999"
+
+clone_good scope-unmapped-fr
+rewrite "$TEST_TMP/scope-unmapped-fr/spec.md" \
+  's/`FR-001, FR-002, SC-001`/`FR-001, SC-001`/'
+seal "$TEST_TMP/scope-unmapped-fr/spec.md"
+expect fail spec "$TEST_TMP/scope-unmapped-fr" "every FR must map to a non-deferred CAP" \
+  "FR-002 is not mapped"
+
+clone_good scope-unmapped-sc
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-unmapped-sc/spec.md" '/^- \*\*SC-001\*\*:/a\
+- **SC-002**: Existing configuration syntax remains accepted without migration.'
+seal "$TEST_TMP/scope-unmapped-sc/spec.md"
+expect fail spec "$TEST_TMP/scope-unmapped-sc" "every SC must map to a non-deferred CAP" \
+  "SC-002 is not mapped"
+
+clone_good scope-cap-missing-sc
+rewrite "$TEST_TMP/scope-cap-missing-sc/spec.md" \
+  's/`FR-001, FR-002, SC-001`/`FR-001, FR-002`/'
+seal "$TEST_TMP/scope-cap-missing-sc/spec.md"
+expect fail spec "$TEST_TMP/scope-cap-missing-sc" \
+  "every non-deferred CAP needs an FR and an SC" "requires at least one FR and one SC"
+
+clone_good scope-deferred-has-refs
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-deferred-has-refs/spec.md" '/^| CAP-001/a\
+| CAP-002 — Replace the complete configuration API | `deferred` | `FR-001, SC-001` | It is outside this delivery. |'
+seal "$TEST_TMP/scope-deferred-has-refs/spec.md"
+expect fail spec "$TEST_TMP/scope-deferred-has-refs" "deferred CAP cannot carry Spec refs" \
+  "must use exactly 'none'"
+
+clone_good scope-core-completion-not-core
+rewrite "$TEST_TMP/scope-core-completion-not-core/spec.md" 's/| `core` |/| `committed` |/'
+seal "$TEST_TMP/scope-core-completion-not-core/spec.md"
+expect fail spec "$TEST_TMP/scope-core-completion-not-core" \
+  "Core completion SC must belong to a core CAP" "not mapped by a core capability"
+
+clone_good scope-plan-duplicate
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/scope-plan-duplicate/plan.md" '/^## Delivery Estimate/i\
+**Scope Contract Schema**: 1\
+## Scope Contract\
+Duplicated scope.'
+seal "$TEST_TMP/scope-plan-duplicate/plan.md"
+expect fail design "$TEST_TMP/scope-plan-duplicate" "Plan cannot duplicate the Scope Contract" \
+  "do not duplicate Scope Contract"
+
+clone_good legacy-scope-no-progress
+strip_scope_contract "$TEST_TMP/legacy-scope-no-progress/spec.md"
+seal "$TEST_TMP/legacy-scope-no-progress/spec.md"
+expect fail spec "$TEST_TMP/legacy-scope-no-progress" \
+  "unstarted legacy Requirements without Scope Contract must be revised" \
+  "run gatespec.specify --revise before Design"
+
+clone_good legacy-scope-checked-progress
+strip_scope_contract "$TEST_TMP/legacy-scope-checked-progress/spec.md"
+seal "$TEST_TMP/legacy-scope-checked-progress/spec.md"
+make_tasks "$TEST_TMP/legacy-scope-checked-progress"
+rewrite "$TEST_TMP/legacy-scope-checked-progress/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+expect pass spec "$TEST_TMP/legacy-scope-checked-progress" \
+  "checked implementation progress preserves legacy Requirements read-only" \
+  "implementation progress already exists"
+
+clone_good legacy-scope-review-progress
+strip_scope_contract "$TEST_TMP/legacy-scope-review-progress/spec.md"
+seal "$TEST_TMP/legacy-scope-review-progress/spec.md"
+mkdir -p "$TEST_TMP/legacy-scope-review-progress/.gatespec/reviews/REV-FOUNDATION"
+printf '%s\n' '# implementation review began' \
+  > "$TEST_TMP/legacy-scope-review-progress/.gatespec/reviews/REV-FOUNDATION/round-00-request.md"
+expect pass spec "$TEST_TMP/legacy-scope-review-progress" \
+  "implementation review progress preserves legacy Requirements read-only" \
+  "implementation progress already exists"
+
+legacy_scope_product_repo="$TEST_TMP/legacy-scope-product-progress-repo"
+legacy_scope_product_feature=$(init_feature_repo "$legacy_scope_product_repo")
+strip_scope_contract "$legacy_scope_product_feature/spec.md"
+seal "$legacy_scope_product_feature/spec.md"
+git -C "$legacy_scope_product_repo" add -- specs/001-hot-reload
+git -C "$legacy_scope_product_repo" commit -qm 'Approve legacy scope before implementation'
+mkdir -p "$legacy_scope_product_repo/src"
+printf '%s\n' 'int scope_delivery_started = 1;' > "$legacy_scope_product_repo/src/runtime.cc"
+git -C "$legacy_scope_product_repo" add -- src/runtime.cc
+git -C "$legacy_scope_product_repo" commit -qm 'Begin scoped product implementation'
+expect pass spec "$legacy_scope_product_feature" \
+  "real production delta preserves legacy Requirements read-only" \
+  "implementation progress already exists"
+
+clone_good draft-missing-scope
+strip_scope_contract "$TEST_TMP/draft-missing-scope/spec.md"
+rewrite "$TEST_TMP/draft-missing-scope/spec.md" 's/Approved-Requirements (2026-08-07)/Draft/'
+seal "$TEST_TMP/draft-missing-scope/spec.md"
+expect fail spec "$TEST_TMP/draft-missing-scope" "Draft cannot omit Scope Contract" \
+  "Scope Contract Schema 1 and one Scope Contract section are required"
 
 # Delivery Estimate Schema ---------------------------------------------------
 clone_good estimate-missing-field
@@ -1089,6 +1312,13 @@ clone_good closure-ref-range
 make_tasks "$TEST_TMP/closure-ref-range"
 rewrite "$TEST_TMP/closure-ref-range/tasks.md" 's/| REV-FOUNDATION | D1, FR-002 |/| REV-FOUNDATION | D1-FR-002 |/'
 expect fail tasks-structure "$TEST_TMP/closure-ref-range" "Closure refs reject ranges and require original IDs"
+
+clone_good closure-cap-ref
+make_tasks "$TEST_TMP/closure-cap-ref"
+rewrite "$TEST_TMP/closure-cap-ref/tasks.md" \
+  's/| REV-FOUNDATION | D1, FR-002 |/| REV-FOUNDATION | CAP-001, D1, FR-002 |/'
+expect fail tasks-structure "$TEST_TMP/closure-cap-ref" \
+  "CAP IDs stay out of task Closure" "contains invalid identifier 'CAP-001'"
 
 clone_good prior-multiline
 make_tasks "$TEST_TMP/prior-multiline"

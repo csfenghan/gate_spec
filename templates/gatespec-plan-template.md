@@ -23,7 +23,15 @@
 
 ## Summary
 
-[Extract from feature spec: primary requirement, design intent, current-to-target change boundary, and technical approach from research]
+[Extract from feature spec: Primary outcome, retained baseline, design intent, current-to-target change boundary, and technical approach from research]
+
+<!--
+  GATESPEC: Do not copy the Requirements Scope Contract or create another scope
+  table here. Its approved bytes are already bound by Requirements
+  Content-SHA256. Every design element instead traces to a non-deferred CAP and
+  an FR, while preserving Retained baseline. Activating a deferred CAP, adding
+  external behavior, or changing the Primary outcome requires specify --revise.
+-->
 
 ## Delivery Estimate *(gatespec: mandatory)*
 
@@ -131,17 +139,17 @@ explicit Decision Log approval.]
    - **Execution contexts**: [existing and planned threads/processes/event loops, owners, and affinity]
    - **Cross-context flow**: [directed control/data handoffs, queues, cancellation, and backpressure]
    - **Synchronization contract**: [primitives or serialization plus ordering, race/deadlock, and shutdown guarantees]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 2. **Object lifetimes & ownership**:
    - **Owned resources**: [key objects/buffers/handles and their current/planned owners]
    - **Lifetime flow**: [creation, share/borrow/copy/move rules, destruction order, and failure cleanup]
    - **Resource contract**: [material allocation, reclamation, memory/buffer bounds, or explicit no-extra-constraint reason]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 3. **Key modules & classes**:
    - **Repository anchors**: [inspected existing modules, entry points, and types forming the integration surface]
    - **Change map**: [each key existing/modified/new element, responsibility, boundary, and deliberately unchanged neighbor]
    - **Dependency contract**: [directed callers/callees and allowed or prohibited dependency directions]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 4. **Key internal APIs & interactions**:
    - **Existing entry points**: [actual symbols or protocols consumed by the design]
    - **Core contract skeleton**:
@@ -150,17 +158,17 @@ explicit Decision Log approval.]
      ```
    - **Primary interaction**: [ordered main success and principal failure flows with execution context on material hops]
    - **Semantic contract**: [inputs, outputs, errors, pre/postconditions, thread affinity, and ownership]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 5. **External interface behavior contracts**:
    - **Affected surfaces**: [new/changed/unchanged API, CLI, configuration, event, or schema surfaces]
    - **Behavior contract**: [externally observable success, error, timing, retry, or idempotency behavior]
    - **Compatibility contract**: [versioning, migration, fallback, and explicitly preserved behavior]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 6. **Setup / runtime / teardown phase interactions**:
    - **States & owner**: [states, transition authority, and owning component]
    - **Phase flow**: [ordered setup, runtime, and teardown interactions]
    - **Failure / recovery contract**: [partial startup, rollback, retry, cancellation, and cleanup behavior]
-   - **Technical basis**: [FR/D/constraint, inspected repository anchors, and attachment references]
+   - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 
 ## Implementation Freedoms *(gatespec: include if any)*
 
