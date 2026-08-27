@@ -1097,6 +1097,119 @@ check_constraint_basis() {
   [[ "$missing" -eq 0 ]] && pass "spec.md: Constraint Basis records all sources, effective rules, and conflicts"
 }
 
+extract_spec_test_control_exceptions() {
+  awk '
+    $0 == "### Test Control Policy Exceptions *(gatespec: mandatory)*" {inside=1; next}
+    inside && (/^## / || /^### /) {exit}
+    inside {print}
+  ' "$SPEC"
+}
+
+validate_test_control_exception_body() {
+  local body="$1" context="$2" mode header separator invalid rows="$TMP_DIR/test-control-exception-rows"
+  local exception rule decision replacement reason expected=1 expected_id bad=0
+  local clarifications="$TMP_DIR/test-control-exception-clarifications"
+  header='| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |'
+  separator='|---|---|---|---|---|'
+  mode=$(markdown_field_value "$body" 'Mode')
+  invalid=$(awk -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ {next}
+    !mode {if ($0 != "- **Mode**: `none`" && $0 != "- **Mode**: `approved`") print NR ":" $0; mode=1; next}
+    !head {if ($0 != header) print NR ":" $0; head=1; next}
+    !sep {if ($0 != separator) print NR ":" $0; sep=1; next}
+    {if ($0 !~ /^\| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \|$/) print NR ":" $0}
+    END {if (!mode || !head || !sep) print "missing canonical preamble"}
+  ' "$body")
+  if [[ -n "$invalid" || ( "$mode" != none && "$mode" != approved ) ]]; then
+    fail "$context: Test Control Policy Exceptions must use the exact Mode/table schema"
+    return 1
+  fi
+  awk -F '|' -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ || /^- \*\*Mode\*\*:/ || $0 == header || $0 == separator {next}
+    {for (i=2;i<=6;i++) {v=$i; sub(/^ /,"",v); sub(/ $/,"",v); printf "%s%s",(i==2?"":"\t"),v} print ""}
+  ' "$body" > "$rows"
+  if [[ "$mode" == none ]]; then
+    if [[ $(awk 'NF {n++} END {print n+0}' "$rows") -ne 1 ]] ||
+       ! grep -Fqx $'none\tnone\tnone\tnone\tnone' "$rows"; then
+      fail "$context: Mode none requires the exact sole all-none exception row"
+      return 1
+    fi
+    return 0
+  fi
+  if [[ ! -s "$rows" ]]; then
+    fail "$context: Mode approved requires at least one TCE-### exception"
+    return 1
+  fi
+  section_body "$SPEC" 'Clarifications' > "$clarifications"
+  while IFS=$'\t' read -r exception rule decision replacement reason; do
+    [[ -n "$exception" ]] || continue
+    expected_id=$(printf 'TCE-%03d' "$expected")
+    [[ "$exception" == "$expected_id" ]] || { fail "$context: exception IDs must be continuous from TCE-001"; bad=1; }
+    case "$rule" in
+      source-root|language-marker|formal-api|switch-identifier|control-model|touchpoint-shape|validator-path-marker) ;;
+      *) fail "$context: $exception names an unknown or non-exemptable Test Control Policy rule"; bad=1 ;;
+    esac
+    if ! printf '%s\n' "$decision" | grep -Eq '^R[1-9][0-9]*$' ||
+       [[ $(grep -Ec "^- Q: \\[${decision}\\] .+ → A: .+" "$clarifications" || true) -ne 1 ]]; then
+      fail "$context: $exception must reference one concluded Requirements Clarification R<n>"
+      bad=1
+    fi
+    if [[ -z "$replacement" || "$replacement" == none || "$replacement" == \[* ||
+          -z "$reason" || "$reason" == none || "$reason" == \[* ]]; then
+      fail "$context: $exception requires a replacement source-auditable mechanism and material reason/consequence"
+      bad=1
+    fi
+    expected=$((expected + 1))
+  done < "$rows"
+  [[ "$bad" -eq 0 ]]
+}
+
+test_control_rule_is_excepted() {
+  local wanted="$1"
+  extract_spec_test_control_exceptions | awk -F '|' -v wanted="$wanted" '
+    {
+      value=$3
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      if (value == wanted) found=1
+    }
+    END {exit !found}
+  '
+}
+
+check_spec_test_control_policy_exceptions() {
+  local count candidates body="$TMP_DIR/spec-test-control-exceptions" status
+  local constraint_line next_h2_line exception_line
+  count=$(grep -Fxc '### Test Control Policy Exceptions *(gatespec: mandatory)*' "$SPEC" || true)
+  candidates=$(grep -cE '^#{1,6} Test Control Policy Exceptions([[:space:]]|$)' "$SPEC" || true)
+  if [[ "$count" -eq 0 && "$candidates" -eq 0 ]]; then
+    status=$(grep -E '^\*\*Status\*\*:' "$SPEC" | head -1)
+    if [[ "$status" == '**Status**: Draft' ]]; then
+      fail "spec.md: new/revised Protocol v3 Requirements require Test Control Policy Exceptions (use Mode none when no exception was approved)"
+    else
+      warn "spec.md: legacy approved Requirements has no Test Control Policy Exceptions contract; Protocol v3 Design may copy only canonical Mode none"
+    fi
+    return
+  fi
+  if [[ "$count" -ne 1 || "$candidates" -ne 1 ]]; then
+    fail "spec.md: Test Control Policy Exceptions must have one exact mandatory H3 heading"
+    return
+  fi
+  constraint_line=$(awk '/^## Constraint Basis([[:space:]]|$)/ {print NR; exit}' "$SPEC")
+  exception_line=$(grep -nFx '### Test Control Policy Exceptions *(gatespec: mandatory)*' "$SPEC" | cut -d: -f1)
+  next_h2_line=$(awk -v start="$constraint_line" 'NR > start && /^## / {print NR; exit}' "$SPEC")
+  if ! [[ "$constraint_line" =~ ^[0-9]+$ && "$exception_line" =~ ^[0-9]+$ &&
+          "$next_h2_line" =~ ^[0-9]+$ ]] ||
+     (( exception_line <= constraint_line || exception_line >= next_h2_line )); then
+    fail "spec.md: Test Control Policy Exceptions must be the unique nested H3 inside Constraint Basis"
+    return
+  fi
+  extract_spec_test_control_exceptions > "$body"
+  if validate_test_control_exception_body "$body" 'spec.md'; then
+    pass "spec.md: Test Control Policy Exceptions is canonical and Requirements-decision-bound"
+  fi
+}
+
 check_clarifications() {
   local body="$TMP_DIR/clarifications" bad=0 entries none_count sessions invalid nonblank
   section_body "$SPEC" 'Clarifications' > "$body"
@@ -1269,6 +1382,7 @@ check_spec_gate() {
   check_clarifications
   check_defaults
   check_constraint_basis "$SPEC"
+  check_spec_test_control_policy_exceptions
   check_scope_contract
   check_delivery_estimate "$SPEC" requirements
   check_fr_traceability
@@ -1554,6 +1668,55 @@ valid_repo_path() {
   [[ -n "$path" && "$path" != 'not-applicable' && "$path" != /* && "$path" != *'..'* && "$path" != *$'\t'* ]]
 }
 
+canonical_test_control_repo_path() {
+  local path="$1" remaining component
+  [[ -n "$path" && "$path" != not-applicable && "$path" != /* &&
+     "$path" != *$'\t'* ]] || return 1
+  case "$path" in
+    /*|*/|*//*|'') return 1 ;;
+  esac
+  remaining=$path
+  while :; do
+    component=${remaining%%/*}
+    [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+    printf '%s\n' "$component" | grep -Eq '^[[:alnum:]_.+@][[:alnum:]_.+@-]*$' || return 1
+    [[ "$remaining" == "$component" ]] && break
+    remaining=${remaining#*/}
+  done
+  return 0
+}
+
+test_control_symbol_has_default_language_marker() {
+  local symbol="$1"
+  printf '%s\n' "$symbol" | grep -Eq \
+    '(^|::|[./#])testonly(::|[./#])[[:alnum:]_~]|(^|::|[./#])(TestOnly|test_only)[[:alnum:]_]*(::|[./#(<~]|$)'
+}
+
+protocol_has_execution_state() {
+  [[ "$1" == 2 || "$1" == 3 ]]
+}
+
+normalized_test_control_closure_stream_for_file() {
+  local file="$1" cr
+  cr=$(printf '\r')
+  printf '%s\n' '## GateSpec Test Control Closure *(gatespec: mandatory)*'
+  section_body "$file" 'GateSpec Test Control Closure' |
+    sed -e "s/${cr}\$//" |
+    awk 'NF {lines[++count]=$0} END {for (i=1; i<=count; i++) print lines[i]}'
+}
+
+normalized_test_control_closure_stream() {
+  normalized_test_control_closure_stream_for_file "$TASKS"
+}
+
+test_control_closure_hash_for_file() {
+  normalized_test_control_closure_stream_for_file "$1" | portable_sha256 | awk '{print $1}'
+}
+
+test_control_closure_hash() {
+  test_control_closure_hash_for_file "$TASKS"
+}
+
 check_source_decisions() {
   local bundle="$1" body="$TMP_DIR/source-decisions" ids="$TMP_DIR/source-decision-ids"
   local id block approved bad=0
@@ -1816,7 +1979,7 @@ check_source_receipt_whitelist() {
       next
     }
     kind == "request" {
-      if (state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Previous-Verdict-SHA256)\*\*: `[^`]+`$/) next
+      if (state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Default-OFF-Evidence-SHA256|Explicit-ON-Evidence-SHA256|Previous-Verdict-SHA256)\*\*: `[^`]+`$/) next
       if (state == 0 && $0 == "## Required Tests") {state=1; next}
       if (state == 1 && $0 == "- Not run — source-design review") next
       if (state == 1 && $0 ~ /^- \*\*Request-SHA256\*\*: `[0-9a-f]+`$/) {state=2; next}
@@ -1830,7 +1993,7 @@ check_source_receipt_whitelist() {
       print NR ":" $0; next
     }
     kind == "seal" {
-      if ($0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/) next
+      if ($0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Basis-SHA256|Source-Design-Reviewed-SHA256|Source-Baseline-Commit|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Default-OFF-Evidence-SHA256|Explicit-ON-Evidence-SHA256|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/) next
       print NR ":" $0
     }
   ' "$file" > "$invalid"
@@ -1841,18 +2004,41 @@ check_source_receipt_whitelist() {
   fi
 }
 
+check_no_test_control_receipt_fields() {
+  local file="$1" context="$2" label bad=0
+  for label in Test-Control-Mode Test-Control-Closure-SHA256 \
+    Test-Control-Subject-Manifest-SHA256 Default-OFF-Evidence-SHA256 \
+    Explicit-ON-Evidence-SHA256; do
+    if [[ -n "$(markdown_field_line_numbers "$file" "$label")" ]]; then
+      fail "$context: Protocol v1/v2 must not contain Protocol v3 field $label"
+      bad=1
+    fi
+  done
+  [[ "$bad" -eq 0 ]] && pass "$context: legacy receipt contains no Protocol v3 Test Control fields"
+  [[ "$bad" -eq 0 ]]
+}
+
 check_source_request_file() {
   local file="$1" round="$2" previous="$3" bind_current="$4" context request_hash
   local protocol id scope spec_hash plan_hash basis_hash reviewed_hash baseline bad=0
   context=$(basename "$file")
   if [[ ! -f "$file" ]]; then fail "$context: SOURCE request file not found"; return; fi
   check_source_receipt_whitelist "$file" request "$context"
-  check_ordered_fields "$file" "$context" \
-    'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
-    'Plan-Content-SHA256' 'Design-Basis-SHA256' 'Source-Design-Reviewed-SHA256' \
-    'Source-Baseline-Commit' 'Previous-Verdict-SHA256' 'Request-SHA256'
-  check_exact_h2_order "$file" "$context" 'Required Tests'
   protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  if [[ "$protocol" == 3 ]]; then
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Basis-SHA256' 'Source-Design-Reviewed-SHA256' \
+      'Source-Baseline-Commit' 'Test-Control-Mode' 'Test-Control-Closure-SHA256' \
+      'Test-Control-Subject-Manifest-SHA256' 'Default-OFF-Evidence-SHA256' \
+      'Explicit-ON-Evidence-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  else
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Basis-SHA256' 'Source-Design-Reviewed-SHA256' \
+      'Source-Baseline-Commit' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  fi
+  check_exact_h2_order "$file" "$context" 'Required Tests'
   id=$(markdown_field_value "$file" 'Review-ID')
   scope=$(markdown_field_value "$file" 'Scope')
   spec_hash=$(markdown_field_value "$file" 'Spec-Content-SHA256')
@@ -1860,7 +2046,21 @@ check_source_request_file() {
   basis_hash=$(markdown_field_value "$file" 'Design-Basis-SHA256')
   reviewed_hash=$(markdown_field_value "$file" 'Source-Design-Reviewed-SHA256')
   baseline=$(markdown_field_value "$file" 'Source-Baseline-Commit')
-  [[ "$protocol" == '2' ]] || { fail "$context: SOURCE Protocol-Version must be '2'"; bad=1; }
+  if [[ "$protocol" != 2 && "$protocol" != 3 ]]; then
+    fail "$context: SOURCE Protocol-Version must be 2 or 3"; bad=1
+  elif [[ "$protocol" != "${ACTIVE_REVIEW_PROTOCOL:-$protocol}" ]]; then
+    fail "$context: SOURCE Protocol-Version must match the active Plan protocol"; bad=1
+  fi
+  if [[ "$protocol" == 3 ]]; then
+    for label in Test-Control-Mode Test-Control-Closure-SHA256 Test-Control-Subject-Manifest-SHA256 \
+      Default-OFF-Evidence-SHA256 Explicit-ON-Evidence-SHA256; do
+      [[ $(markdown_field_value "$file" "$label") == not-applicable ]] || {
+        fail "$context: pre-tasks SOURCE field $label must be not-applicable"; bad=1;
+      }
+    done
+  else
+    check_no_test_control_receipt_fields "$file" "$context" || bad=1
+  fi
   [[ "$id" == 'REV-SOURCE' && "$scope" == 'SOURCE' ]] || { fail "$context: SOURCE request must bind REV-SOURCE/SOURCE"; bad=1; }
   [[ $(markdown_field_value "$file" 'Round') == "$round" ]] || { fail "$context: Round must be $round"; bad=1; }
   [[ $(markdown_field_value "$file" 'Previous-Verdict-SHA256') == "$previous" ]] || { fail "$context: prior SOURCE verdict chain mismatch"; bad=1; }
@@ -1913,7 +2113,9 @@ check_source_verdict_file() {
   platform=$(markdown_field_value "$file" 'Reviewer-Platform')
   context_id=$(markdown_field_value "$file" 'Reviewer-Context-ID')
   isolation=$(markdown_field_value "$file" 'Isolation')
-  [[ "$protocol" == '2' ]] || { fail "$context: SOURCE Protocol-Version must be '2'"; bad=1; }
+  [[ "$protocol" == "${ACTIVE_REVIEW_PROTOCOL:-2}" && ( "$protocol" == 2 || "$protocol" == 3 ) ]] || {
+    fail "$context: SOURCE Protocol-Version must be 2 or 3 and match the active Plan"; bad=1;
+  }
   [[ $(markdown_field_value "$file" 'Review-ID') == 'REV-SOURCE' ]] || { fail "$context: Review-ID must be REV-SOURCE"; bad=1; }
   [[ $(markdown_field_value "$file" 'Round') == "$round" ]] || { fail "$context: Round mismatch"; bad=1; }
   [[ $(markdown_field_value "$file" 'Request-SHA256') == "$request_hash" ]] || { fail "$context: Request-SHA256 mismatch"; bad=1; }
@@ -1949,14 +2151,27 @@ check_source_verdict_file() {
 }
 
 check_source_seal_file() {
-  local file="$1" request="$2" verdict="$3" round="$4" label expected actual bad=0
+  local file="$1" request="$2" verdict="$3" round="$4" label expected actual bad=0 request_protocol
   if [[ ! -f "$file" ]]; then fail "REV-SOURCE: PASS seal not found"; return; fi
   check_source_receipt_whitelist "$file" seal 'REV-SOURCE seal'
-  check_ordered_fields "$file" 'REV-SOURCE seal' \
-    'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
-    'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Basis-SHA256' \
-    'Source-Design-Reviewed-SHA256' 'Source-Baseline-Commit' 'Sealed-At' 'Seal-SHA256'
-  [[ $(markdown_field_value "$file" 'Protocol-Version') == 2 ]] || { fail "REV-SOURCE seal: Protocol-Version must be 2"; bad=1; }
+  request_protocol=$(markdown_field_value "$request" 'Protocol-Version')
+  if [[ "$request_protocol" == 3 ]]; then
+    check_ordered_fields "$file" 'REV-SOURCE seal' \
+      'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+      'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Basis-SHA256' \
+      'Source-Design-Reviewed-SHA256' 'Source-Baseline-Commit' 'Test-Control-Mode' \
+      'Test-Control-Closure-SHA256' 'Test-Control-Subject-Manifest-SHA256' \
+      'Default-OFF-Evidence-SHA256' 'Explicit-ON-Evidence-SHA256' 'Sealed-At' 'Seal-SHA256'
+  else
+    check_ordered_fields "$file" 'REV-SOURCE seal' \
+      'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+      'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Basis-SHA256' \
+      'Source-Design-Reviewed-SHA256' 'Source-Baseline-Commit' 'Sealed-At' 'Seal-SHA256'
+    check_no_test_control_receipt_fields "$file" 'REV-SOURCE seal' || bad=1
+  fi
+  [[ $(markdown_field_value "$file" 'Protocol-Version') == $(markdown_field_value "$request" 'Protocol-Version') ]] || {
+    fail "REV-SOURCE seal: Protocol-Version must match request"; bad=1;
+  }
   [[ $(markdown_field_value "$file" 'Review-ID') == REV-SOURCE ]] || { fail "REV-SOURCE seal: Review-ID mismatch"; bad=1; }
   [[ $(markdown_field_value "$file" 'Round') == "$round" && $(markdown_field_value "$file" 'Status') == PASS ]] || { fail "REV-SOURCE seal: round/status mismatch"; bad=1; }
   [[ $(markdown_field_value "$file" 'Request-SHA256') == $(markdown_field_value "$request" 'Request-SHA256') ]] || { fail "REV-SOURCE seal: request hash mismatch"; bad=1; }
@@ -1965,6 +2180,15 @@ check_source_seal_file() {
     expected=$(markdown_field_value "$request" "$label"); actual=$(markdown_field_value "$file" "$label")
     [[ "$actual" == "$expected" ]] || { fail "REV-SOURCE seal: $label mismatch"; bad=1; }
   done
+  if [[ "$request_protocol" == 3 ]]; then
+    for label in Test-Control-Mode Test-Control-Closure-SHA256 Test-Control-Subject-Manifest-SHA256 \
+      Default-OFF-Evidence-SHA256 Explicit-ON-Evidence-SHA256; do
+      expected=$(markdown_field_value "$request" "$label"); actual=$(markdown_field_value "$file" "$label")
+      [[ "$expected" == not-applicable && "$actual" == "$expected" ]] || {
+        fail "REV-SOURCE seal: $label must copy not-applicable from request"; bad=1;
+      }
+    done
+  fi
   printf '%s\n' "$(markdown_field_value "$file" 'Sealed-At')" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || { fail "REV-SOURCE seal: Sealed-At must be UTC RFC3339"; bad=1; }
   check_self_hash "$file" 'Seal-SHA256' 'REV-SOURCE seal'
   [[ "$bad" -eq 0 ]] && pass "REV-SOURCE: PASS seal binds the reviewed hash without binding mutable approval fields"
@@ -2037,14 +2261,14 @@ preserved_reviews_hash() {
 check_execution_state() {
   local phase="$1" context='execution-state.md' protocol epoch original handoff source_hash preserved
   local current_source current_preserved invalid bad=0
-  if [[ ! -f "$EXECUTION_STATE" ]]; then fail "$context: Review Protocol v2 requires .gatespec/execution-state.md"; return; fi
+  if [[ ! -f "$EXECUTION_STATE" ]]; then fail "$context: Review Protocol v2/v3 requires .gatespec/execution-state.md"; return; fi
   invalid=$(awk '
     /^[[:space:]]*$/ {next}
     NR == 1 && $0 == "# GateSpec Execution State" {next}
     /^- \*\*(Protocol-Version|Execution-Epoch|Original-Implementation-Baseline|Task-Handoff-Commit|Source-Design-Content-SHA256|Preserved-Reviews-SHA256|Execution-State-SHA256)\*\*: `[^`]+`$/ {next}
     {print NR ":" $0}
   ' "$EXECUTION_STATE")
-  [[ -z "$invalid" ]] || { fail "$context: only the canonical v2 execution fields are allowed"; bad=1; }
+  [[ -z "$invalid" ]] || { fail "$context: only the canonical v2/v3 execution fields are allowed"; bad=1; }
   [[ $(sed -n '1p' "$EXECUTION_STATE") == '# GateSpec Execution State' &&
      $(grep -cFx '# GateSpec Execution State' "$EXECUTION_STATE" || true) -eq 1 ]] || {
     fail "$context: canonical execution state requires its exact line-1 title"; bad=1;
@@ -2058,7 +2282,11 @@ check_execution_state() {
   handoff=$(markdown_field_value "$EXECUTION_STATE" 'Task-Handoff-Commit')
   source_hash=$(markdown_field_value "$EXECUTION_STATE" 'Source-Design-Content-SHA256')
   preserved=$(markdown_field_value "$EXECUTION_STATE" 'Preserved-Reviews-SHA256')
-  [[ "$protocol" == 2 ]] || { fail "$context: Protocol-Version must be 2"; bad=1; }
+  if ! protocol_has_execution_state "$protocol"; then
+    fail "$context: Protocol-Version must be 2 or 3"; bad=1
+  elif [[ "$protocol" != "${ACTIVE_REVIEW_PROTOCOL:-$protocol}" ]]; then
+    fail "$context: Protocol-Version must match the active Plan protocol"; bad=1
+  fi
   printf '%s\n' "$epoch" | grep -Eq '^E[1-9][0-9]*$' || { fail "$context: Execution-Epoch must be E<n>"; bad=1; }
   GIT_ROOT=${GIT_ROOT:-$(git -C "$FEATURE_DIR" rev-parse --show-toplevel 2>/dev/null || true)}
   if ! is_git_oid "$original" || [[ -z "$GIT_ROOT" ]] || ! git -C "$GIT_ROOT" cat-file -e "${original}^{commit}" 2>/dev/null; then
@@ -2069,7 +2297,7 @@ check_execution_state() {
       fail "$context: Task-Handoff-Commit must be pending or a valid commit before tasks"; bad=1
     fi
   elif ! is_git_oid "$handoff" || ! git -C "$GIT_ROOT" cat-file -e "${handoff}^{commit}" 2>/dev/null; then
-    fail "$context: downstream Protocol v2 requires a committed Task-Handoff-Commit"; bad=1
+    fail "$context: downstream Protocol v2/v3 requires a committed Task-Handoff-Commit"; bad=1
   fi
   if is_git_oid "$original" && is_git_oid "$handoff" &&
      ! git -C "$GIT_ROOT" merge-base --is-ancestor "$original" "$handoff" 2>/dev/null; then
@@ -2093,7 +2321,7 @@ check_execution_state() {
   CURRENT_ORIGINAL_BASELINE=$original
   CURRENT_TASK_HANDOFF=$handoff
   CURRENT_PRESERVED_HASH=$preserved
-  [[ "$bad" -eq 0 ]] && pass "$context: v2 epoch, original baseline, handoff, Source, and preserved reviews are current"
+  [[ "$bad" -eq 0 ]] && pass "$context: v2/v3 epoch, original baseline, handoff, Source, and preserved reviews are current"
 }
 
 check_canonical_empty_ia() {
@@ -2155,6 +2383,7 @@ check_canonical_empty_ia() {
 check_implementation_adjustments() {
   local require_empty="$1" context='implementation-adjustments.md' epoch source_hash expected_source
   local headings="$TMP_DIR/ia-headings" id block value expected=1 bad=0 source_bundle="$TMP_DIR/ia-source-bundle"
+  local changed_path control_path
   : > "$TMP_DIR/ia-changed-paths"
   if [[ ! -f "$SOURCE_ENTRY" ]]; then
     [[ ! -e "$IA_FILE" ]] || { fail "$context: IA is not applicable when Source Design is disabled"; return; }
@@ -2211,6 +2440,20 @@ check_implementation_adjustments() {
     expected=$((expected + 1))
   done < "$headings"
   LC_ALL=C sort -u -o "$TMP_DIR/ia-changed-paths" "$TMP_DIR/ia-changed-paths"
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 && "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated &&
+        -s "$TMP_DIR/test-control-structural-paths" ]]; then
+    while IFS= read -r changed_path; do
+      [[ -n "$changed_path" ]] || continue
+      while IFS= read -r control_path; do
+        [[ -n "$control_path" ]] || continue
+        if [[ "$changed_path" == "$control_path" || "$changed_path" == "$control_path/"* ||
+              "$control_path" == "$changed_path/"* ]]; then
+          fail "$context: IA path '$changed_path' must not touch declared Test Control surfaces, touchpoints, wiring, or validators"
+          bad=1
+        fi
+      done < "$TMP_DIR/test-control-structural-paths"
+    done < "$TMP_DIR/ia-changed-paths"
+  fi
   [[ "$bad" -eq 0 ]] && pass "$context: IA log is epoch-bound, bounded, ordered, and path-complete"
 }
 
@@ -2251,6 +2494,16 @@ collect_delivery_exclusion_patterns() {
 
 delivery_path_is_production() {
   local path="$1" pattern
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 && "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated &&
+        "${CURRENT_TEST_CONTROL_EVIDENCE_VALID:-no}" == yes ]]; then
+    if grep -Fqx -- "$path" "$TMP_DIR/test-control-subject-production-paths"; then
+      return 0
+    fi
+    if grep -Fqx -- "$path" "$TMP_DIR/test-control-subject-surface-paths" ||
+       grep -Fqx -- "$path" "$TMP_DIR/test-control-subject-validator-paths"; then
+      return 1
+    fi
+  fi
   case "$path" in
     "$GIT_FEATURE_REL"|"$GIT_FEATURE_REL"/*|specs/*|test/*|tests/*|doc/*|docs/*|\
     */test/*|*/tests/*|*/doc/*|*/docs/*|README|README.*|CHANGELOG|CHANGELOG.*|LICENSE|LICENSE.*|\
@@ -2282,7 +2535,7 @@ report_actual_delivery_metrics() {
   [[ -f "$request" ]] || { fail "Delivery Size: sealed REV-FINAL request is missing"; return; }
   protocol=$(markdown_field_value "$request" 'Protocol-Version')
   subject=$(markdown_field_value "$request" 'Subject-Commit')
-  if [[ "$protocol" == 2 ]]; then
+  if protocol_has_execution_state "$protocol"; then
     original=$CURRENT_ORIGINAL_BASELINE
   else
     original=$(markdown_field_value "$request" 'Implementation-Baseline')
@@ -2352,23 +2605,32 @@ check_source_final_paths() {
   : > "$expected"
   cat "$TMP_DIR/source-manifest-paths" >> "$expected"
   [[ -s "$TMP_DIR/ia-changed-paths" ]] && cat "$TMP_DIR/ia-changed-paths" >> "$expected"
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 && "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated &&
+        -s "$TMP_DIR/test-control-subject-paths" ]]; then
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if grep -Fqx -- "$path" "$actual"; then
+        printf '%s\n' "$path" >> "$expected"
+      fi
+    done < "$TMP_DIR/test-control-subject-paths"
+  fi
   LC_ALL=C sort -u -o "$actual" "$actual"
   LC_ALL=C sort -u -o "$expected" "$expected"
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     if ! grep -Fqx -- "$path" "$expected"; then
-      fail "REV-FINAL: product path '$path' is absent from Source Change Manifest + IA Changed Paths"
+      fail "REV-FINAL: product path '$path' is absent from Source Change Manifest + IA + validated Test Control paths"
       bad=1
     fi
   done < "$actual"
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     if ! grep -Fqx -- "$path" "$actual"; then
-      fail "REV-FINAL: declared Source/IA path '$path' is absent from the actual implementation delta"
+      fail "REV-FINAL: declared Source/IA or changed Test Control path '$path' is absent from the actual implementation delta"
       bad=1
     fi
   done < "$expected"
-  [[ "$bad" -eq 0 ]] && pass "REV-FINAL: actual product paths equal Source Change Manifest + bounded IA paths"
+  [[ "$bad" -eq 0 ]] && pass "REV-FINAL: actual product paths equal Source Change Manifest + bounded IA + changed validated Test Control objects"
 }
 
 check_implementation_review_contract() {
@@ -2399,13 +2661,10 @@ check_implementation_review_contract() {
   printf '%s\n' "$final_validation" > "$TMP_DIR/final-validation"
 
   case "$protocol" in
-    1|2) ;;
-    *) fail "plan.md: review Protocol Version must be '1' (legacy) or '2'"; bad=1 ;;
+    1|2|3) ;;
+    *) fail "plan.md: review Protocol Version must be '1' (legacy), '2' (legacy), or '3'"; bad=1 ;;
   esac
   ACTIVE_REVIEW_PROTOCOL=$protocol
-  # An approved legacy Plan stays byte-for-byte immutable. Enabling the
-  # independent Source Design sub-contract activates receipt protocol v2.
-  [[ -f "$SOURCE_ENTRY" ]] && ACTIVE_REVIEW_PROTOCOL=2
   [[ "$review_root" == '.gatespec/reviews' ]] || { fail "plan.md: Review Root must be '.gatespec/reviews'"; bad=1; }
   [[ "$task_review" == 'REV-TASKS after speckit.analyze; PASS required before speckit.implement' ]] || {
     fail "plan.md: Task Review contract is not the fixed REV-TASKS handoff"; bad=1;
@@ -2528,6 +2787,135 @@ check_implementation_review_contract() {
   done < "$TMP_DIR/mapping-checkpoints"
 
   [[ "$bad" -eq 0 ]] && pass "plan.md: Implementation Review Contract is complete and fixed"
+}
+
+tracked_legacy_acceptance_exists() {
+  local repo rel
+  [[ ( "$MODE" == acceptance || "$MODE" == acceptance-candidate ) &&
+     ( "${ACTIVE_REVIEW_PROTOCOL:-}" == 1 || "${ACTIVE_REVIEW_PROTOCOL:-}" == 2 ) &&
+     -f "$ACCEPTANCE" && ! -L "$ACCEPTANCE" ]] || return 1
+  [[ $(markdown_field_value "$ACCEPTANCE" 'Protocol-Version') == "${ACTIVE_REVIEW_PROTOCOL:-}" ]] || return 1
+  [[ $(markdown_field_value "$ACCEPTANCE" 'Status') == Accepted ]] || return 1
+  repo=$(git -C "$FEATURE_DIR" rev-parse --show-toplevel 2>/dev/null || true)
+  [[ -n "$repo" ]] || return 1
+  rel=$(git -C "$FEATURE_DIR" rev-parse --show-prefix 2>/dev/null || true)
+  rel=${rel%/}
+  [[ -n "$rel" ]] || return 1
+  git -C "$repo" ls-files --error-unmatch -- "$rel/.gatespec/acceptance.md" >/dev/null 2>&1
+}
+
+enforce_active_protocol_v3() {
+  case "$MODE" in
+    design|source-candidate|source-review|source|tasks-structure|task-review|retask-eligible|implementation-candidate|implementation-review)
+      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" != 3 ]]; then
+        fail "plan.md: active or unaccepted Protocol v1/v2 execution is closed; run gatespec.plan --revise to create Protocol v3 (--retask cannot upgrade protocols)"
+      fi
+      ;;
+    acceptance-candidate|acceptance)
+      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" != 3 ]] && ! tracked_legacy_acceptance_exists; then
+        fail "plan.md: unaccepted Protocol v1/v2 delivery is closed; run gatespec.plan --revise to create Protocol v3"
+      fi
+      ;;
+  esac
+}
+
+check_test_control_policy() {
+  local body="$TMP_DIR/test-control-policy" actual="$TMP_DIR/test-control-policy-actual"
+  local expected="$TMP_DIR/test-control-policy-expected" invalid
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" != 3 ]]; then
+    return
+  fi
+  if [[ $(h2_count "$PLAN" 'Test Control Policy') -ne 1 ||
+        $(grep -Fxc '## Test Control Policy *(gatespec: mandatory)*' "$PLAN" || true) -ne 1 ]]; then
+    fail "plan.md: Protocol v3 requires one exact mandatory ## Test Control Policy section"
+    return
+  fi
+  section_body "$PLAN" 'Test Control Policy' > "$body"
+  awk -v output="$actual" '
+    function flush() {
+      if (label != "") print label "\t" value > output
+      label=""; value=""
+    }
+    /^[[:space:]]*$/ {next}
+    /^<!--/ && !started && !comment_seen {comment=1; comment_seen=1; if ($0 ~ /-->[[:space:]]*$/) comment=0; next}
+    comment {if ($0 ~ /-->[[:space:]]*$/) comment=0; next}
+    /^- \*\*[^*]+\*\*: / {
+      flush(); started=1
+      line=$0; sub(/^- \*\*/, "", line)
+      split_at=index(line, "**: ")
+      label=substr(line, 1, split_at - 1)
+      value=substr(line, split_at + 4)
+      next
+    }
+    started && /^  [^[:space:]]/ {
+      line=$0; sub(/^  /, "", line)
+      value=value " " line
+      next
+    }
+    {print NR ":" $0 > output ".invalid"}
+    END {
+      flush()
+      if (comment) print "unterminated comment" > output ".invalid"
+    }
+  ' "$body"
+  invalid=''
+  [[ -f "$actual.invalid" ]] && invalid=$(awk 'NF {print; exit}' "$actual.invalid")
+  {
+    printf '%s\t%s\n' 'Policy Schema' '`1`'
+    printf '%s\t%s\n' 'Registration Stage' '`native tasks only`'
+    printf '%s\t%s\n' 'Allowed Modes' '`none|isolated`'
+    printf '%s\t%s\n' 'Isolation Contract' 'Test Control source roots end in `/src/testonly`; the terminal namespace or module is `testonly`, or a language without namespaces uses a leading `TestOnly`/`test_only` name. Formal product APIs gain no testing parameter, option, overload, getter, or state.'
+    printf '%s\t%s\n' 'Activation Contract' 'each hook project uses a dedicated positive `*_ENABLE_TEST_HOOKS` compile switch whose declared default is `OFF`; only an explicit opt-in enables it. Runtime activation and common Debug, `BUILD_TESTING`, or equivalent umbrella triggers are forbidden. The OFF build fully elides Test Control fields, branches, resources, and symbols.'
+    printf '%s\t%s\n' 'Control Contract' 'controls are typed, declarative, single-purpose, per-instance RAII and limited to named one-shot, count, barrier, time, random, fault, or observation effects. Generic callbacks, options bags, global mutable state, validation bypasses, duplicated business algorithms, placeholders, and controls without a named verification gap are forbidden. A control is removed with its last consumer.'
+    printf '%s\t%s\n' 'Production Readability Contract' 'each affected production function has at most one visually contiguous dedicated `*_ENABLE_TEST_HOOKS` macro-guard block. That block contains only one `testonly` call and feeds its result into the normal production error/result path. Counting, waiting, fault selection, and observer dispatch live entirely under the registered `/src/testonly` surface.'
+    printf '%s\t%s\n' 'Validator Contract' 'every isolated hook project supplies one tracked regular non-symlink Bash validator with `testonly` in its path/name and the sole invocation `bash <validator> --gatespec-lane default-off|explicit-on` (file mode may be 100644 or 100755). The default lane omits the hook option; the explicit lane sets it ON. Both run the same normal tests, the ON lane additionally runs hook-consuming tests, and output is canonical and subject-bound.'
+  } > "$expected"
+  if [[ -n "$invalid" ]] || ! cmp -s "$actual" "$expected"; then
+    fail "plan.md Test Control Policy: the eight-field universal policy must exactly match canonical Schema 1"
+    return
+  fi
+  pass "plan.md: Protocol v3 Test Control Policy exactly matches canonical Schema 1"
+}
+
+check_plan_test_control_policy_exceptions() {
+  local spec_body="$TMP_DIR/spec-test-control-exceptions-plan-check"
+  local plan_body="$TMP_DIR/plan-test-control-exceptions"
+  local policy_line exception_line next_h2
+  [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]] || return
+  if [[ $(h2_count "$PLAN" 'Test Control Policy Exceptions') -ne 1 ||
+        $(grep -Fxc '## Test Control Policy Exceptions *(gatespec: mandatory)*' "$PLAN" || true) -ne 1 ]]; then
+    fail "plan.md: Protocol v3 requires one exact mandatory Test Control Policy Exceptions copy"
+    return
+  fi
+  policy_line=$(grep -nFx '## Test Control Policy *(gatespec: mandatory)*' "$PLAN" | cut -d: -f1)
+  exception_line=$(grep -nFx '## Test Control Policy Exceptions *(gatespec: mandatory)*' "$PLAN" | cut -d: -f1)
+  next_h2=$(awk -v start="$policy_line" 'NR > start && /^## / {print; exit}' "$PLAN")
+  if ! [[ "$policy_line" =~ ^[0-9]+$ && "$exception_line" =~ ^[0-9]+$ ]] ||
+     [[ "$next_h2" != '## Test Control Policy Exceptions *(gatespec: mandatory)*' ]]; then
+    fail "plan.md: Test Control Policy Exceptions must be the H2 immediately after Test Control Policy"
+    return
+  fi
+  next_h2=$(awk -v start="$exception_line" 'NR > start && /^## / {print; exit}' "$PLAN")
+  if [[ "$next_h2" != '## Implementation Review Contract *(gatespec: mandatory)*' ]]; then
+    fail "plan.md: Test Control Policy Exceptions must be immediately before Implementation Review Contract"
+    return
+  fi
+  section_body "$PLAN" 'Test Control Policy Exceptions' > "$plan_body"
+  validate_test_control_exception_body "$plan_body" 'plan.md' || return
+  if [[ $(grep -Fxc '### Test Control Policy Exceptions *(gatespec: mandatory)*' "$SPEC" || true) -eq 0 ]]; then
+    if [[ $(markdown_field_value "$plan_body" 'Mode') != none ]]; then
+      fail "plan.md: legacy Requirements without a Test Control Policy Exceptions contract permits only canonical Mode none"
+      return
+    fi
+    pass "plan.md: canonical Mode none preserves the legacy Requirements implicit no-exception state"
+    return
+  fi
+  extract_spec_test_control_exceptions > "$spec_body"
+  if ! cmp -s "$spec_body" "$plan_body"; then
+    fail "plan.md: Test Control Policy Exceptions must be a scoped byte-identical copy of approved Requirements"
+    return
+  fi
+  pass "plan.md: Test Control Policy Exceptions exactly copies the approved Requirements decisions"
 }
 
 check_tasks_structure() {
@@ -2932,14 +3320,234 @@ check_checkpoint_closure_table() {
   [[ "$bad" -eq 0 ]] && pass "tasks.md: checkpoint closure exactly partitions contracts and task intervals"
 }
 
+parse_test_control_path_symbols() {
+  local value="$1" output="$2" context="$3" entry path symbol rebuilt='' separator='' bad=0
+  : > "$output"
+  printf '%s\n' "$value" | awk -F ', ' '{for (i=1; i<=NF; i++) print $i}' > "$TMP_DIR/test-control-path-symbol-items"
+  while IFS= read -r entry; do
+    path=${entry%%::*}
+    symbol=${entry#*::}
+    if [[ "$entry" != *::* || "$path" == "$entry" ]] ||
+       ! canonical_test_control_repo_path "$path" ||
+       ! printf '%s\n' "$symbol" | grep -Eq '^[][[:alnum:]_:.#()+<>=~/?!%^&*-]+$'; then
+      fail "$context contains invalid concrete path::symbol '$entry'"
+      bad=1
+    else
+      printf '%s\t%s\n' "$path" "$symbol" >> "$output"
+    fi
+    rebuilt="${rebuilt}${separator}${entry}"
+    separator=', '
+  done < "$TMP_DIR/test-control-path-symbol-items"
+  if [[ -z "$value" || "$rebuilt" != "$value" ]]; then
+    fail "$context must use canonical comma+space path::symbol entries"
+    bad=1
+  fi
+  if [[ -s "$output" ]]; then
+    LC_ALL=C sort -u "$output" > "$TMP_DIR/test-control-path-symbol-sorted"
+    if ! cmp -s "$output" "$TMP_DIR/test-control-path-symbol-sorted"; then
+      fail "$context entries must be unique and C-sorted"
+      bad=1
+    fi
+  fi
+  [[ "$bad" -eq 0 ]]
+}
+
+check_test_control_closure_table() {
+  local body="$TMP_DIR/test-control-closure-body" rows="$TMP_DIR/test-control-closure-rows"
+  local mode mode_lines invalid header separator control gap surfaces touchpoints effect wiring consumers proof
+  local expected=1 expected_id switch wiring_path validator_path rebuilt count id task_line bad=0
+  local source_root_excepted=no language_marker_excepted=no
+  local switch_identifier_excepted=no validator_marker_excepted=no
+  header='| Control | Verification gap / production invariant | Test-only surface | Production touchpoint | Allowed effect / lifetime | Build switch / validator | Consumer tasks/tests | Default-build proof task |'
+  separator='|---|---|---|---|---|---|---|---|'
+  section_body "$TASKS" 'GateSpec Test Control Closure' > "$body"
+  mode=$(markdown_field_value "$body" 'Mode')
+  mode_lines=$(markdown_field_line_numbers "$body" 'Mode')
+  if [[ $(printf '%s\n' "$mode_lines" | awk 'NF {n++} END {print n+0}') -ne 1 ]] ||
+     [[ "$mode" != none && "$mode" != isolated ]]; then
+    fail "tasks.md: Test Control Closure requires one exact Mode of none or isolated"
+    return
+  fi
+  invalid=$(awk -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ {next}
+    !mode {
+      if ($0 != "- **Mode**: `none`" && $0 != "- **Mode**: `isolated`") print NR ":" $0
+      mode=1; next
+    }
+    !head {if ($0 != header) print NR ":" $0; head=1; next}
+    !sep {if ($0 != separator) print NR ":" $0; sep=1; next}
+    {
+      if ($0 !~ /^\| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \|$/) print NR ":" $0
+    }
+    END {if (!mode || !head || !sep) print "missing canonical preamble"}
+  ' "$body")
+  if [[ -n "$invalid" ]]; then
+    fail "tasks.md: Test Control Closure must contain only its exact Mode, header, separator, and canonical eight-column rows"
+    return
+  fi
+  awk -F '|' -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ || /^- \*\*Mode\*\*:/ || $0 == header || $0 == separator {next}
+    {
+      for (i=2; i<=9; i++) {
+        value=$i; sub(/^ /, "", value); sub(/ $/, "", value)
+        printf "%s%s", (i == 2 ? "" : "\t"), value
+      }
+      print ""
+    }
+  ' "$body" > "$rows"
+  : > "$TMP_DIR/test-control-ids"
+  : > "$TMP_DIR/test-control-surface-declarations"
+  : > "$TMP_DIR/test-control-touchpoint-declarations"
+  : > "$TMP_DIR/test-control-structural-paths"
+  : > "$TMP_DIR/test-control-consumer-task-ids"
+  : > "$TMP_DIR/test-control-validator-tuples"
+  test_control_rule_is_excepted source-root && source_root_excepted=yes
+  test_control_rule_is_excepted language-marker && language_marker_excepted=yes
+  test_control_rule_is_excepted switch-identifier && switch_identifier_excepted=yes
+  test_control_rule_is_excepted validator-path-marker && validator_marker_excepted=yes
+  if [[ "$mode" == none ]]; then
+    if [[ $(awk 'NF {n++} END {print n+0}' "$rows") -ne 1 ]] ||
+       ! grep -Fqx $'none\tnone\tnone\tnone\tnone\tnone\tnone\tnone' "$rows"; then
+      fail "tasks.md: Test Control Closure Mode none requires the exact sole all-none row"
+      bad=1
+    fi
+  else
+    if [[ ! -s "$rows" ]]; then
+      fail "tasks.md: Test Control Closure Mode isolated requires at least one TC-### row"
+      bad=1
+    fi
+    while IFS=$'\t' read -r control gap surfaces touchpoints effect wiring consumers proof; do
+      [[ -n "$control" ]] || continue
+      expected_id=$(printf 'TC-%03d' "$expected")
+      if [[ "$control" != "$expected_id" ]]; then
+        fail "tasks.md: Test Control IDs must be continuous from TC-001 (expected $expected_id)"
+        bad=1
+      fi
+      printf '%s\n' "$control" >> "$TMP_DIR/test-control-ids"
+      if [[ -z "$gap" || "$gap" == none || "$gap" == \[* || -z "$effect" || "$effect" == none || "$effect" == \[* ]]; then
+        fail "tasks.md: $control gap/invariant and allowed effect/lifetime must be substantive"
+        bad=1
+      fi
+      if parse_test_control_path_symbols "$surfaces" "$TMP_DIR/test-control-row-surfaces" "tasks.md: $control Test-only surface"; then
+        while IFS=$'\t' read -r path symbol; do
+          case "$path" in
+            src/testonly|src/testonly/*|*/src/testonly|*/src/testonly/*) ;;
+            *)
+              if [[ "$source_root_excepted" != yes ]]; then
+                fail "tasks.md: $control Test-only surface '$path' must be under a src/testonly root unless Requirements approved the source-root exception"
+                bad=1
+              fi
+              ;;
+          esac
+          if [[ "$language_marker_excepted" != yes ]] &&
+             ! test_control_symbol_has_default_language_marker "$symbol"; then
+            fail "tasks.md: $control Test-only surface symbol '$symbol' must use a testonly namespace/module or leading TestOnly/test_only name unless Requirements approved the language-marker exception"
+            bad=1
+          fi
+          printf '%s\t%s\t%s\n' "$control" "$path" "$symbol" >> "$TMP_DIR/test-control-surface-declarations"
+          printf '%s\n' "$path" >> "$TMP_DIR/test-control-structural-paths"
+        done < "$TMP_DIR/test-control-row-surfaces"
+      else
+        bad=1
+      fi
+      if parse_test_control_path_symbols "$touchpoints" "$TMP_DIR/test-control-row-touchpoints" "tasks.md: $control Production touchpoint"; then
+        while IFS=$'\t' read -r path symbol; do
+          case "$path" in
+            src/testonly|src/testonly/*|*/src/testonly|*/src/testonly/*)
+              fail "tasks.md: $control Production touchpoint '$path' must not be under src/testonly"; bad=1 ;;
+          esac
+          printf '%s\t%s\t%s\n' "$control" "$path" "$symbol" >> "$TMP_DIR/test-control-touchpoint-declarations"
+          printf '%s\n' "$path" >> "$TMP_DIR/test-control-structural-paths"
+        done < "$TMP_DIR/test-control-row-touchpoints"
+      else
+        bad=1
+      fi
+      switch=${wiring%% @ *}
+      rebuilt=${wiring#* @ }
+      wiring_path=${rebuilt%% @ *}
+      validator_path=${rebuilt#* @ }
+      if [[ "$wiring" != "$switch @ $wiring_path @ $validator_path" ]] ||
+         ! printf '%s\n' "$switch" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' ||
+         ! canonical_test_control_repo_path "$wiring_path" ||
+         ! canonical_test_control_repo_path "$validator_path"; then
+        fail "tasks.md: $control Build switch / validator must be 'NAME_ENABLE_TEST_HOOKS @ wiring/path @ validator/testonly-path'"
+        bad=1
+      elif [[ "$switch_identifier_excepted" != yes ]] &&
+           ! printf '%s\n' "$switch" | grep -Eq '^[A-Z][A-Z0-9_]*_ENABLE_TEST_HOOKS$'; then
+        fail "tasks.md: $control Build switch must use uppercase NAME_ENABLE_TEST_HOOKS unless Requirements approved the switch-identifier exception"
+        bad=1
+      elif [[ "$validator_marker_excepted" != yes && "$validator_path" != *testonly* ]]; then
+        fail "tasks.md: $control validator path must contain testonly unless Requirements approved the validator-path-marker exception"
+        bad=1
+      else
+        printf '%s\n' "$wiring_path" "$validator_path" >> "$TMP_DIR/test-control-structural-paths"
+        printf '%s\t%s\t%s\n' "$switch" "$wiring_path" "$validator_path" >> "$TMP_DIR/test-control-validator-tuples"
+      fi
+      if canonical_id_list "$consumers" '^T[0-9][0-9][0-9]$' "$TMP_DIR/test-control-row-consumers" \
+        "tasks.md: $control Consumer tasks/tests" no; then
+        while IFS= read -r id; do
+          task_line=$(grep -E "^- \\[[ xX]\\] ${id}([[:space:]]|$)" "$TASKS" || true)
+          if [[ $(printf '%s\n' "$task_line" | awk 'NF {n++} END {print n+0}') -ne 1 ]] ||
+             printf '%s\n' "$task_line" | grep -Eq 'GateSpec review checkpoint REV-'; then
+            fail "tasks.md: $control consumer $id must resolve to one non-checkpoint task"
+            bad=1
+          fi
+          printf '%s\n' "$id" >> "$TMP_DIR/test-control-consumer-task-ids"
+        done < "$TMP_DIR/test-control-row-consumers"
+      else
+        bad=1
+      fi
+      task_line=$(grep -E "^- \\[[ xX]\\] ${proof}([[:space:]]|$)" "$TASKS" || true)
+      if ! printf '%s\n' "$proof" | grep -Eq '^T[0-9][0-9][0-9]$' ||
+         [[ $(printf '%s\n' "$task_line" | awk 'NF {n++} END {print n+0}') -ne 1 ]] ||
+         printf '%s\n' "$task_line" | grep -Eq 'GateSpec review checkpoint REV-'; then
+        fail "tasks.md: $control Default-build proof task must resolve to one non-checkpoint T###"
+        bad=1
+      fi
+      expected=$((expected + 1))
+    done < "$rows"
+    LC_ALL=C sort -u -o "$TMP_DIR/test-control-structural-paths" "$TMP_DIR/test-control-structural-paths"
+    LC_ALL=C sort -u -o "$TMP_DIR/test-control-validator-tuples" "$TMP_DIR/test-control-validator-tuples"
+    cut -f1,2 "$TMP_DIR/test-control-validator-tuples" | LC_ALL=C sort | uniq -d > "$TMP_DIR/test-control-duplicate-switch-wiring"
+    if [[ -s "$TMP_DIR/test-control-duplicate-switch-wiring" ]]; then
+      fail "tasks.md: each project/bundle switch and build-wiring pair must identify exactly one validator path"
+      bad=1
+    fi
+    cut -f3 "$TMP_DIR/test-control-validator-tuples" | LC_ALL=C sort | uniq -d > "$TMP_DIR/test-control-duplicate-validators"
+    if [[ -s "$TMP_DIR/test-control-duplicate-validators" ]]; then
+      fail "tasks.md: each project/bundle validator path must identify exactly one switch/wiring tuple"
+      bad=1
+    fi
+  fi
+  CURRENT_TEST_CONTROL_MODE=$mode
+  CURRENT_TEST_CONTROL_CLOSURE_HASH=$(test_control_closure_hash) || CURRENT_TEST_CONTROL_CLOSURE_HASH=''
+  is_lower_hex64 "$CURRENT_TEST_CONTROL_CLOSURE_HASH" || { fail "tasks.md: cannot hash normalized Test Control Closure"; bad=1; }
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: Test Control Closure is canonical, bounded, and structurally parseable"
+}
+
 check_tasks_closure() {
-  local checkpoint_exact prior_exact checkpoint_candidates prior_candidates first_phase
-  local before_phase_h2="$TMP_DIR/tasks-before-phase-h2" previous penultimate bad=0 grandfather_before
+  local checkpoint_exact prior_exact test_exact checkpoint_candidates prior_candidates test_candidates first_phase
+  local before_phase_h2="$TMP_DIR/tasks-before-phase-h2" third_last second_last last bad=0 grandfather_before
   checkpoint_exact=$(grep -Fxc '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' "$TASKS" || true)
   prior_exact=$(grep -Fxc '## GateSpec Prior Review Closure *(gatespec: mandatory)*' "$TASKS" || true)
   checkpoint_candidates=$(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Checkpoint Closure' "$TASKS" || true)
   prior_candidates=$(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Prior Review Closure' "$TASKS" || true)
+  test_exact=$(grep -Fxc '## GateSpec Test Control Closure *(gatespec: mandatory)*' "$TASKS" || true)
+  test_candidates=$(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Test Control Closure' "$TASKS" || true)
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]]; then
+    if [[ "$test_exact" -ne 1 || "$test_candidates" -ne 1 ]]; then
+      fail "tasks.md: Protocol v3 requires one exact mandatory GateSpec Test Control Closure section"
+      return
+    fi
+  elif [[ "$test_candidates" -ne 0 ]]; then
+    fail "tasks.md: legacy Protocol v1/v2 must not contain the Protocol v3 Test Control Closure"
+    return
+  fi
   if [[ "$checkpoint_candidates" -eq 0 && "$prior_candidates" -eq 0 ]]; then
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]]; then
+      fail "tasks.md: Protocol v3 never grandfathers missing Checkpoint, Prior Review, or Test Control Closure sections"
+      return
+    fi
     grandfather_before=$FAILURES
     if check_complete_tracked_task_review_grandfather; then
       collect_prior_review_findings
@@ -2954,7 +3562,11 @@ check_tasks_closure() {
   fi
   if [[ "$checkpoint_exact" -ne 1 || "$prior_exact" -ne 1 ||
         "$checkpoint_candidates" -ne 1 || "$prior_candidates" -ne 1 ]]; then
-    fail "tasks.md: both GateSpec Closure headings must be exact, unique, and present together"
+    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]]; then
+      fail "tasks.md: all three Protocol v3 GateSpec Closure headings must be exact, unique, and present together"
+    else
+      fail "tasks.md: both legacy GateSpec Closure headings must be exact, unique, and present together"
+    fi
     return
   fi
   first_phase=$(awk '/^## Phase([[:space:]]|$)/ {print NR; exit}' "$TASKS")
@@ -2963,22 +3575,105 @@ check_tasks_closure() {
     return
   fi
   awk -v stop="$first_phase" 'NR < stop && /^## / {print}' "$TASKS" > "$before_phase_h2"
-  previous=$(awk 'NF {previous=current; current=$0} END {print previous}' "$before_phase_h2")
-  penultimate=$(awk 'NF {previous=current; current=$0} END {print current}' "$before_phase_h2")
-  if [[ "$previous" != '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' ||
-        "$penultimate" != '## GateSpec Prior Review Closure *(gatespec: mandatory)*' ]]; then
+  third_last=$(awk 'NF {a=b; b=c; c=$0} END {print a}' "$before_phase_h2")
+  second_last=$(awk 'NF {a=b; b=$0} END {print a}' "$before_phase_h2")
+  last=$(awk 'NF {value=$0} END {print value}' "$before_phase_h2")
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]]; then
+    if [[ "$third_last" != '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' ||
+          "$second_last" != '## GateSpec Prior Review Closure *(gatespec: mandatory)*' ||
+          "$last" != '## GateSpec Test Control Closure *(gatespec: mandatory)*' ]]; then
+      fail "tasks.md: Protocol v3 Closure sections must be the final three H2 sections before the first Phase, in fixed order"
+      bad=1
+    fi
+  elif [[ "$second_last" != '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' ||
+          "$last" != '## GateSpec Prior Review Closure *(gatespec: mandatory)*' ]]; then
     fail "tasks.md: Closure sections must be the final two H2 sections before the first Phase, in fixed order"
     bad=1
   fi
   collect_required_closure_contracts
   check_checkpoint_closure_table
+  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 ]]; then
+    check_test_control_closure_table
+  fi
   check_prior_review_closure_table
   [[ "$bad" -eq 0 ]] && pass "tasks.md: mandatory Closure sections are exact and correctly positioned"
+}
+
+extract_retask_stable_test_control_contract() {
+  local tasks_file="$1" output="$2" context="$3"
+  local body="$TMP_DIR/retask-test-control-body" mode mode_lines invalid
+  local header separator
+  header='| Control | Verification gap / production invariant | Test-only surface | Production touchpoint | Allowed effect / lifetime | Build switch / validator | Consumer tasks/tests | Default-build proof task |'
+  separator='|---|---|---|---|---|---|---|---|'
+  : > "$output"
+  if [[ $(grep -Fxc '## GateSpec Test Control Closure *(gatespec: mandatory)*' "$tasks_file" || true) -ne 1 ]] ||
+     [[ $(grep -cE '^[[:space:]]*#{1,6}[[:space:]]+GateSpec Test Control Closure' "$tasks_file" || true) -ne 1 ]]; then
+    fail "$context: archived Protocol v3 tasks require one exact Test Control Closure"
+    return 1
+  fi
+  section_body "$tasks_file" 'GateSpec Test Control Closure' > "$body"
+  mode=$(markdown_field_value "$body" 'Mode')
+  mode_lines=$(markdown_field_line_numbers "$body" 'Mode')
+  if [[ $(printf '%s\n' "$mode_lines" | awk 'NF {n++} END {print n+0}') -ne 1 ]] ||
+     [[ "$mode" != none && "$mode" != isolated ]]; then
+    fail "$context: archived Test Control Closure requires one exact Mode"
+    return 1
+  fi
+  invalid=$(awk -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ {next}
+    !mode {
+      if ($0 != "- **Mode**: `none`" && $0 != "- **Mode**: `isolated`") print NR ":" $0
+      mode=1; next
+    }
+    !head {if ($0 != header) print NR ":" $0; head=1; next}
+    !sep {if ($0 != separator) print NR ":" $0; sep=1; next}
+    {
+      if ($0 !~ /^\| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \| [^|[:space:]]([^|]*[^|[:space:]])? \|$/) print NR ":" $0
+    }
+    END {if (!mode || !head || !sep) print "missing canonical preamble"}
+  ' "$body")
+  if [[ -n "$invalid" ]]; then
+    fail "$context: archived Test Control Closure is non-canonical"
+    return 1
+  fi
+  printf 'Mode\t%s\n' "$mode" > "$output"
+  awk -F '|' -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ || /^- \*\*Mode\*\*:/ || $0 == header || $0 == separator {next}
+    {
+      for (i=2; i<=7; i++) {
+        value=$i; sub(/^ /, "", value); sub(/ $/, "", value)
+        printf "%s%s", (i == 2 ? "" : "\t"), value
+      }
+      print ""
+    }
+  ' "$body" >> "$output"
+  if [[ $(awk 'END {print NR+0}' "$output") -lt 2 ]]; then
+    fail "$context: archived Test Control Closure has no canonical row"
+    return 1
+  fi
+}
+
+check_retask_test_control_immutability() {
+  local archive="$1" context="${1#"$FEATURE_DIR"/}"
+  local current="$TMP_DIR/current-retask-test-control-stable"
+  local historical="$TMP_DIR/historical-retask-test-control-stable"
+  if ! extract_retask_stable_test_control_contract "$TASKS" "$current" 'tasks.md'; then
+    return 1
+  fi
+  if ! extract_retask_stable_test_control_contract "$archive/tasks.md" "$historical" "$context/tasks.md"; then
+    return 1
+  fi
+  if ! cmp -s "$current" "$historical"; then
+    fail "tasks.md: retask archive '$context' changes immutable Test Control Mode/stable columns; retask may only rebind consumer/proof T### IDs"
+    return 1
+  fi
+  pass "tasks.md: retask archive '$context' preserves Test Control Mode and stable columns"
 }
 
 check_historical_task_request_file() {
   local file="$1" expected_round="$2" previous_hash="$3" context protocol id round scope
   local spec_hash plan_hash attachments_hash tasks_hash source_hash epoch ia_hash handoff preserved
+  local tc_mode tc_closure tc_manifest tc_default tc_explicit
   local baseline base subject task_ids changed final_delta previous previous_line tests_line hash_line
   local before="$FAILURES" expected_source
   HISTORICAL_REQUEST_BASIS_MATCH=no
@@ -2992,11 +3687,22 @@ check_historical_task_request_file() {
   HISTORICAL_REQUEST_IA_HASH=''
   HISTORICAL_REQUEST_HANDOFF=''
   HISTORICAL_REQUEST_PRESERVED=''
+  HISTORICAL_REQUEST_TC_MODE=''
   [[ -f "$file" ]] || { fail "historical REV-TASKS: request file is missing"; return 1; }
   context=${file#"$FEATURE_DIR"/}
   check_receipt_line_whitelist "$file" request "$context"
   protocol=$(markdown_field_value "$file" 'Protocol-Version')
-  if [[ "$protocol" == 2 ]]; then
+  if [[ "$protocol" == 3 ]]; then
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Test-Control-Mode' 'Test-Control-Closure-SHA256' 'Test-Control-Subject-Manifest-SHA256' \
+      'Default-OFF-Evidence-SHA256' 'Explicit-ON-Evidence-SHA256' \
+      'Execution-Epoch' 'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' 'Implementation-Baseline' \
+      'Base-Commit' 'Subject-Commit' 'Task-IDs' 'Changed-Paths-SHA256' \
+      'Final-Delta-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  elif [[ "$protocol" == 2 ]]; then
     check_ordered_fields "$file" "$context" \
       'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
       'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
@@ -3026,6 +3732,11 @@ check_historical_task_request_file() {
   plan_hash=$(markdown_field_value "$file" 'Plan-Content-SHA256')
   attachments_hash=$(markdown_field_value "$file" 'Design-Attachments-SHA256')
   tasks_hash=$(markdown_field_value "$file" 'Tasks-Definition-SHA256')
+  tc_mode=$(markdown_field_value "$file" 'Test-Control-Mode')
+  tc_closure=$(markdown_field_value "$file" 'Test-Control-Closure-SHA256')
+  tc_manifest=$(markdown_field_value "$file" 'Test-Control-Subject-Manifest-SHA256')
+  tc_default=$(markdown_field_value "$file" 'Default-OFF-Evidence-SHA256')
+  tc_explicit=$(markdown_field_value "$file" 'Explicit-ON-Evidence-SHA256')
   epoch=$(markdown_field_value "$file" 'Execution-Epoch')
   source_hash=$(markdown_field_value "$file" 'Source-Design-Content-SHA256')
   ia_hash=$(markdown_field_value "$file" 'Implementation-Adjustments-SHA256')
@@ -3038,7 +3749,7 @@ check_historical_task_request_file() {
   changed=$(markdown_field_value "$file" 'Changed-Paths-SHA256')
   final_delta=$(markdown_field_value "$file" 'Final-Delta-SHA256')
   previous=$(markdown_field_value "$file" 'Previous-Verdict-SHA256')
-  case "$protocol" in 1|2) ;; *) fail "$context: Protocol-Version must be 1 or 2" ;; esac
+  case "$protocol" in 1|2|3) ;; *) fail "$context: Protocol-Version must be 1, 2, or 3" ;; esac
   [[ "$id" == REV-TASKS ]] || fail "$context: Review-ID must be REV-TASKS"
   [[ "$round" == "$expected_round" ]] || fail "$context: Round must be $expected_round"
   [[ "$scope" == TASKS ]] || fail "$context: Scope must be TASKS"
@@ -3050,7 +3761,7 @@ check_historical_task_request_file() {
         "$task_ids" != none || "$changed" != not-applicable ]]; then
     fail "$context: historical TASKS Git and Task-IDs fields must use their fixed not-applicable/none values"
   fi
-  if [[ "$protocol" == 2 ]]; then
+  if protocol_has_execution_state "$protocol"; then
     printf '%s\n' "$epoch" | grep -Eq '^E[1-9][0-9]*$' || fail "$context: Execution-Epoch must be E<n>"
     if [[ "$source_hash" != not-applicable ]] && ! is_lower_hex64 "$source_hash"; then
       fail "$context: Source-Design-Content-SHA256 must be not-applicable or lowercase 64-hex"
@@ -3064,7 +3775,16 @@ check_historical_task_request_file() {
     fi
     [[ "$final_delta" == not-applicable ]] || fail "$context: TASKS Final-Delta-SHA256 must be not-applicable"
   elif [[ -n "$epoch$source_hash$ia_hash$handoff$preserved$final_delta" ]]; then
-    fail "$context: Protocol v1 must not contain Protocol v2 fields"
+    fail "$context: Protocol v1 must not contain Protocol v2/v3 execution fields"
+  fi
+  if [[ "$protocol" == 3 ]]; then
+    [[ "$tc_mode" == none || "$tc_mode" == isolated ]] || fail "$context: Test-Control-Mode must be none or isolated"
+    is_lower_hex64 "$tc_closure" || fail "$context: Test-Control-Closure-SHA256 must be lowercase 64-hex"
+    if [[ "$tc_manifest" != not-applicable || "$tc_default" != not-applicable || "$tc_explicit" != not-applicable ]]; then
+      fail "$context: historical REV-TASKS Test Control subject/evidence fields must be not-applicable"
+    fi
+  elif [[ -n "$tc_mode$tc_closure$tc_manifest$tc_default$tc_explicit" ]]; then
+    fail "$context: Protocol v1/v2 must not contain Protocol v3 Test Control fields"
   fi
   check_request_tests "$file" TASKS "$context" REV-TASKS
   check_self_hash "$file" 'Request-SHA256' "$context"
@@ -3078,12 +3798,13 @@ check_historical_task_request_file() {
   HISTORICAL_REQUEST_IA_HASH=$ia_hash
   HISTORICAL_REQUEST_HANDOFF=$handoff
   HISTORICAL_REQUEST_PRESERVED=$preserved
+  HISTORICAL_REQUEST_TC_MODE=$tc_mode
   if [[ -f "$SOURCE_ENTRY" ]]; then expected_source=$(source_design_content_hash) || expected_source=''
   else expected_source=not-applicable; fi
   if [[ "$spec_hash" == "$CURRENT_SPEC_HASH" && "$plan_hash" == "$CURRENT_PLAN_HASH" &&
         "$attachments_hash" == "$CURRENT_ATTACHMENTS_HASH" ]]; then
     if [[ -f "$SOURCE_ENTRY" ]]; then
-      [[ "$protocol" == 2 && "$source_hash" == "$expected_source" ]] && HISTORICAL_REQUEST_BASIS_MATCH=yes
+      protocol_has_execution_state "$protocol" && [[ "$source_hash" == "$expected_source" ]] && HISTORICAL_REQUEST_BASIS_MATCH=yes
     elif [[ "$protocol" == 1 || "$source_hash" == not-applicable ]]; then
       HISTORICAL_REQUEST_BASIS_MATCH=yes
     fi
@@ -3130,7 +3851,8 @@ append_blocker_findings() {
 }
 
 git_tree_blob_manifest_hash() {
-  local commit="$1" kind="$2" tree="$TMP_DIR/git-tree-$kind"
+  local commit="$1" kind="$2"
+  local tree="$TMP_DIR/git-tree-$kind"
   local manifest="$TMP_DIR/git-tree-$kind-manifest" meta path mode type oid rel digest tail
   local source_entry='' saw_source_shard=0
   : > "$manifest"
@@ -3193,7 +3915,7 @@ git_tree_blob_manifest_hash() {
 
 check_archived_v2_handoff() {
   local root="$1" review="$root/reviews/REV-TASKS" round00="$root/reviews/REV-TASKS/round-00-request.md"
-  local context="${root#"$FEATURE_DIR"/}" handoff original epoch source ia_hash preserved
+  local context="${root#"$FEATURE_DIR"/}" handoff original epoch source ia_hash preserved protocol
   local parents spec_blob="$TMP_DIR/archive-handoff-spec" plan_blob="$TMP_DIR/archive-handoff-plan"
   local tasks_blob="$TMP_DIR/archive-handoff-tasks" state_blob="$TMP_DIR/archive-handoff-state"
   local ia_blob="$TMP_DIR/archive-handoff-ia" invalid actual_attachments actual_source actual_preserved bad=0
@@ -3203,6 +3925,7 @@ check_archived_v2_handoff() {
   source=$(markdown_field_value "$round00" 'Source-Design-Content-SHA256')
   ia_hash=$(markdown_field_value "$round00" 'Implementation-Adjustments-SHA256')
   preserved=$(markdown_field_value "$round00" 'Preserved-Reviews-SHA256')
+  protocol=$(markdown_field_value "$round00" 'Protocol-Version')
   if [[ -z "$GIT_ROOT" ]] || ! resolve_git_feature_paths || ! is_git_oid "$handoff" ||
      ! git -C "$GIT_ROOT" cat-file -e "${handoff}^{commit}" 2>/dev/null; then
     fail "tasks.md: $context archived Task-Handoff-Commit must resolve to a commit"
@@ -3266,7 +3989,7 @@ check_archived_v2_handoff() {
     check_ordered_fields "$state_blob" "$context archived pending execution state" \
       'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
       'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
-    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == 2 &&
+    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == "$protocol" &&
        $(markdown_field_value "$state_blob" 'Execution-Epoch') == "$epoch" &&
        $(markdown_field_value "$state_blob" 'Original-Implementation-Baseline') == "$original" &&
        $(markdown_field_value "$state_blob" 'Task-Handoff-Commit') == pending &&
@@ -3292,11 +4015,13 @@ check_archived_v2_handoff() {
       fail "tasks.md: $context archived Task-Handoff IA does not bind round 00"; bad=1;
     }
   fi
-  [[ "$bad" -eq 0 ]] && pass "tasks.md: $context archived v2 Task-Handoff snapshot is reproducible"
+  [[ "$bad" -eq 0 ]] && pass "tasks.md: $context archived v2/v3 Task-Handoff snapshot is reproducible"
 }
 
 append_contributing_archive_manifest() {
   local root="$1" review file rel protocol source_hash tasks_hash latest_request
+  local archive_tc_hash archive_stable archive_mode archive_declared latest_verdict
+  local request_mode verdict_mode verdict_declared
   local git_rel state_invalid state_epoch state_original state_source state_handoff state_preserved
   review="$root/reviews/REV-TASKS"
   [[ -n "$root" ]] || return 0
@@ -3322,12 +4047,38 @@ append_contributing_archive_manifest() {
   if [[ "$tasks_hash" != $(normalized_tasks_hash "$root/tasks.md") ]]; then
     fail "tasks.md: contributing retask archive tasks.md does not match its terminal REV-TASKS request"
   fi
+  if [[ "$protocol" == 3 ]]; then
+    archive_tc_hash=$(test_control_closure_hash_for_file "$root/tasks.md") || archive_tc_hash=''
+    if [[ "$archive_tc_hash" != $(markdown_field_value "$latest_request" 'Test-Control-Closure-SHA256') ]]; then
+      fail "tasks.md: contributing retask archive Test Control Closure does not match its terminal REV-TASKS request"
+    fi
+    archive_stable="$TMP_DIR/contributing-archive-test-control-stable"
+    if extract_retask_stable_test_control_contract "$root/tasks.md" "$archive_stable" \
+      "${root#"$FEATURE_DIR"/}/tasks.md"; then
+      archive_mode=$(awk -F '\t' 'NR == 1 {print $2}' "$archive_stable")
+      if [[ "$archive_mode" == none ]]; then
+        archive_declared=none
+      else
+        archive_declared=$(awk -F '\t' 'NR > 1 {
+          value=value separator $1; separator=", "
+        } END {print value}' "$archive_stable")
+      fi
+      latest_verdict=${latest_request%-request.md}-verdict.md
+      request_mode=$(markdown_field_value "$latest_request" 'Test-Control-Mode')
+      verdict_mode=$(markdown_field_value "$latest_verdict" 'Mode')
+      verdict_declared=$(markdown_field_value "$latest_verdict" 'Declared-Controls')
+      if [[ "$request_mode" != "$archive_mode" || "$verdict_mode" != "$archive_mode" ||
+            "$verdict_declared" != "$archive_declared" ]]; then
+        fail "tasks.md: contributing retask archive terminal request/Audit must exactly bind archived Test Control Mode and declared IDs"
+      fi
+    fi
+  fi
   if grep -Eq '^- \[[xX]\] T[0-9][0-9][0-9]([[:space:]]|$)' "$root/tasks.md"; then
     fail "tasks.md: retask archive contains completed task evidence"
   fi
-  if [[ "$protocol" == 2 ]]; then
+  if protocol_has_execution_state "$protocol"; then
     if [[ ! -f "$root/execution-state.md" ]]; then
-      fail "tasks.md: contributing v2 retask archive is missing execution-state.md"
+      fail "tasks.md: contributing Protocol v2/v3 retask archive is missing execution-state.md"
     else
       state_invalid=$(awk '
         /^[[:space:]]*$/ {next}
@@ -3342,8 +4093,8 @@ append_contributing_archive_manifest() {
       check_ordered_fields "$root/execution-state.md" "${root#"$FEATURE_DIR"/}/execution-state.md" \
         'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
         'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
-      [[ $(markdown_field_value "$root/execution-state.md" 'Protocol-Version') == 2 ]] ||
-        fail "tasks.md: contributing retask archive execution state must use Protocol-Version 2"
+      [[ $(markdown_field_value "$root/execution-state.md" 'Protocol-Version') == "$protocol" ]] ||
+        fail "tasks.md: contributing retask archive execution state must match its receipt protocol"
       state_epoch=$(markdown_field_value "$root/execution-state.md" 'Execution-Epoch')
       state_original=$(markdown_field_value "$root/execution-state.md" 'Original-Implementation-Baseline')
       state_source=$(markdown_field_value "$root/execution-state.md" 'Source-Design-Content-SHA256')
@@ -3368,7 +4119,7 @@ append_contributing_archive_manifest() {
     source_hash=$(markdown_field_value "$latest_request" 'Source-Design-Content-SHA256')
     if [[ "$source_hash" != not-applicable ]]; then
       if [[ ! -f "$root/implementation-adjustments.md" ]]; then
-        fail "tasks.md: contributing Source/v2 retask archive is missing implementation-adjustments.md"
+        fail "tasks.md: contributing Source Protocol v2/v3 retask archive is missing implementation-adjustments.md"
       else
         if [[ $(file_hash "$root/implementation-adjustments.md") != \
               $(markdown_field_value "$latest_request" 'Implementation-Adjustments-SHA256') ]]; then
@@ -3386,7 +4137,7 @@ append_contributing_archive_manifest() {
       fail "tasks.md: no-Source retask archive must not contain implementation-adjustments.md"
     fi
   elif [[ -e "$root/execution-state.md" || -e "$root/implementation-adjustments.md" ]]; then
-    fail "tasks.md: Protocol v1 retask archive must not contain v2 execution state or IA"
+    fail "tasks.md: Protocol v1 retask archive must not contain Protocol v2/v3 execution state or IA"
   fi
 }
 
@@ -3452,15 +4203,17 @@ check_historical_task_chain() {
               "$current_attachments" != "$previous_attachments" ]]; then
           fail "$context: task remediation must retain Spec, Plan, and Design-Attachments hashes"
         fi
-        if [[ "$current_protocol" == 2 ]] &&
+        if protocol_has_execution_state "$current_protocol" &&
            [[ "$current_epoch" != "$previous_epoch" || "$current_source" != "$previous_source" ||
               "$current_ia" != "$previous_ia" || "$current_handoff" != "$previous_handoff" ||
               "$current_preserved" != "$previous_preserved" ]]; then
-          fail "$context: v2 task remediation must retain epoch, Source, IA, handoff, and preserved-review bindings"
+          fail "$context: Protocol v2/v3 task remediation must retain epoch, Source, IA, handoff, and preserved-review bindings"
         fi
       fi
       request_hash=$(markdown_field_value "$request" 'Request-SHA256')
+      HISTORICAL_TASK_AUDIT=yes
       check_verdict_file "$verdict" REV-TASKS "$round" "$request_hash" TASKS "$current_protocol"
+      HISTORICAL_TASK_AUDIT=no
       status=$CHECKED_VERDICT_STATUS
       if [[ "$status" == BLOCKED && "$HISTORICAL_REQUEST_BASIS_MATCH" == yes ]] &&
          ! [[ "$MODE" == retask-eligible && "${TASKS_CLOSURE_POLICY:-required}" == optional &&
@@ -3580,23 +4333,30 @@ collect_prior_review_findings() {
         continue
       fi
       check_historical_task_chain "$archive/reviews/REV-TASKS" "$archive"
-      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 && "$HISTORICAL_CHAIN_PROTOCOL" == 2 ]]; then
-        fail "tasks.md: legacy Protocol v1 cannot follow a Protocol v2 retask archive"
+      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 ]] && protocol_has_execution_state "$HISTORICAL_CHAIN_PROTOCOL"; then
+        fail "tasks.md: legacy Protocol v1 cannot follow a Protocol v2/v3 retask archive"
+      fi
+      if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 && "$HISTORICAL_CHAIN_BASIS_MATCH" == yes ]]; then
+        if [[ "$HISTORICAL_CHAIN_PROTOCOL" != 3 ]]; then
+          fail "tasks.md: a basis-matching Protocol v3 retask archive must itself use Protocol v3"
+        else
+          check_retask_test_control_immutability "$archive" || true
+        fi
       fi
       append_contributing_archive_manifest "$archive"
-      if [[ "$HISTORICAL_CHAIN_PROTOCOL" == 2 ]]; then
+      if protocol_has_execution_state "$HISTORICAL_CHAIN_PROTOCOL"; then
         [[ -f "$archive/execution-state.md" && ! -L "$archive/execution-state.md" ]] ||
-          fail "tasks.md: v2 retask archive '${archive#"$FEATURE_DIR"/}' requires regular execution-state.md"
+          fail "tasks.md: Protocol v2/v3 retask archive '${archive#"$FEATURE_DIR"/}' requires regular execution-state.md"
         if [[ "$HISTORICAL_CHAIN_TERMINAL_SOURCE_HASH" != not-applicable ]]; then
           [[ -f "$archive/implementation-adjustments.md" && ! -L "$archive/implementation-adjustments.md" ]] ||
-            fail "tasks.md: Source/v2 retask archive '${archive#"$FEATURE_DIR"/}' requires regular implementation-adjustments.md"
+            fail "tasks.md: Source Protocol v2/v3 retask archive '${archive#"$FEATURE_DIR"/}' requires regular implementation-adjustments.md"
         elif [[ -e "$archive/implementation-adjustments.md" || -L "$archive/implementation-adjustments.md" ]]; then
-          fail "tasks.md: no-Source v2 retask archive '${archive#"$FEATURE_DIR"/}' must not contain implementation-adjustments.md"
+          fail "tasks.md: no-Source Protocol v2/v3 retask archive '${archive#"$FEATURE_DIR"/}' must not contain implementation-adjustments.md"
         fi
       elif [[ "$HISTORICAL_CHAIN_PROTOCOL" == 1 ]] &&
            [[ -e "$archive/execution-state.md" || -L "$archive/execution-state.md" ||
               -e "$archive/implementation-adjustments.md" || -L "$archive/implementation-adjustments.md" ]]; then
-        fail "tasks.md: v1 retask archive '${archive#"$FEATURE_DIR"/}' must not contain v2 state or IA"
+        fail "tasks.md: v1 retask archive '${archive#"$FEATURE_DIR"/}' must not contain Protocol v2/v3 state or IA"
       fi
     done < <(find "$FEATURE_DIR/.gatespec/archive" -mindepth 1 -maxdepth 1 -name '*-retask' -print | LC_ALL=C sort)
   fi
@@ -3651,7 +4411,7 @@ check_v2_execution_history_continuity() {
     seen=$((seen + 1))
   done < "$commits"
   if [[ "$seen" -eq 0 ]]; then
-    fail "retask eligibility: Protocol v2 requires committed execution-state history"
+    fail "retask eligibility: Protocol v2/v3 requires committed execution-state history"
     return
   fi
   [[ "$CURRENT_ORIGINAL_BASELINE" == "$anchor_original" ]] || {
@@ -3679,7 +4439,7 @@ check_v2_execution_history_continuity() {
       fi
       archive_number=${archive_epoch#E}
       if [[ "$previous_archive_number" -gt 0 && "$archive_number" -le "$previous_archive_number" ]]; then
-        fail "retask eligibility: v2 retask archive epochs must strictly increase in timestamp order"
+        fail "retask eligibility: Protocol v2/v3 retask archive epochs must strictly increase in timestamp order"
         bad=1
       fi
       if ! grep -Fqx -- "$archive_epoch" "$history_epochs"; then
@@ -3690,7 +4450,7 @@ check_v2_execution_history_continuity() {
     done < <(find "$FEATURE_DIR/.gatespec/archive" -mindepth 1 -maxdepth 1 -name '*-retask' -print | LC_ALL=C sort)
   fi
   if [[ "$previous_archive_number" -gt 0 && "$current_number" -le "$previous_archive_number" ]]; then
-    fail "retask eligibility: current execution epoch must be newer than every v2 retask archive"
+    fail "retask eligibility: current execution epoch must be newer than every Protocol v2/v3 retask archive"
     bad=1
   fi
   [[ "$bad" -eq 0 ]] && pass "retask eligibility: Original Baseline and execution epochs are continuous across committed state and retask archives"
@@ -3769,7 +4529,7 @@ check_complete_tracked_task_review_grandfather() {
   local before="$FAILURES"
   [[ -f "$FEATURE_DIR/.gatespec/reviews/REV-TASKS/seal.md" ]] || return 1
   initialize_review_hashes
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     check_execution_state downstream
     [[ "$FAILURES" -eq "$before" ]] && check_implementation_adjustments no
   fi
@@ -3818,13 +4578,13 @@ check_receipt_line_whitelist() {
   local file="$1" kind="$2" context="$3" invalid="$TMP_DIR/receipt-invalid-lines"
   awk -v kind="$kind" '
     function request_pre(line) {
-      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Task-IDs|Changed-Paths-SHA256|Final-Delta-SHA256|Previous-Verdict-SHA256)\*\*: `[^`]+`$/
+      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Scope|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Default-OFF-Evidence-SHA256|Explicit-ON-Evidence-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Task-IDs|Changed-Paths-SHA256|Final-Delta-SHA256|Previous-Verdict-SHA256)\*\*: `[^`]+`$/
     }
     function verdict_pre(line) {
       return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Request-SHA256|Reviewer-Platform|Reviewer-Context-ID|Isolation|Status)\*\*: `[^`]+`$/
     }
     function seal_field(line) {
-      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Final-Delta-SHA256|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/
+      return line ~ /^- \*\*(Protocol-Version|Review-ID|Round|Status|Request-SHA256|Verdict-SHA256|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Default-OFF-Evidence-SHA256|Explicit-ON-Evidence-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Task-Handoff-Commit|Preserved-Reviews-SHA256|Implementation-Baseline|Base-Commit|Subject-Commit|Final-Delta-SHA256|Sealed-At|Seal-SHA256)\*\*: `[^`]+`$/
     }
     /^[[:space:]]*$/ {next}
     kind == "request" {
@@ -3838,12 +4598,13 @@ check_receipt_line_whitelist() {
     kind == "verdict" {
       if (state == 0 && verdict_pre($0)) next
       if (state == 1 && $0 ~ /^- \*\*Verdict-SHA256\*\*: `[^`]+`$/) {state=2; next}
-      if ($0 == "## Tests Run" || $0 == "## Blockers" || $0 == "## Observations" || $0 == "## Limitations") {
+      if ($0 == "## Tests Run" || $0 == "## Test Control Audit" || $0 == "## Blockers" || $0 == "## Observations" || $0 == "## Limitations") {
         state=1
         section=substr($0, 4)
         blocker_active=0
         next
       }
+      if (state == 1 && section == "Test Control Audit" && $0 ~ /^- \*\*(Mode|Declared-Controls|Undeclared-Controls|Orphan-Controls|Default-OFF-Proof|Explicit-ON-Proof|Test-Control-Scale)\*\*: `[^`]+`$/) next
       if (state == 1 && section == "Blockers") {
         if ($0 ~ /^- [^[:space:]](.*[^[:space:]])?$/) {
           blocker_active=($0 ~ /^- BLOCKER:[[:space:]]+/)
@@ -4008,6 +4769,276 @@ git_changed_paths_hash() {
   LC_ALL=C sort "$list" | portable_sha256 | awk '{print $1}'
 }
 
+append_test_control_manifest_object() {
+  local subject="$1" role="$2" declared="$3" allow_tree="$4" context="$5"
+  local listing="$TMP_DIR/test-control-ls-tree" meta object_path mode type oid count=0 bad=0
+  : > "$listing"
+  if [[ "$allow_tree" == yes ]]; then
+    git -C "$GIT_ROOT" ls-tree "$subject" -- "$declared" > "$TMP_DIR/test-control-ls-root" 2>/dev/null || return 1
+    if awk -F $'\t' 'NR == 1 {split($1,a," "); if (a[2] == "tree") ok=1} END {exit !ok}' \
+      "$TMP_DIR/test-control-ls-root"; then
+      git -C "$GIT_ROOT" ls-tree -r "$subject" -- "$declared" > "$listing" 2>/dev/null || return 1
+    else
+      cp "$TMP_DIR/test-control-ls-root" "$listing"
+    fi
+  else
+    git -C "$GIT_ROOT" ls-tree "$subject" -- "$declared" > "$listing" 2>/dev/null || return 1
+  fi
+  while IFS=$'\t' read -r meta object_path; do
+    [[ -n "$object_path" ]] || continue
+    mode=$(printf '%s\n' "$meta" | awk '{print $1}')
+    type=$(printf '%s\n' "$meta" | awk '{print $2}')
+    oid=$(printf '%s\n' "$meta" | awk '{print $3}')
+    if [[ "$type" != blob || ( "$mode" != 100644 && "$mode" != 100755 ) ]]; then
+      fail "$context: Test Control $role '$object_path' must be a tracked regular non-symlink blob at Subject"
+      bad=1
+      continue
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$role" "$declared" "$object_path" "$mode" "$oid" \
+      >> "$TMP_DIR/test-control-subject-manifest"
+    printf '%s\n' "$object_path" >> "$TMP_DIR/test-control-subject-paths"
+    [[ "$role" == test-only-surface ]] && printf '%s\n' "$object_path" >> "$TMP_DIR/test-control-subject-surface-paths"
+    [[ "$role" == validator ]] && printf '%s\n' "$object_path" >> "$TMP_DIR/test-control-subject-validator-paths"
+    case "$role" in
+      production-touchpoint|build-wiring)
+        printf '%s\n' "$object_path" >> "$TMP_DIR/test-control-subject-production-paths"
+        ;;
+    esac
+    count=$((count + 1))
+  done < "$listing"
+  if [[ "$count" -eq 0 ]]; then
+    fail "$context: declared Test Control $role path '$declared' is missing from Subject"
+    bad=1
+  elif [[ "$allow_tree" != yes && "$count" -ne 1 ]]; then
+    fail "$context: Test Control $role '$declared' must resolve to exactly one blob"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]]
+}
+
+test_control_subject_manifest_hash() {
+  local subject="$1" context="$2" control path symbol switch wiring validator bad=0
+  : > "$TMP_DIR/test-control-subject-manifest"
+  : > "$TMP_DIR/test-control-subject-paths"
+  : > "$TMP_DIR/test-control-subject-surface-paths"
+  : > "$TMP_DIR/test-control-subject-validator-paths"
+  : > "$TMP_DIR/test-control-subject-production-paths"
+  while IFS=$'\t' read -r control path symbol; do
+    [[ -n "$path" ]] || continue
+    append_test_control_manifest_object "$subject" test-only-surface "$path" yes "$context" || bad=1
+  done < "$TMP_DIR/test-control-surface-declarations"
+  while IFS=$'\t' read -r control path symbol; do
+    [[ -n "$path" ]] || continue
+    append_test_control_manifest_object "$subject" production-touchpoint "$path" no "$context" || bad=1
+  done < "$TMP_DIR/test-control-touchpoint-declarations"
+  while IFS=$'\t' read -r switch wiring validator; do
+    [[ -n "$switch" ]] || continue
+    append_test_control_manifest_object "$subject" build-wiring "$wiring" no "$context" || bad=1
+    append_test_control_manifest_object "$subject" validator "$validator" no "$context" || bad=1
+  done < "$TMP_DIR/test-control-validator-tuples"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-subject-manifest" "$TMP_DIR/test-control-subject-manifest"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-subject-paths" "$TMP_DIR/test-control-subject-paths"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-subject-surface-paths" "$TMP_DIR/test-control-subject-surface-paths"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-subject-validator-paths" "$TMP_DIR/test-control-subject-validator-paths"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-subject-production-paths" "$TMP_DIR/test-control-subject-production-paths"
+  [[ "$bad" -eq 0 ]] || return 1
+  portable_sha256 < "$TMP_DIR/test-control-subject-manifest" | awk '{print $1}'
+}
+
+check_test_control_subject_manifest() {
+  local subject="$1" recorded="$2" context="$3" actual
+  actual=$(test_control_subject_manifest_hash "$subject" "$context") || actual=''
+  if ! is_lower_hex64 "$recorded" || [[ "$recorded" != "$actual" ]]; then
+    fail "$context: Test-Control-Subject-Manifest-SHA256 does not match declared Subject Git objects"
+    return 1
+  fi
+  pass "$context: Test Control Subject manifest binds declared regular Git objects"
+}
+
+check_test_control_evidence_file() {
+  local file="$1" lane="$2" round="$3" subject="$4" closure="$5" manifest="$6" context="$7"
+  local header separator body="$TMP_DIR/test-control-evidence-table" rows="$TMP_DIR/test-control-evidence-rows"
+  local invalid protocol id recorded_round recorded_lane recorded_subject mode recorded_closure recorded_manifest state
+  local validator switch wiring command scope compile dependency artifact install tests source_coverage test_coverage
+  local compile_hits dependency_hits artifact_hits install_hits result expected_state expected_scope expected_source expected_test
+  local actual_hash tuple_count row_count bad=0 before="$FAILURES"
+  header='| Validator | Build switch | Build wiring | Validator command | Production build scope | Compile manifest SHA256 | Dependency manifest SHA256 | Artifact manifest SHA256 | Install/export/symbol manifest SHA256 | Test manifest SHA256 | Declared source coverage | Declared test coverage | Undeclared compile hits | Undeclared dependency hits | Undeclared artifact hits | Undeclared install/export hits | Result |'
+  separator='|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    fail "$context: required $lane evidence must be a regular non-symlink file"
+    return 1
+  fi
+  invalid=$(awk -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ {next}
+    NR == 1 && $0 == "# GateSpec Test Control Evidence" {next}
+    state == 0 && $0 ~ /^- \*\*(Protocol-Version|Review-ID|Round|Lane|Subject-Commit|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Effective-Switch-State)\*\*: `[^`]+`$/ {next}
+    state == 0 && $0 == "## Validator Results" {state=1; next}
+    state == 1 && $0 == header {state=2; next}
+    state == 2 && $0 == separator {state=3; next}
+    state == 3 && substr($0,1,2) == "| " {
+      count=split($0,cells,"|")
+      rebuilt="|"
+      row_ok=(count == 19 && cells[1] == "" && cells[19] == "")
+      for (i=2; i<=18 && row_ok; i++) {
+        value=cells[i]
+        sub(/^ /,"",value)
+        sub(/ $/,"",value)
+        if (value == "" || value ~ /^[[:space:]]/ || value ~ /[[:space:]]$/) row_ok=0
+        rebuilt=rebuilt " " value " |"
+      }
+      if (row_ok && rebuilt == $0) next
+    }
+    state == 3 && $0 ~ /^- \*\*Evidence-SHA256\*\*: `[0-9a-f]+`$/ {state=4; next}
+    {print NR ":" $0}
+    END {if (state != 4) print "incomplete canonical evidence"}
+  ' "$file")
+  [[ -z "$invalid" ]] || { fail "$context: $lane evidence contains non-canonical fields, table, or prose"; bad=1; }
+  [[ $(sed -n '1p' "$file") == '# GateSpec Test Control Evidence' &&
+     $(grep -cFx '# GateSpec Test Control Evidence' "$file" || true) -eq 1 ]] || {
+    fail "$context: $lane evidence requires its exact line-1 title"; bad=1;
+  }
+  check_ordered_fields "$file" "$context $lane evidence" \
+    'Protocol-Version' 'Review-ID' 'Round' 'Lane' 'Subject-Commit' 'Test-Control-Mode' \
+    'Test-Control-Closure-SHA256' 'Test-Control-Subject-Manifest-SHA256' \
+    'Effective-Switch-State' 'Evidence-SHA256'
+  protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  id=$(markdown_field_value "$file" 'Review-ID')
+  recorded_round=$(markdown_field_value "$file" 'Round')
+  recorded_lane=$(markdown_field_value "$file" 'Lane')
+  recorded_subject=$(markdown_field_value "$file" 'Subject-Commit')
+  mode=$(markdown_field_value "$file" 'Test-Control-Mode')
+  recorded_closure=$(markdown_field_value "$file" 'Test-Control-Closure-SHA256')
+  recorded_manifest=$(markdown_field_value "$file" 'Test-Control-Subject-Manifest-SHA256')
+  state=$(markdown_field_value "$file" 'Effective-Switch-State')
+  [[ "$protocol" == 3 && "$id" == REV-FINAL && "$recorded_round" == "$round" &&
+     "$recorded_lane" == "$lane" && "$recorded_subject" == "$subject" && "$mode" == isolated &&
+     "$recorded_closure" == "$closure" && "$recorded_manifest" == "$manifest" ]] || {
+    fail "$context: $lane evidence global fields do not bind the REV-FINAL request"; bad=1;
+  }
+  if [[ "$lane" == default-off ]]; then
+    expected_state=omitted-default-off
+    expected_scope='production-install-package-when-present'
+    expected_source=absent
+    expected_test=not-applicable
+  else
+    expected_state=explicit-on
+    expected_scope=test-build-only
+    expected_source=complete
+    expected_test=complete
+  fi
+  [[ "$state" == "$expected_state" ]] || { fail "$context: $lane Effective-Switch-State is invalid"; bad=1; }
+  awk -v start='## Validator Results' -v end='- **Evidence-SHA256**:' '
+    $0 == start {inside=1; next}
+    inside && index($0,end) == 1 {exit}
+    inside {print}
+  ' "$file" > "$body"
+  awk -F '|' -v header="$header" -v separator="$separator" '
+    /^[[:space:]]*$/ || $0 == header || $0 == separator {next}
+    {
+      if (NF != 19) {print "INVALID"; next}
+      for (i=2; i<=18; i++) {
+        value=$i; sub(/^ /,"",value); sub(/ $/,"",value)
+        printf "%s%s", (i == 2 ? "" : "\t"), value
+      }
+      print ""
+    }
+  ' "$body" > "$rows"
+  if grep -Fqx INVALID "$rows"; then
+    fail "$context: $lane validator rows must have exactly seventeen columns"
+    bad=1
+  fi
+  grep '^| ' "$body" | grep -Fvx "$header" > "$TMP_DIR/test-control-evidence-raw-rows" || true
+  LC_ALL=C sort -u "$TMP_DIR/test-control-evidence-raw-rows" > "$TMP_DIR/test-control-evidence-raw-sorted"
+  if ! cmp -s "$TMP_DIR/test-control-evidence-raw-rows" "$TMP_DIR/test-control-evidence-raw-sorted"; then
+    fail "$context: $lane validator rows must be unique and C-sorted"
+    bad=1
+  fi
+  : > "$TMP_DIR/test-control-evidence-actual-tuples"
+  while IFS=$'\t' read -r validator switch wiring command scope compile dependency artifact install tests \
+    source_coverage test_coverage compile_hits dependency_hits artifact_hits install_hits result; do
+    [[ -n "$validator" && "$validator" != INVALID ]] || continue
+    printf '%s\t%s\t%s\n' "$switch" "$wiring" "$validator" >> "$TMP_DIR/test-control-evidence-actual-tuples"
+    [[ "$command" == "bash $validator --gatespec-lane $lane" ]] || { fail "$context: $lane validator command is not canonical for '$validator'"; bad=1; }
+    [[ "$scope" == "$expected_scope" && "$source_coverage" == "$expected_source" &&
+       "$test_coverage" == "$expected_test" && "$result" == PASS ]] || {
+      fail "$context: $lane validator '$validator' has invalid scope, coverage, or result"; bad=1;
+    }
+    for actual_hash in "$compile" "$dependency" "$artifact" "$tests"; do
+      is_lower_hex64 "$actual_hash" || { fail "$context: $lane validator manifest hashes must be lowercase 64-hex"; bad=1; break; }
+    done
+    if [[ "$install" != not-applicable ]] && ! is_lower_hex64 "$install"; then
+      fail "$context: $lane install/export/symbol manifest must be not-applicable or lowercase 64-hex"; bad=1
+    fi
+    if [[ "$compile_hits" != 0 || "$dependency_hits" != 0 || "$artifact_hits" != 0 || "$install_hits" != 0 ]]; then
+      fail "$context: $lane validator '$validator' must report zero undeclared hits in every manifest"; bad=1
+    fi
+  done < "$rows"
+  LC_ALL=C sort -u -o "$TMP_DIR/test-control-evidence-actual-tuples" "$TMP_DIR/test-control-evidence-actual-tuples"
+  if ! cmp -s "$TMP_DIR/test-control-validator-tuples" "$TMP_DIR/test-control-evidence-actual-tuples"; then
+    fail "$context: $lane evidence must contain exactly one row per declared validator tuple"
+    bad=1
+  fi
+  tuple_count=$(awk 'NF {n++} END {print n+0}' "$TMP_DIR/test-control-validator-tuples")
+  row_count=$(awk 'NF && $0 != "INVALID" {n++} END {print n+0}' "$rows")
+  [[ "$row_count" -eq "$tuple_count" ]] || { fail "$context: $lane evidence validator row count is incomplete"; bad=1; }
+  check_self_hash "$file" 'Evidence-SHA256' "$context $lane evidence"
+  [[ "$bad" -eq 0 && "$FAILURES" -eq "$before" ]]
+}
+
+check_test_control_final_evidence() {
+  local request="$1" round="$2" context="$3" directory subject closure manifest default_file explicit_file
+  local default_hash explicit_hash bad=0 before="$FAILURES"
+  CURRENT_TEST_CONTROL_EVIDENCE_VALID=no
+  directory=${request%/*}
+  subject=$(markdown_field_value "$request" 'Subject-Commit')
+  closure=$(markdown_field_value "$request" 'Test-Control-Closure-SHA256')
+  manifest=$(markdown_field_value "$request" 'Test-Control-Subject-Manifest-SHA256')
+  default_file="$directory/round-${round}-default-off-evidence.md"
+  explicit_file="$directory/round-${round}-explicit-on-evidence.md"
+  check_test_control_evidence_file "$default_file" default-off "$round" "$subject" "$closure" "$manifest" "$context" || bad=1
+  check_test_control_evidence_file "$explicit_file" explicit-on "$round" "$subject" "$closure" "$manifest" "$context" || bad=1
+  default_hash=$(markdown_field_value "$default_file" 'Evidence-SHA256')
+  explicit_hash=$(markdown_field_value "$explicit_file" 'Evidence-SHA256')
+  [[ "$default_hash" == $(markdown_field_value "$request" 'Default-OFF-Evidence-SHA256') ]] || {
+    fail "$context: Default-OFF-Evidence-SHA256 does not bind its evidence self-hash"; bad=1;
+  }
+  [[ "$explicit_hash" == $(markdown_field_value "$request" 'Explicit-ON-Evidence-SHA256') ]] || {
+    fail "$context: Explicit-ON-Evidence-SHA256 does not bind its evidence self-hash"; bad=1;
+  }
+  if [[ "$bad" -eq 0 && "$FAILURES" -eq "$before" ]]; then
+    CURRENT_TEST_CONTROL_EVIDENCE_VALID=yes
+    pass "$context: both Test Control lane records match canonical tuple, Subject, and hash bindings"
+    return 0
+  fi
+  return 1
+}
+
+check_test_control_receipt_fields() {
+  local file="$1" id="$2" scope="$3" context="$4"
+  local mode closure manifest default_evidence explicit_evidence bad=0
+  mode=$(markdown_field_value "$file" 'Test-Control-Mode')
+  closure=$(markdown_field_value "$file" 'Test-Control-Closure-SHA256')
+  manifest=$(markdown_field_value "$file" 'Test-Control-Subject-Manifest-SHA256')
+  default_evidence=$(markdown_field_value "$file" 'Default-OFF-Evidence-SHA256')
+  explicit_evidence=$(markdown_field_value "$file" 'Explicit-ON-Evidence-SHA256')
+  [[ "$mode" == "${CURRENT_TEST_CONTROL_MODE:-}" ]] || {
+    fail "$context: Test-Control-Mode does not match tasks.md"; bad=1;
+  }
+  [[ "$closure" == "${CURRENT_TEST_CONTROL_CLOSURE_HASH:-}" && -n "$closure" ]] || {
+    fail "$context: Test-Control-Closure-SHA256 does not match normalized tasks closure"; bad=1;
+  }
+  if [[ "$mode" == isolated && "$id" == REV-FINAL && "$scope" == FINAL ]]; then
+    for digest in "$manifest" "$default_evidence" "$explicit_evidence"; do
+      is_lower_hex64 "$digest" || { fail "$context: isolated REV-FINAL Test Control subject/evidence bindings must be lowercase 64-hex"; bad=1; break; }
+    done
+  elif [[ "$manifest" != not-applicable || "$default_evidence" != not-applicable ||
+          "$explicit_evidence" != not-applicable ]]; then
+    fail "$context: non-final or Mode none Test Control subject/evidence fields must be not-applicable"
+    bad=1
+  fi
+  [[ "$bad" -eq 0 ]]
+}
+
 check_request_file() {
   local file="$1" expected_id="$2" expected_round="$3" expected_scope="$4"
   local bind_current="$5" previous_hash="$6" context
@@ -4023,7 +5054,17 @@ check_request_file() {
   fi
   check_receipt_line_whitelist "$file" request "$context"
   request_protocol=$(markdown_field_value "$file" 'Protocol-Version')
-  if [[ "$request_protocol" == 2 ]]; then
+  if [[ "$request_protocol" == 3 ]]; then
+    check_ordered_fields "$file" "$context" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
+      'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
+      'Test-Control-Mode' 'Test-Control-Closure-SHA256' 'Test-Control-Subject-Manifest-SHA256' \
+      'Default-OFF-Evidence-SHA256' 'Explicit-ON-Evidence-SHA256' \
+      'Execution-Epoch' 'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' 'Implementation-Baseline' \
+      'Base-Commit' 'Subject-Commit' 'Task-IDs' 'Changed-Paths-SHA256' \
+      'Final-Delta-SHA256' 'Previous-Verdict-SHA256' 'Request-SHA256'
+  elif [[ "$request_protocol" == 2 ]]; then
     check_ordered_fields "$file" "$context" \
       'Protocol-Version' 'Review-ID' 'Round' 'Scope' 'Spec-Content-SHA256' \
       'Plan-Content-SHA256' 'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' \
@@ -4091,7 +5132,7 @@ check_request_file() {
     [[ "$tasks_hash" == "$CURRENT_TASKS_HASH" ]] || { fail "$context: normalized tasks definition hash is stale"; bad=1; }
   fi
 
-  if [[ "$protocol" == 2 ]]; then
+  if protocol_has_execution_state "$protocol"; then
     [[ "$execution_epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution-Epoch is stale"; bad=1; }
     [[ "$task_handoff" == "$CURRENT_TASK_HANDOFF" ]] || { fail "$context: Task-Handoff-Commit is stale"; bad=1; }
     [[ "$preserved" == "$CURRENT_PRESERVED_HASH" ]] || { fail "$context: Preserved-Reviews-SHA256 is stale"; bad=1; }
@@ -4120,8 +5161,14 @@ check_request_file() {
       fail "$context: Implementation-Adjustments-SHA256 must be not-applicable or lowercase 64-hex"; bad=1
     fi
   elif [[ -n "$execution_epoch$source_hash$ia_hash$task_handoff$preserved$final_delta" ]]; then
-    fail "$context: Protocol v1 must not contain Protocol v2 fields"
+    fail "$context: Protocol v1 must not contain Protocol v2/v3 execution fields"
     bad=1
+  fi
+
+  if [[ "$protocol" == 3 ]]; then
+    check_test_control_receipt_fields "$file" "$expected_id" "$expected_scope" "$context" || bad=1
+  else
+    check_no_test_control_receipt_fields "$file" "$context" || bad=1
   fi
 
   check_task_ids_field "$task_ids" "$context"
@@ -4131,7 +5178,7 @@ check_request_file() {
       fail "$context: TASKS review Git fields must be 'not-applicable'"
       bad=1
     fi
-    if [[ "$protocol" == 2 && "$final_delta" != not-applicable ]]; then
+    if protocol_has_execution_state "$protocol" && [[ "$final_delta" != not-applicable ]]; then
       fail "$context: TASKS Final-Delta-SHA256 must be not-applicable"
       bad=1
     fi
@@ -4158,11 +5205,11 @@ check_request_file() {
          ! git -C "$GIT_ROOT" cat-file -e "${subject}^{commit}" 2>/dev/null; then
       fail "$context: baseline/base/subject must resolve to commits"
       bad=1
-    elif [[ "$protocol" == 2 && "$expected_id" == REV-FINAL ]]; then
+    elif protocol_has_execution_state "$protocol" && [[ "$expected_id" == REV-FINAL ]]; then
       if [[ "$base" != "$CURRENT_ORIGINAL_BASELINE" ]] ||
          ! git -C "$GIT_ROOT" merge-base --is-ancestor "$base" "$baseline" 2>/dev/null ||
          ! git -C "$GIT_ROOT" merge-base --is-ancestor "$baseline" "$subject" 2>/dev/null; then
-        fail "$context: v2 FINAL must use Original Baseline and preserve original -> handoff baseline -> subject ancestry"
+        fail "$context: Protocol v2/v3 FINAL must use Original Baseline and preserve original -> handoff baseline -> subject ancestry"
         bad=1
       else
         actual_changed=$(git_changed_paths_hash "$GIT_ROOT" "$base" "$subject") || actual_changed=''
@@ -4186,7 +5233,7 @@ check_request_file() {
         pass "$context: Git commits, ancestry, and changed-path hash agree"
       fi
     fi
-    if [[ "$protocol" == 2 ]]; then
+    if protocol_has_execution_state "$protocol"; then
       if [[ -f "$SOURCE_ENTRY" ]]; then
         if ! resolve_git_feature_paths || ! git -C "$GIT_ROOT" show "$subject:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" > "$TMP_DIR/request-subject-ia" 2>/dev/null; then
           fail "$context: Subject-Commit must contain the complete IA snapshot"
@@ -4212,11 +5259,167 @@ check_request_file() {
         bad=1
       fi
     fi
+    if [[ "$protocol" == 3 && "$expected_id" == REV-FINAL &&
+          "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated ]]; then
+      check_test_control_subject_manifest "$subject" \
+        "$(markdown_field_value "$file" 'Test-Control-Subject-Manifest-SHA256')" "$context" || bad=1
+      check_test_control_final_evidence "$file" "$expected_round" "$context" || bad=1
+    fi
   fi
 
   check_request_tests "$file" "$expected_scope" "$context" "$expected_id"
   check_self_hash "$file" 'Request-SHA256' "$context"
   [[ "$bad" -eq 0 ]] && pass "$context: request fields match review scope and current artifact contract"
+}
+
+check_test_control_audit() {
+  local file="$1" id="$2" scope="$3" status="$4" context="$5"
+  local body="$TMP_DIR/test-control-audit" mode declared undeclared orphan default_proof explicit_proof scale
+  local expected_declared expected_default expected_explicit value metric range lower upper bad=0
+  local scale_shape_ok=no additions_lower additions_upper churn_lower churn_upper
+  local touchpoints_lower touchpoints_upper actual_touchpoints
+  section_body "$file" 'Test Control Audit' > "$body"
+  check_ordered_fields "$body" "$context Test Control Audit" \
+    'Mode' 'Declared-Controls' 'Undeclared-Controls' 'Orphan-Controls' \
+    'Default-OFF-Proof' 'Explicit-ON-Proof' 'Test-Control-Scale'
+  if grep -vE '^[[:space:]]*$|^- \*\*(Mode|Declared-Controls|Undeclared-Controls|Orphan-Controls|Default-OFF-Proof|Explicit-ON-Proof|Test-Control-Scale)\*\*: `[^`]+`$' "$body" >/dev/null 2>&1; then
+    fail "$context: Test Control Audit permits only its seven canonical fields"
+    bad=1
+  fi
+  mode=$(markdown_field_value "$body" 'Mode')
+  declared=$(markdown_field_value "$body" 'Declared-Controls')
+  undeclared=$(markdown_field_value "$body" 'Undeclared-Controls')
+  orphan=$(markdown_field_value "$body" 'Orphan-Controls')
+  default_proof=$(markdown_field_value "$body" 'Default-OFF-Proof')
+  explicit_proof=$(markdown_field_value "$body" 'Explicit-ON-Proof')
+  scale=$(markdown_field_value "$body" 'Test-Control-Scale')
+  if [[ "${HISTORICAL_TASK_AUDIT:-no}" == yes ]]; then
+    [[ "$mode" == "${HISTORICAL_REQUEST_TC_MODE:-}" ]] || { fail "$context: historical Audit Mode does not match its request"; bad=1; }
+  else
+    [[ "$mode" == "${CURRENT_TEST_CONTROL_MODE:-}" ]] || { fail "$context: Audit Mode does not match tasks.md"; bad=1; }
+  fi
+  if [[ "$mode" == none ]]; then
+    expected_declared=none
+    expected_default=not-applicable
+    expected_explicit=not-applicable
+  else
+    expected_declared=$(awk 'BEGIN {sep=""} NF {printf "%s%s",sep,$0; sep=", "} END {print ""}' "$TMP_DIR/test-control-ids")
+    if [[ "$id" == REV-FINAL && "$scope" == FINAL ]]; then
+      expected_default=verified
+      expected_explicit=verified
+    else
+      expected_default=pending-REV-FINAL
+      expected_explicit=pending-REV-FINAL
+    fi
+  fi
+  if [[ "${HISTORICAL_TASK_AUDIT:-no}" == yes ]]; then
+    if [[ "$mode" == none ]]; then
+      [[ "$declared" == none ]] || { fail "$context: historical Mode none audit must declare no controls"; bad=1; }
+    elif ! canonical_id_list "$declared" '^TC-[0-9][0-9][0-9]$' "$TMP_DIR/historical-audit-controls" \
+      "$context: historical Audit Declared-Controls" no; then
+      bad=1
+    fi
+  else
+    [[ "$declared" == "$expected_declared" ]] || { fail "$context: Audit Declared-Controls must exactly cover tasks.md"; bad=1; }
+  fi
+  case "$undeclared" in none|found) ;; *) fail "$context: Audit Undeclared-Controls must be none or found"; bad=1 ;; esac
+  if [[ "$orphan" != none ]]; then
+    if ! canonical_id_list "$orphan" '^TC-[0-9][0-9][0-9]$' "$TMP_DIR/test-control-audit-orphans" \
+      "$context: Audit Orphan-Controls" no; then
+      bad=1
+    else
+      while IFS= read -r value; do
+        if [[ "${HISTORICAL_TASK_AUDIT:-no}" == yes ]]; then
+          grep -Fqx -- "$value" "$TMP_DIR/historical-audit-controls" || { fail "$context: Audit orphan $value is not declared"; bad=1; }
+        else
+          grep -Fqx -- "$value" "$TMP_DIR/test-control-ids" || { fail "$context: Audit orphan $value is not declared"; bad=1; }
+        fi
+      done < "$TMP_DIR/test-control-audit-orphans"
+    fi
+  fi
+  case "$default_proof" in not-applicable|pending-REV-FINAL|verified|failed) ;; *) fail "$context: invalid Default-OFF-Proof state"; bad=1 ;; esac
+  case "$explicit_proof" in not-applicable|pending-REV-FINAL|verified|failed) ;; *) fail "$context: invalid Explicit-ON-Proof state"; bad=1 ;; esac
+  if [[ "$mode" == isolated ]]; then
+    if [[ "$id" == REV-FINAL && "$scope" == FINAL ]]; then
+      case "$default_proof" in verified|failed) ;; *) fail "$context: isolated REV-FINAL Default-OFF-Proof must be verified or failed"; bad=1 ;; esac
+      case "$explicit_proof" in verified|failed) ;; *) fail "$context: isolated REV-FINAL Explicit-ON-Proof must be verified or failed"; bad=1 ;; esac
+    elif [[ "$default_proof" != pending-REV-FINAL || "$explicit_proof" != pending-REV-FINAL ]]; then
+      fail "$context: isolated REV-TASKS and non-final implementation proofs must both be pending-REV-FINAL"
+      bad=1
+    fi
+  fi
+  if [[ "$status" == PASS && ( "$default_proof" == failed || "$explicit_proof" == failed ) ]]; then
+    fail "$context: PASS Test Control Audit cannot report a failed lane proof"
+    bad=1
+  fi
+  if [[ "$mode" == none && ( "$default_proof" != not-applicable || "$explicit_proof" != not-applicable ) ]]; then
+    fail "$context: Mode none proof states must be not-applicable"
+    bad=1
+  fi
+  if [[ "$status" == PASS ]] &&
+     [[ "$undeclared" != none || "$orphan" != none || "$default_proof" != "$expected_default" ||
+        "$explicit_proof" != "$expected_explicit" ]]; then
+    fail "$context: PASS Test Control Audit must have no undeclared/orphan controls and the exact lane proof state"
+    bad=1
+  fi
+  if [[ "$mode" == none && "$undeclared" == none ]]; then
+    if [[ "$scale" == 'additions=0; churn=0; files=0; touchpoints=0' ]]; then
+      scale_shape_ok=yes
+    else
+      fail "$context: Mode none without an undeclared control must use exact all-zero Test-Control-Scale counts"
+      bad=1
+    fi
+  elif [[ "$scope" == TASKS ]]; then
+    if ! printf '%s\n' "$scale" | grep -Eq '^additions=[0-9]+(\.\.[0-9]+)?; churn=[0-9]+(\.\.[0-9]+)?; files=[0-9]+(\.\.[0-9]+)?; touchpoints=[0-9]+(\.\.[0-9]+)?$'; then
+      fail "$context: REV-TASKS Test-Control-Scale must use canonical nonnegative exact/range values"
+      bad=1
+    else
+      scale_shape_ok=yes
+    fi
+  elif ! printf '%s\n' "$scale" | grep -Eq '^additions=[0-9]+; churn=[0-9]+; files=[0-9]+; touchpoints=[0-9]+$'; then
+      fail "$context: implementation Test-Control-Scale must use exact nonnegative counts"
+      bad=1
+  else
+    scale_shape_ok=yes
+  fi
+  if [[ "$scale_shape_ok" == yes ]]; then
+    for metric in additions churn files touchpoints; do
+      range=$(printf '%s\n' "$scale" | sed -n "s/.*${metric}=\\([0-9][0-9]*\\(\\.\\.[0-9][0-9]*\\)\\{0,1\\}\\).*/\\1/p")
+      lower=${range%%..*}
+      if [[ "$range" == *..* ]]; then upper=${range#*..}; else upper=$lower; fi
+      decimal_le "$lower" "$upper" || {
+        fail "$context: Test-Control-Scale $metric lower bound exceeds upper bound"
+        bad=1
+      }
+      case "$metric" in
+        additions) additions_lower=$lower; additions_upper=$upper ;;
+        churn) churn_lower=$lower; churn_upper=$upper ;;
+        touchpoints) touchpoints_lower=$lower; touchpoints_upper=$upper ;;
+      esac
+    done
+    if ! decimal_le "$additions_lower" "$churn_lower" ||
+       ! decimal_le "$additions_upper" "$churn_upper"; then
+      fail "$context: Test-Control-Scale additions cannot exceed churn"
+      bad=1
+    fi
+    if [[ "${HISTORICAL_TASK_AUDIT:-no}" != yes && "$mode" == isolated &&
+          -f "$TMP_DIR/test-control-touchpoint-declarations" ]]; then
+      cut -f2,3 "$TMP_DIR/test-control-touchpoint-declarations" |
+        LC_ALL=C sort -u > "$TMP_DIR/test-control-unique-touchpoints"
+      actual_touchpoints=$(awk 'NF {n++} END {print n+0}' "$TMP_DIR/test-control-unique-touchpoints")
+      if ! decimal_le "$touchpoints_lower" "$actual_touchpoints" ||
+         ! decimal_le "$actual_touchpoints" "$touchpoints_upper"; then
+        if [[ "$scope" == TASKS ]]; then
+          fail "$context: REV-TASKS Test-Control-Scale touchpoints range must include $actual_touchpoints unique declared production path::symbol touchpoint(s)"
+        else
+          fail "$context: implementation Test-Control-Scale touchpoints must equal $actual_touchpoints unique declared production path::symbol touchpoint(s)"
+        fi
+        bad=1
+      fi
+    fi
+  fi
+  [[ "$bad" -eq 0 ]] && pass "$context: Test Control Audit is canonical and status-consistent"
+  [[ "$bad" -eq 0 ]]
 }
 
 check_verdict_file() {
@@ -4235,7 +5438,12 @@ check_verdict_file() {
   check_ordered_fields "$file" "$context" \
     'Protocol-Version' 'Review-ID' 'Round' 'Request-SHA256' 'Reviewer-Platform' \
     'Reviewer-Context-ID' 'Isolation' 'Status' 'Verdict-SHA256'
-  check_exact_h2_order "$file" "$context" 'Tests Run' 'Blockers' 'Observations' 'Limitations'
+  protocol=$(markdown_field_value "$file" 'Protocol-Version')
+  if [[ "$protocol" == 3 ]]; then
+    check_exact_h2_order "$file" "$context" 'Tests Run' 'Test Control Audit' 'Blockers' 'Observations' 'Limitations'
+  else
+    check_exact_h2_order "$file" "$context" 'Tests Run' 'Blockers' 'Observations' 'Limitations'
+  fi
 
   status_line=$(markdown_field_line_numbers "$file" 'Status')
   tests_line=$(awk '$0 == "## Tests Run" {print NR}' "$file")
@@ -4246,7 +5454,6 @@ check_verdict_file() {
     bad=1
   fi
 
-  protocol=$(markdown_field_value "$file" 'Protocol-Version')
   id=$(markdown_field_value "$file" 'Review-ID')
   round=$(markdown_field_value "$file" 'Round')
   request_hash=$(markdown_field_value "$file" 'Request-SHA256')
@@ -4277,6 +5484,10 @@ check_verdict_file() {
     PASS|BLOCKED) ;;
     *) fail "$context: Status must be PASS or BLOCKED"; bad=1 ;;
   esac
+
+  if [[ "$protocol" == 3 ]]; then
+    check_test_control_audit "$file" "$expected_id" "$expected_scope" "$status" "$context" || bad=1
+  fi
 
   receipt_section_body "$file" 'Tests Run' 'Verdict-SHA256' > "$TMP_DIR/verdict-tests"
   nonblank=$(grep -cE '^- [^[:space:]](.*[^[:space:]])?$' "$TMP_DIR/verdict-tests" || true)
@@ -4341,7 +5552,17 @@ check_seal_file() {
   fi
   check_receipt_line_whitelist "$file" seal "$expected_id seal"
   request_protocol=$(markdown_field_value "$request" 'Protocol-Version')
-  if [[ "$request_protocol" == 2 ]]; then
+  if [[ "$request_protocol" == 3 ]]; then
+    check_ordered_fields "$file" "$expected_id seal" \
+      'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
+      'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Attachments-SHA256' \
+      'Tasks-Definition-SHA256' 'Test-Control-Mode' 'Test-Control-Closure-SHA256' \
+      'Test-Control-Subject-Manifest-SHA256' 'Default-OFF-Evidence-SHA256' \
+      'Explicit-ON-Evidence-SHA256' 'Execution-Epoch' 'Source-Design-Content-SHA256' \
+      'Implementation-Adjustments-SHA256' 'Task-Handoff-Commit' 'Preserved-Reviews-SHA256' \
+      'Implementation-Baseline' 'Base-Commit' 'Subject-Commit' 'Final-Delta-SHA256' \
+      'Sealed-At' 'Seal-SHA256'
+  elif [[ "$request_protocol" == 2 ]]; then
     check_ordered_fields "$file" "$expected_id seal" \
       'Protocol-Version' 'Review-ID' 'Round' 'Status' 'Request-SHA256' 'Verdict-SHA256' \
       'Spec-Content-SHA256' 'Plan-Content-SHA256' 'Design-Attachments-SHA256' \
@@ -4382,7 +5603,7 @@ check_seal_file() {
       bad=1
     fi
   done
-  if [[ "$request_protocol" == 2 ]]; then
+  if protocol_has_execution_state "$request_protocol"; then
     for label in Execution-Epoch Source-Design-Content-SHA256 Implementation-Adjustments-SHA256 \
       Task-Handoff-Commit Preserved-Reviews-SHA256 Final-Delta-SHA256; do
       expected=$(markdown_field_value "$request" "$label")
@@ -4392,6 +5613,19 @@ check_seal_file() {
         bad=1
       fi
     done
+  fi
+  if [[ "$request_protocol" == 3 ]]; then
+    for label in Test-Control-Mode Test-Control-Closure-SHA256 Test-Control-Subject-Manifest-SHA256 \
+      Default-OFF-Evidence-SHA256 Explicit-ON-Evidence-SHA256; do
+      expected=$(markdown_field_value "$request" "$label")
+      actual=$(markdown_field_value "$file" "$label")
+      if [[ "$actual" != "$expected" ]]; then
+        fail "$expected_id seal: $label does not match the sealed request"
+        bad=1
+      fi
+    done
+  else
+    check_no_test_control_receipt_fields "$file" "$expected_id seal" || bad=1
   fi
   if ! printf '%s\n' "$sealed_at" | grep -Eq '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'; then
     fail "$expected_id seal: Sealed-At must be UTC RFC3339"
@@ -4437,7 +5671,14 @@ check_implementation_remediation_commit() {
 
   git -C "$GIT_ROOT" -c core.quotepath=false diff --no-renames --name-only "$prior_subject" "$finding" \
     | LC_ALL=C sort > "$metadata_paths"
-  printf '%s\n' "$request_rel" "$verdict_rel" | LC_ALL=C sort > "$expected_paths"
+  if [[ "$id" == REV-FINAL && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 &&
+        "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated ]]; then
+    printf '%s\n' "$request_rel" "$verdict_rel" \
+      "${review_prefix}${id}/round-${prior_round}-default-off-evidence.md" \
+      "${review_prefix}${id}/round-${prior_round}-explicit-on-evidence.md" | LC_ALL=C sort > "$expected_paths"
+  else
+    printf '%s\n' "$request_rel" "$verdict_rel" | LC_ALL=C sort > "$expected_paths"
+  fi
   if ! cmp -s "$metadata_paths" "$expected_paths"; then
     fail "$id: finding commit must change only its prior request and verdict"
     bad=1
@@ -4479,8 +5720,15 @@ check_review_chain() {
   fi
   invalid=$(find "$directory" -mindepth 1 -maxdepth 1 -print | while IFS= read -r file; do
     rel=${file##*/}
-    if [[ ! -f "$file" || -L "$file" ]] ||
-       ! printf '%s\n' "$rel" | grep -Eq '^(round-(00|01|02)-(request|verdict)\.md|seal\.md)$'; then
+    allowed=no
+    if printf '%s\n' "$rel" | grep -Eq '^(round-(00|01|02)-(request|verdict)\.md|seal\.md)$'; then
+      allowed=yes
+    elif [[ "$id" == REV-FINAL && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 3 &&
+            "${CURRENT_TEST_CONTROL_MODE:-none}" == isolated ]] &&
+         printf '%s\n' "$rel" | grep -Eq '^round-(00|01|02)-(default-off|explicit-on)-evidence\.md$'; then
+      allowed=yes
+    fi
+    if [[ ! -f "$file" || -L "$file" || "$allowed" != yes ]]; then
       printf '%s\n' "$rel"
     fi
   done)
@@ -4520,7 +5768,7 @@ check_review_chain() {
       request_source=$(markdown_field_value "$request" 'Source-Design-Content-SHA256')
       request_handoff=$(markdown_field_value "$request" 'Task-Handoff-Commit')
       request_preserved=$(markdown_field_value "$request" 'Preserved-Reviews-SHA256')
-      if [[ "$i" -gt 0 && "$request_protocol" == 2 ]] &&
+      if [[ "$i" -gt 0 ]] && protocol_has_execution_state "$request_protocol" &&
          [[ "$request_epoch" != "$previous_epoch" || "$request_source" != "$previous_source" ||
             "$request_handoff" != "$previous_handoff" || "$request_preserved" != "$previous_preserved" ]]; then
         fail "$id round $round: remediation must retain execution epoch, Source, task handoff, and preserved-review bindings"
@@ -4579,7 +5827,9 @@ check_review_chain() {
       previous_preserved=$request_preserved
       previous_round=$round
       previous_verdict_file=$verdict
-    elif [[ -e "$request" || -e "$verdict" ]]; then
+    elif [[ -e "$request" || -e "$verdict" ||
+            -e "$directory/round-${round}-default-off-evidence.md" ||
+            -e "$directory/round-${round}-explicit-on-evidence.md" ]]; then
       fail "$id: review files exist after the sealed PASS round"
       bad=1
     fi
@@ -4671,7 +5921,7 @@ check_retask_archive_source_files() {
     find "$FEATURE_DIR/.gatespec/reviews/REV-TASKS" -mindepth 1 -maxdepth 1 -print \
       >> "$sources"
   fi
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     printf '%s\n' "$EXECUTION_STATE" >> "$sources"
     [[ -e "$IA_FILE" || -L "$IA_FILE" ]] && printf '%s\n' "$IA_FILE" >> "$sources"
   fi
@@ -4722,7 +5972,7 @@ check_retask_worktree_paths() {
     case "$path" in
       "$GIT_FEATURE_REL/tasks.md"|"$GIT_FEATURE_REL/.gatespec/reviews/REV-TASKS/"*) ;;
       "$GIT_FEATURE_REL/.gatespec/execution-state.md"|"$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md")
-        if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" != 2 ]]; then
+        if ! protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
           fail "retask eligibility: Protocol v1 must not have execution-state/IA worktree changes"
           bad=1
         fi
@@ -4821,7 +6071,7 @@ check_retask_historical_content() {
       bad=1
       break
     fi
-    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]] &&
+    if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}" &&
        git -C "$GIT_ROOT" show "$commit:$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md" \
          > "$ia_blob" 2>/dev/null && ! canonical_empty_ia_shape "$ia_blob"; then
       fail "retask eligibility: commit $commit records nonempty or non-canonical IA evidence"
@@ -4837,7 +6087,7 @@ check_v2_task_handoff_snapshot() {
   local round00="$review/round-00-request.md" manifest="$TMP_DIR/retask-handoff-manifest"
   local blob="$TMP_DIR/retask-handoff-blob" tasks_blob="$TMP_DIR/retask-handoff-tasks"
   local state_blob="$TMP_DIR/retask-handoff-state" ia_blob="$TMP_DIR/retask-handoff-ia"
-  local rel current invalid expected_tasks expected_epoch expected_source expected_ia expected_preserved bad=0
+  local rel current invalid expected_protocol expected_tasks expected_epoch expected_source expected_ia expected_preserved bad=0
   : > "$manifest"
   if ! append_retask_immutable_artifact_files "$manifest"; then
     fail "retask eligibility: cannot enumerate immutable Task-Handoff snapshot files"
@@ -4851,6 +6101,7 @@ check_v2_task_handoff_snapshot() {
     fi
   done < "$manifest"
   expected_tasks=$(markdown_field_value "$round00" 'Tasks-Definition-SHA256')
+  expected_protocol=$(markdown_field_value "$round00" 'Protocol-Version')
   if ! git -C "$GIT_ROOT" show "$handoff:$GIT_FEATURE_REL/tasks.md" > "$tasks_blob" 2>/dev/null ||
      [[ $(normalized_tasks_hash "$tasks_blob") != "$expected_tasks" ]]; then
     fail "retask eligibility: Task-Handoff tasks snapshot does not bind round-00 Tasks-Definition-SHA256"
@@ -4879,7 +6130,7 @@ check_v2_task_handoff_snapshot() {
     check_ordered_fields "$state_blob" 'Task-Handoff execution-state snapshot' \
       'Protocol-Version' 'Execution-Epoch' 'Original-Implementation-Baseline' 'Task-Handoff-Commit' \
       'Source-Design-Content-SHA256' 'Preserved-Reviews-SHA256' 'Execution-State-SHA256'
-    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == 2 &&
+    [[ $(markdown_field_value "$state_blob" 'Protocol-Version') == "$expected_protocol" &&
        $(markdown_field_value "$state_blob" 'Execution-Epoch') == "$expected_epoch" &&
        $(markdown_field_value "$state_blob" 'Original-Implementation-Baseline') == "$CURRENT_ORIGINAL_BASELINE" &&
        $(markdown_field_value "$state_blob" 'Task-Handoff-Commit') == pending &&
@@ -4914,7 +6165,7 @@ check_retask_product_delta() {
   local allowed="$TMP_DIR/retask-committed-allowlist"
   local manifest="$TMP_DIR/retask-product-immutable" addition_count plan_rel plan_commit plan_additions
   local boundary_fields boundary_paths="$TMP_DIR/retask-boundary-paths" include_scan_start=no
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     boundary=$CURRENT_TASK_HANDOFF
     scan_start=$CURRENT_ORIGINAL_BASELINE
   elif [[ "$kind" == pass ]]; then
@@ -4970,10 +6221,10 @@ check_retask_product_delta() {
     fail "retask eligibility: pre-implementation boundary must be a HEAD ancestor"
     return
   fi
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     boundary_fields=$(git -C "$GIT_ROOT" rev-list --parents -n 1 "$boundary" 2>/dev/null || true)
     if [[ $(printf '%s\n' "$boundary_fields" | awk '{print NF+0}') -ne 2 ]]; then
-      fail "retask eligibility: v2 Task-Handoff commit must have exactly one parent"
+      fail "retask eligibility: Protocol v2/v3 Task-Handoff commit must have exactly one parent"
       return
     fi
     : > "$manifest"
@@ -4986,13 +6237,13 @@ check_retask_product_delta() {
     LC_ALL=C sort -u -o "$allowed" "$allowed"
     if ! git -C "$GIT_ROOT" -c core.quotepath=false diff-tree --root --no-commit-id \
         --name-only -r "$boundary" > "$boundary_paths" 2>/dev/null; then
-      fail "retask eligibility: cannot inspect the v2 Task-Handoff commit"
+      fail "retask eligibility: cannot inspect the Protocol v2/v3 Task-Handoff commit"
       return
     fi
     while IFS= read -r path; do
       [[ -n "$path" ]] || continue
       if ! grep -Fqx -- "$path" "$allowed"; then
-        fail "retask eligibility: v2 Task-Handoff commit contains product or unknown path '$path'"
+        fail "retask eligibility: Protocol v2/v3 Task-Handoff commit contains product or unknown path '$path'"
         bad=1
       fi
     done < "$boundary_paths"
@@ -5016,7 +6267,7 @@ check_retask_product_delta() {
   awk 'NF' "$raw_paths" | LC_ALL=C sort -u > "$paths"
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
-    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+    if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
       case "$path" in
         "$GIT_FEATURE_REL/spec.md"|"$GIT_FEATURE_REL/plan.md"|"$GIT_FEATURE_REL/tasks.md"|\
         "$GIT_FEATURE_REL/research.md"|"$GIT_FEATURE_REL/data-model.md"|"$GIT_FEATURE_REL/quickstart.md"|\
@@ -5029,7 +6280,7 @@ check_retask_product_delta() {
         "$GIT_FEATURE_REL/.gatespec/revalidations/"*|\
         "$GIT_FEATURE_REL/.gatespec/execution-state.md"|\
         "$GIT_FEATURE_REL/.gatespec/implementation-adjustments.md") ;;
-        *) fail "retask eligibility: v2 product or unknown evidence path '$path' changed after Original Baseline"; bad=1 ;;
+        *) fail "retask eligibility: Protocol v2/v3 product or unknown evidence path '$path' changed after Original Baseline"; bad=1 ;;
       esac
     else
       case "$path" in
@@ -5075,7 +6326,7 @@ check_retask_eligibility() {
   case "$ref" in refs/heads/*) pass "retask eligibility: HEAD is attached to a local branch" ;;
     *) fail "retask eligibility: HEAD must be attached to a local branch" ;; esac
 
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     check_execution_state downstream
     [[ "$FAILURES" -eq "$before" ]] && check_implementation_adjustments yes
   else
@@ -5110,7 +6361,7 @@ check_retask_eligibility() {
     [[ "$protocol" == "${ACTIVE_REVIEW_PROTOCOL:-1}" ]] || fail "retask eligibility: BLOCKED chain protocol is stale"
     [[ "$HISTORICAL_CHAIN_TERMINAL_TASKS_HASH" == "$CURRENT_TASKS_HASH" ]] ||
       fail "retask eligibility: terminal BLOCKED request does not bind the current tasks definition"
-    if [[ "$protocol" == 2 ]]; then
+    if protocol_has_execution_state "$protocol"; then
       if [[ -f "$SOURCE_ENTRY" ]]; then
         current_source_hash=$(source_design_content_hash) || current_source_hash=''
         current_ia_hash=$(file_hash "$IA_FILE") || current_ia_hash=''
@@ -5123,7 +6374,7 @@ check_retask_eligibility() {
             "$HISTORICAL_CHAIN_TERMINAL_IA_HASH" != "$current_ia_hash" ||
             "$HISTORICAL_CHAIN_TERMINAL_HANDOFF" != "${CURRENT_TASK_HANDOFF:-}" ||
             "$HISTORICAL_CHAIN_TERMINAL_PRESERVED" != "${CURRENT_PRESERVED_HASH:-}" ]]; then
-        fail "retask eligibility: terminal BLOCKED request does not bind current v2 epoch, Source, IA, handoff, and preserved reviews"
+        fail "retask eligibility: terminal BLOCKED request does not bind current Protocol v2/v3 epoch, Source, IA, handoff, and preserved reviews"
       fi
     fi
   fi
@@ -5132,7 +6383,7 @@ check_retask_eligibility() {
   # predate Closure tables. Revalidating them here prevents a preflight PASS
   # followed by a guaranteed post-regeneration Closure failure.
   collect_prior_review_findings
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && -n "${CURRENT_EXECUTION_EPOCH:-}" &&
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}" && [[ -n "${CURRENT_EXECUTION_EPOCH:-}" &&
         -n "${CURRENT_ORIGINAL_BASELINE:-}" ]]; then
     check_v2_execution_history_continuity
   fi
@@ -5221,6 +6472,13 @@ append_review_chain_files() {
     printf '%s\t%s\n' \
       "$prefix/round-${current}-request.md" "$request" \
       "$prefix/round-${current}-verdict.md" "$verdict" >> "$manifest"
+    if [[ "$id" == REV-FINAL && $(markdown_field_value "$request" 'Protocol-Version') == 3 &&
+          $(markdown_field_value "$request" 'Test-Control-Mode') == isolated ]]; then
+      printf '%s\t%s\n' \
+        "$prefix/round-${current}-default-off-evidence.md" "$directory/round-${current}-default-off-evidence.md" \
+        "$prefix/round-${current}-explicit-on-evidence.md" "$directory/round-${current}-explicit-on-evidence.md" \
+        >> "$manifest"
+    fi
     i=$((i + 1))
   done
   printf '%s\t%s\n' "$prefix/seal.md" "$seal_file" >> "$manifest"
@@ -5413,7 +6671,7 @@ check_post_subject_delta() {
       "$review_prefix"*) ;;
       "$tasks_rel") ;;
       "$acceptance_rel")
-        if [[ "$MODE" != acceptance ]]; then
+        if [[ "$MODE" != acceptance ]] && ! tracked_legacy_acceptance_exists; then
           fail "$id: acceptance metadata exists before the acceptance phase"
           bad=1
         fi
@@ -5512,8 +6770,8 @@ check_implementation_review_gate() {
         fail "$id: all implementation seals must share one Implementation-Baseline"
         bad=1
       fi
-      if [[ "$id" == 'REV-FINAL' && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && "$CHAIN_BASE" != "$CURRENT_ORIGINAL_BASELINE" ]]; then
-        fail "$id: Protocol v2 Base-Commit must equal Original-Implementation-Baseline"
+      if [[ "$id" == 'REV-FINAL' ]] && protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}" && [[ "$CHAIN_BASE" != "$CURRENT_ORIGINAL_BASELINE" ]]; then
+        fail "$id: Protocol v2/v3 Base-Commit must equal Original-Implementation-Baseline"
         bad=1
       elif [[ "$id" == 'REV-FINAL' && "${ACTIVE_REVIEW_PROTOCOL:-1}" == 1 && "$CHAIN_BASE" != "$baseline" ]]; then
         fail "$id: Protocol v1 Base-Commit must equal Implementation-Baseline for cumulative final review"
@@ -5546,7 +6804,7 @@ check_implementation_review_gate() {
     fi
   fi
   if [[ "$REVIEW_ID" == 'REV-FINAL' ]]; then
-    if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 && -f "$SOURCE_ENTRY" && -n "$selected_subject" ]]; then
+    if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}" && [[ -f "$SOURCE_ENTRY" && -n "$selected_subject" ]]; then
       check_source_final_paths "$selected_subject"
     fi
     unchecked=$(grep -cE '^- \[ \] T[0-9][0-9][0-9]([[:space:]]|$)' "$TASKS" || true)
@@ -5563,6 +6821,7 @@ check_implementation_review_gate() {
 check_acceptance_gate() {
   local context='acceptance.md' protocol status accepted_at spec_hash plan_hash attachments_hash tasks_hash
   local epoch source_hash ia_hash original subject seal_hash review_commit final_delta actual_final
+  local tc_mode tc_closure tc_manifest tc_default tc_explicit label
   local final_dir="$FEATURE_DIR/.gatespec/reviews/REV-FINAL" seal="$FEATURE_DIR/.gatespec/reviews/REV-FINAL/seal.md"
   local round request head parent latest seal_rel acceptance_rel changed parent_fields dirty invalid bad=0
   echo ""
@@ -5571,23 +6830,39 @@ check_acceptance_gate() {
   invalid=$(awk '
     /^[[:space:]]*$/ {next}
     NR == 1 && $0 == "# GateSpec Implementation Acceptance" {next}
-    /^- \*\*(Protocol-Version|Status|Accepted-At|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Original-Implementation-Baseline|Final-Subject-Commit|REV-FINAL-Seal-SHA256|Final-Review-Commit|Final-Delta-SHA256|Acceptance-SHA256)\*\*: `[^`]+`$/ {next}
+    /^- \*\*(Protocol-Version|Status|Accepted-At|Spec-Content-SHA256|Plan-Content-SHA256|Design-Attachments-SHA256|Tasks-Definition-SHA256|Test-Control-Mode|Test-Control-Closure-SHA256|Test-Control-Subject-Manifest-SHA256|Default-OFF-Evidence-SHA256|Explicit-ON-Evidence-SHA256|Execution-Epoch|Source-Design-Content-SHA256|Implementation-Adjustments-SHA256|Original-Implementation-Baseline|Final-Subject-Commit|REV-FINAL-Seal-SHA256|Final-Review-Commit|Final-Delta-SHA256|Acceptance-SHA256)\*\*: `[^`]+`$/ {next}
     {print NR ":" $0}
   ' "$ACCEPTANCE")
   [[ -z "$invalid" ]] || { fail "$context: only the canonical acceptance fields are allowed"; bad=1; }
-  check_ordered_fields "$ACCEPTANCE" "$context" \
-    'Protocol-Version' 'Status' 'Accepted-At' 'Spec-Content-SHA256' 'Plan-Content-SHA256' \
-    'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' 'Execution-Epoch' \
-    'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
-    'Original-Implementation-Baseline' 'Final-Subject-Commit' 'REV-FINAL-Seal-SHA256' \
-    'Final-Review-Commit' 'Final-Delta-SHA256' 'Acceptance-SHA256'
   protocol=$(markdown_field_value "$ACCEPTANCE" 'Protocol-Version')
+  if [[ "$protocol" == 3 ]]; then
+    check_ordered_fields "$ACCEPTANCE" "$context" \
+      'Protocol-Version' 'Status' 'Accepted-At' 'Spec-Content-SHA256' 'Plan-Content-SHA256' \
+      'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' 'Test-Control-Mode' \
+      'Test-Control-Closure-SHA256' 'Test-Control-Subject-Manifest-SHA256' \
+      'Default-OFF-Evidence-SHA256' 'Explicit-ON-Evidence-SHA256' 'Execution-Epoch' \
+      'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Original-Implementation-Baseline' 'Final-Subject-Commit' 'REV-FINAL-Seal-SHA256' \
+      'Final-Review-Commit' 'Final-Delta-SHA256' 'Acceptance-SHA256'
+  else
+    check_ordered_fields "$ACCEPTANCE" "$context" \
+      'Protocol-Version' 'Status' 'Accepted-At' 'Spec-Content-SHA256' 'Plan-Content-SHA256' \
+      'Design-Attachments-SHA256' 'Tasks-Definition-SHA256' 'Execution-Epoch' \
+      'Source-Design-Content-SHA256' 'Implementation-Adjustments-SHA256' \
+      'Original-Implementation-Baseline' 'Final-Subject-Commit' 'REV-FINAL-Seal-SHA256' \
+      'Final-Review-Commit' 'Final-Delta-SHA256' 'Acceptance-SHA256'
+  fi
   status=$(markdown_field_value "$ACCEPTANCE" 'Status')
   accepted_at=$(markdown_field_value "$ACCEPTANCE" 'Accepted-At')
   spec_hash=$(markdown_field_value "$ACCEPTANCE" 'Spec-Content-SHA256')
   plan_hash=$(markdown_field_value "$ACCEPTANCE" 'Plan-Content-SHA256')
   attachments_hash=$(markdown_field_value "$ACCEPTANCE" 'Design-Attachments-SHA256')
   tasks_hash=$(markdown_field_value "$ACCEPTANCE" 'Tasks-Definition-SHA256')
+  tc_mode=$(markdown_field_value "$ACCEPTANCE" 'Test-Control-Mode')
+  tc_closure=$(markdown_field_value "$ACCEPTANCE" 'Test-Control-Closure-SHA256')
+  tc_manifest=$(markdown_field_value "$ACCEPTANCE" 'Test-Control-Subject-Manifest-SHA256')
+  tc_default=$(markdown_field_value "$ACCEPTANCE" 'Default-OFF-Evidence-SHA256')
+  tc_explicit=$(markdown_field_value "$ACCEPTANCE" 'Explicit-ON-Evidence-SHA256')
   epoch=$(markdown_field_value "$ACCEPTANCE" 'Execution-Epoch')
   source_hash=$(markdown_field_value "$ACCEPTANCE" 'Source-Design-Content-SHA256')
   ia_hash=$(markdown_field_value "$ACCEPTANCE" 'Implementation-Adjustments-SHA256')
@@ -5608,7 +6883,7 @@ check_acceptance_gate() {
   [[ -f "$request" ]] || { fail "$context: sealed REV-FINAL request is missing"; return; }
   [[ "$subject" == $(markdown_field_value "$request" 'Subject-Commit') ]] || { fail "$context: Final Subject does not match REV-FINAL"; bad=1; }
   [[ "$seal_hash" == $(markdown_field_value "$seal" 'Seal-SHA256') ]] || { fail "$context: REV-FINAL seal hash mismatch"; bad=1; }
-  if [[ "$protocol" == 2 ]]; then
+  if protocol_has_execution_state "$protocol"; then
     [[ "$epoch" == "$CURRENT_EXECUTION_EPOCH" ]] || { fail "$context: Execution Epoch is stale"; bad=1; }
     [[ "$original" == "$CURRENT_ORIGINAL_BASELINE" ]] || { fail "$context: Original Baseline is stale"; bad=1; }
     [[ "$source_hash" == $(markdown_field_value "$request" 'Source-Design-Content-SHA256') ]] || { fail "$context: Source hash does not match REV-FINAL"; bad=1; }
@@ -5616,6 +6891,21 @@ check_acceptance_gate() {
   else
     [[ "$epoch" == not-applicable && "$source_hash" == not-applicable && "$ia_hash" == not-applicable ]] || { fail "$context: Protocol v1 Source/IA/epoch fields must be not-applicable"; bad=1; }
     [[ "$original" == $(markdown_field_value "$request" 'Implementation-Baseline') ]] || { fail "$context: legacy Original Baseline must equal Implementation Baseline"; bad=1; }
+  fi
+  if [[ "$protocol" == 3 ]]; then
+    for label in Test-Control-Mode Test-Control-Closure-SHA256 Test-Control-Subject-Manifest-SHA256 \
+      Default-OFF-Evidence-SHA256 Explicit-ON-Evidence-SHA256; do
+      [[ $(markdown_field_value "$ACCEPTANCE" "$label") == $(markdown_field_value "$request" "$label") ]] || {
+        fail "$context: $label does not match REV-FINAL"; bad=1;
+      }
+    done
+    [[ "$tc_mode" == "${CURRENT_TEST_CONTROL_MODE:-}" &&
+       "$tc_closure" == "${CURRENT_TEST_CONTROL_CLOSURE_HASH:-}" ]] || {
+      fail "$context: Test Control mode/closure is stale"; bad=1;
+    }
+  elif [[ -n "$tc_mode$tc_closure$tc_manifest$tc_default$tc_explicit" ]]; then
+    fail "$context: legacy acceptance must not contain Protocol v3 Test Control fields"
+    bad=1
   fi
   if ! is_git_oid "$subject" || ! is_git_oid "$original" || ! is_git_oid "$review_commit"; then
     fail "$context: baseline, subject, and final review commit must be Git OIDs"; bad=1
@@ -5671,6 +6961,8 @@ check_design_gate() {
   check_decisions
   check_design_detailing
   check_implementation_review_contract
+  check_test_control_policy
+  check_plan_test_control_policy_exceptions
   check_template_remnants "$PLAN"
   check_gate_approval "$PLAN" 'Approved-Design'
   check_vague_words "$PLAN"
@@ -5679,6 +6971,10 @@ check_design_gate() {
 check_spec_gate
 if [[ "$MODE" != 'spec' && "$FAILURES" -eq 0 ]]; then
   check_design_gate
+fi
+if [[ "${ACTIVE_REVIEW_PROTOCOL:-}" == 1 || "${ACTIVE_REVIEW_PROTOCOL:-}" == 2 ||
+      "${ACTIVE_REVIEW_PROTOCOL:-}" == 3 ]]; then
+  enforce_active_protocol_v3
 fi
 if [[ "$FAILURES" -eq 0 ]]; then
   case "$MODE" in
@@ -5716,7 +7012,7 @@ if [[ "$MODE" == 'retask-eligible' && "$FAILURES" -eq 0 ]]; then
   check_retask_eligibility
 fi
 if [[ "$MODE" == 'task-review' && "$FAILURES" -eq 0 ]]; then
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     check_execution_state downstream
     [[ "$FAILURES" -eq 0 ]] && check_implementation_adjustments yes
     if [[ -d "$FEATURE_DIR/checklists" ]] && grep -R -nE '^- \[ \]' "$FEATURE_DIR/checklists" >/dev/null 2>&1; then
@@ -5731,7 +7027,7 @@ if [[ "$MODE" == 'task-review' && "$FAILURES" -eq 0 ]]; then
 fi
 if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-review' ||
         "$MODE" == 'acceptance-candidate' || "$MODE" == 'acceptance' ) && "$FAILURES" -eq 0 ]]; then
-  if [[ "${ACTIVE_REVIEW_PROTOCOL:-1}" == 2 ]]; then
+  if protocol_has_execution_state "${ACTIVE_REVIEW_PROTOCOL:-1}"; then
     check_execution_state downstream
     [[ "$FAILURES" -eq 0 ]] && check_implementation_adjustments no
   fi
@@ -5746,6 +7042,9 @@ if [[ ( "$MODE" == 'implementation-candidate' || "$MODE" == 'implementation-revi
 fi
 if [[ "$MODE" == 'acceptance-candidate' && "$FAILURES" -eq 0 ]]; then
   report_actual_delivery_metrics
+fi
+if [[ "$MODE" == 'acceptance-candidate' && "$FAILURES" -eq 0 ]] && tracked_legacy_acceptance_exists; then
+  check_acceptance_gate
 fi
 if [[ "$MODE" == 'acceptance' && "$FAILURES" -eq 0 ]]; then
   check_acceptance_gate

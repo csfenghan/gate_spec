@@ -1,4 +1,4 @@
-# GateSpec 0.9.0 Gate Protocol
+# GateSpec 0.10.0 Gate Protocol
 
 This document defines Requirements/Design gates, optional Source Design,
 native-task and implementation reviews, final delivery acceptance, hooks,
@@ -300,7 +300,7 @@ Every newly approved plan contains one exact mandatory
 `## Implementation Review Contract` with these fields:
 
 ```markdown
-- **Protocol Version**: `2`
+- **Protocol Version**: `3`
 - **Required Checkpoints**: `REV-FOUNDATION, REV-US1, REV-FINAL`
 - **Review Root**: `.gatespec/reviews`
 - **Task Review**: `REV-TASKS after speckit.analyze; PASS required before speckit.implement`
@@ -340,9 +340,9 @@ Task and implementation review PASS verdicts are not human approvals. A
 reviewer cannot introduce a feature choice, waiver, or scope change. Such a
 finding returns to Requirements or Design diff-approval.
 
-Legacy approved Protocol v1 Plans remain valid only while Source Design is not
-enabled. Source activation independently switches downstream receipts to v2
-without editing the approved Plan.
+Protocol v1/v2 Plans remain readable only for already accepted historical
+deliveries. Any active or unaccepted v1/v2 Plan blocks and requires
+`gatespec.plan --revise`; `--retask` cannot upgrade its protocol.
 
 ## Optional Source Design protocol
 
@@ -360,7 +360,7 @@ invariants, SD-FAIL propagation/recovery/observability, SD-TEST traceability,
 cross-cutting design, bounded freedoms, and prohibited material boundaries.
 Human-relevant source choices use SD<n> and the existing decision mechanism.
 
-REV-SOURCE uses a distinct Protocol v2 SOURCE request. It binds current Spec,
+REV-SOURCE uses a distinct Protocol v3 SOURCE request. It binds current Spec,
 Plan, the original Design Basis with Source excluded, Source baseline commit,
 and Source-Design-Reviewed-SHA256. The reviewed manifest entry digest removes
 the unique Status line and final Gate Approval; shard digests are raw. Thus
@@ -382,6 +382,142 @@ evidence when those bindings are unchanged; the new execution epoch instead
 binds the C-sorted raw revalidation manifest through
 Preserved-Reviews-SHA256.
 
+## Protocol v3 Test Controls
+
+Protocol v3 treats a production test control as an exceptional, explicitly
+closed design surface. Ordinary testing remains unchanged.
+
+Requirements contains the sole deviation channel, nested under Constraint
+Basis with the exact heading
+`### Test Control Policy Exceptions *(gatespec: mandatory)*`. Mode `none` has
+the sole all-`none` row. Mode `approved` has continuous `TCE-001...` rows:
+
+```markdown
+- **Mode**: `none|approved`
+| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |
+|---|---|---|---|---|
+| none | none | none | none | none |
+```
+
+`Rule` is exactly `source-root`, `language-marker`, `formal-api`,
+`switch-identifier`, `control-model`, `touchpoint-shape`, or
+`validator-path-marker`. Each approved row cites exactly one concluded
+Requirements `R<n>` and states a concrete,
+source-auditable replacement plus its consequence. It changes only that named
+semantic rule; bundled rows may cite the same `R<n>`. It cannot name a concrete
+TC, path/symbol, touchpoint, switch,
+wiring, validator, or consumer, and it cannot weaken task-only registration,
+Closure/Audit/evidence/hash schemas, isolated-clone lifecycle, explicit-opt-in
+default-OFF activation, runtime/umbrella-trigger bans, OFF elision, two-lane
+validation, actual-output derivation, consumer/orphan rules, or removal with
+the last consumer. Design copies the body into its mandatory H2 byte-for-byte;
+it cannot add or reinterpret an exception. A legacy Approved Requirements
+artifact with no subsection means Mode `none`, but its v3 Plan still writes the
+canonical none copy.
+
+Every v3 task file
+declares exactly one mode:
+
+- `none`: no production test-only source, build switch, validator, or control
+  consumer exists. The Closure table is the exact eight-cell all-`none` row.
+- `isolated`: every control is a unique consecutive `TC-###` row. Each row
+  names the verification gap or production invariant, test-only surface,
+  production touchpoint, allowed effect and lifetime, dedicated build switch
+  and validator, consumer tasks/tests, and default-build proof task.
+
+Absent matching `source-root`/`language-marker` TCE rows, isolated control paths
+are below a production path ending `src/testonly`, and the language
+namespace/module terminates in `testonly` (or uses leading `TestOnly`/
+`test_only` where namespaces do not exist). A directory, alias, wrapper, or
+re-export alone is not an auditable replacement.
+
+Absent `control-model`/`formal-api` TCE rows, the surface is typed,
+per-instance, and RAII-scoped, and adds no test-shaped product API. A replacement
+must remain source-auditable. Process-global switches and runtime
+configuration/environment activation are outside the non-exemptable boundary.
+Existing dependency injection may be used when it is a real production design
+contract rather than a hidden test toggle; semantic review—not the Bash
+checker—judges that distinction.
+
+Absent a `touchpoint-shape` TCE, each affected production function contains at
+most one visually contiguous dedicated hook macro block. It makes one test-only
+call and feeds the result back into the normal production result/error path;
+mechanics stay in the registered test-only surface.
+
+An isolated project has one dedicated positive build switch, canonically
+`*_ENABLE_TEST_HOOKS` absent a `switch-identifier` TCE; its declared default is
+always OFF. A tracked Bash validator is test-only-named absent a
+`validator-path-marker` TCE and accepts exactly
+`bash <validator> --gatespec-lane default-off` or
+`bash <validator> --gatespec-lane explicit-on`:
+
+1. `default-off` configures the ordinary build with the switch wholly omitted,
+   checks that no default-ON/nonzero definition or test-only symbol leaks into
+   it, and runs the registered default-build proof.
+2. `explicit-on` enables the dedicated switch and runs the registered control
+   consumers. This is an opt-in test build, not a requirement that packaging
+   reject explicit ON and not a release-signing or external-CI contract.
+
+The validator must exercise real configure/build/symbol/consumer checks; an
+echo-only or unconditional-success script is not proof. It and every declared
+test-only source must be tracked regular files, never symlinks.
+Every compile, dependency, artifact, test, and applicable install/export/symbol
+manifest is re-enumerated and hashed from actual lane outputs in the exact
+Subject clone. Literal/precomputed hashes are forbidden, and fresh review
+checks the derivation rather than trusting stdout equality alone.
+
+`REV-TASKS` and every implementation verdict contain exact
+`## Test Control Audit`. The seven ordered fields report mode, declared,
+undeclared, and orphan controls, both lane proofs, and
+`Test-Control-Scale` as `additions=<N|N..N>; churn=<N|N..N>;
+files=<N|N..N>; touchpoints=<N|N..N>`. REV-TASKS may use ordered ranges;
+implementation uses exact integers, and `none` is all zero. For `REV-FINAL`,
+the coordinator first performs
+a local preflight, then the fresh reviewer reruns both lanes against the exact
+Subject. Their canonical evidence paths are
+`round-NN-default-off-evidence.md` and
+`round-NN-explicit-on-evidence.md` in the REV-FINAL review directory.
+The bound Subject manifest C-sorts unique LF-terminated
+`role<TAB>declared-path<TAB>object-path<TAB>git-mode<TAB>blob-oid` rows. Roles
+are exact `test-only-surface`, `production-touchpoint`, `build-wiring`, and
+`validator`; test-only trees expand recursively and every object must be a
+regular `100644`/`100755` blob.
+
+Production and Test-Control scale are reported independently but are not
+forced into mutually exclusive buckets. A changed production touchpoint or
+build-wiring file always remains part of Production delivery metrics; the
+dedicated hook-attributable lines in that file may also contribute to
+Test-Control scale. A surface-only test-only object, validator, or ordinary
+test is excluded from Production only after the switch-omitted lane proves it
+does not enter the production build/install/package surface.
+
+Each evidence sidecar has title `# GateSpec Test Control Evidence`, exact
+global Subject/mode/Closure/manifest/lane/effective-state fields, and one
+`## Validator Results` table. Its C-sorted row per unique validator tuple binds
+validator, switch, wiring, exact lane command, production scope, compile/
+dependency/artifact/install-export-symbol/test manifest hashes, source/test
+coverage, four undeclared-hit counts, and PASS. The default row requires exact
+`omitted-default-off`, `production-install-package-when-present`,
+`absent` source coverage, `not-applicable` test coverage, and four zeros. The
+explicit row requires `explicit-on`, `test-build-only`, complete coverage, and
+the same four zero undeclared-hit counts.
+The coordinator preflights and the fresh reviewer reruns
+`bash <validator> --gatespec-lane <lane>` in isolated Subject checkouts and
+requires its one-row stdout to equal the sidecar row byte for byte. The Bash
+checker validates the bound blobs, canonical sidecars, hashes, tuples, and
+Audit; it does not execute arbitrary project validators.
+
+All v3 requests and seals carry `Test-Control-Mode`,
+`Test-Control-Closure-SHA256`, `Test-Control-Subject-Manifest-SHA256`,
+`Default-OFF-Evidence-SHA256`, and `Explicit-ON-Evidence-SHA256`. SOURCE uses
+`not-applicable` for all five. REV-TASKS and non-final implementation reviews
+bind the mode and Closure and use `not-applicable` for the other three.
+REV-FINAL in `isolated` mode binds real values for all five; REV-FINAL in
+`none` mode binds mode/Closure and uses `not-applicable` for the remaining
+three. Final acceptance copies the REV-FINAL bindings. IA that changes control
+wiring, source changes after the sealed Subject, or missing/swapped/stale/
+wrong-subject lane evidence invalidates the chain.
+
 ## Native task and task-review protocol
 
 Native `speckit.tasks` remains the only creator of `tasks.md`. Every required
@@ -401,8 +537,8 @@ task-local gap in one coherent pass. Its only write boundary is that exact
 product files, Git state, or remotes. A Requirements, human-choice, Design, or
 Source gap blocks and routes back to the corresponding revision protocol.
 
-The refined task file contains exactly two mandatory Closure H2 sections, in
-order, as the final two H2 sections before its first `## Phase`:
+The refined task file contains exactly three mandatory Closure H2 sections, in
+order, as the final three H2 sections before its first `## Phase`:
 
 ```markdown
 ## GateSpec Checkpoint Closure *(gatespec: mandatory)*
@@ -416,6 +552,14 @@ order, as the final two H2 sections before its first `## Phase`:
 | Finding-SHA256 | Source verdict | Required-before | Remediation tasks |
 |---|---|---|---|
 | none | none | none | none |
+
+## GateSpec Test Control Closure *(gatespec: mandatory)*
+
+- **Mode**: `none`
+
+| Control | Verification gap / production invariant | Test-only surface | Production touchpoint | Allowed effect / lifetime | Build switch / validator | Consumer tasks/tests | Default-build proof task |
+|---|---|---|---|---|---|---|---|
+| none | none | none | none | none | none | none | none |
 ```
 
 Checkpoint rows exactly follow Plan order. Each row owns the non-checkpoint
@@ -430,7 +574,7 @@ rejects deferred work or a Retained-baseline violation.
 
 Prior findings come only from current REV-TASKS and
 `.gatespec/archive/*-retask/reviews/REV-TASKS`. A verdict is relevant when its
-Spec, Plan, Design Attachments and, for v2, Source content basis equal the
+Spec, Plan, Design Attachments and, for v3, Source content basis equal the
 current approved basis; tasks/epoch/handoff/IA fields do not determine this
 selection. Each complete raw `- BLOCKER:` Markdown item, including continuation
 lines and their LF bytes, has identity SHA-256 and source
@@ -442,10 +586,10 @@ fresh task reviewer still judges completeness and whether remediation works.
 
 Priority-20 `after_tasks` rejects malformed Closure, missing/duplicate/extra/
 parallel/misplaced checkpoint rows, interval or ref gaps, stale finding rows,
-and mismatched test mapping. Both Closure sections may be absent only when a
-complete current REV-TASKS PASS seal is tracked at HEAD, byte-current, and the
-worktree is clean. One missing section or any malformed section is never
-grandfathered. With Source enabled the checker also requires the approved
+invalid Test Control rows/references, and mismatched test mapping. A v3 task
+file must contain all three; one missing or malformed section always fails.
+Pre-v3 Closure grandfathering is historical only because an accepted delivery
+is not resumable execution. With Source enabled the checker also requires the approved
 Source content hash, SD-* and precise-path refs on every non-checkpoint task,
 and complete coverage of all Source IDs/manifest paths.
 Same-phase parallel work must be disjoint and joined before the checkpoint. No
@@ -464,7 +608,7 @@ so native implementation can safely resume. A current REV-TASKS PASS seal is
 required by the fixed `before_implement` hook.
 The coordinator commits the approved artifacts, tasks, REV-TASKS rounds, and
 seal locally, verifies a clean worktree, and only then runs the task-review
-checker. V2 first binds a clean Task-Handoff commit, execution epoch, unchanged
+checker. V3 first binds a clean Task-Handoff commit, execution epoch, unchanged
 Original Baseline, optional empty IA, and preserved reviews; the later clean
 commit containing the REV-TASKS seal is the Implementation Baseline. Checking
 before it is invalid.
@@ -484,35 +628,36 @@ index blob differs from its working bytes (`MM`/`AM` snapshot ambiguity).
 The comparison is unconditional for every indexed archive source, including
 paths hidden by index flags, and every ancestor must be non-symlink. Existing
 retask archives are exact-tree, tracked/raw-HEAD, chain, payload, handoff, and
-epoch revalidated even when legacy tasks have no Closure tables. An archive
+epoch revalidated. An archive
 source carrying an index flag blocks even if its bytes currently match, because
-its removal is not reproducibly stageable. Product-history inspection begins at the first v1 Plan boundary
-or the v2 Original Baseline, audits every commit path and historical tasks/IA
+its removal is not reproducibly stageable. Product-history inspection begins at
+the v3 Original Baseline, audits every commit path and historical tasks/IA
 blob, and therefore rejects checked tasks or nonempty IA that were later
-restored. V2 additionally binds the complete Task-Handoff tree, anchors the
+restored. V3 additionally binds the complete Task-Handoff tree, anchors the
 unchanged Original Baseline in the first committed execution state, and
 requires gap-free epoch transitions.
-At this entry boundary, existing Closure must be either wholly absent under the
-legacy rule or structurally complete; the old tasks are not required to map the
-new items in the legal unsealed terminal round-02 BLOCKED verdict that they
-could not yet contain. Round-00/01 and prior retask-archive findings, plus every
-existing row, remain strict. Regenerated tasks must map terminal findings after
-the chain moves into the retask archive.
+At this entry boundary, all three existing Closure sections must be
+structurally complete; the old tasks are not required to map new items in the
+legal unsealed terminal round-02 BLOCKED verdict that they could not yet
+contain. Round-00/01 and prior retask-archive findings, plus every existing
+row, remain strict. Regenerated tasks must map terminal findings after the
+chain moves into the retask archive.
 
 The command computes one UTC `YYYYMMDDTHHMMSSZ` timestamp and reserves
 `.gatespec/archive/<timestamp>-retask/`. Any exact target or path-mapping
 collision blocks before writes; it never overwrites, merges, changes suffix,
 or waits for a new timestamp. One local archive commit moves `tasks.md` and
-current `reviews/REV-TASKS`; v2 also archives execution state and IA. A second
+current `reviews/REV-TASKS`; v3 also archives execution state and IA. A second
 local handoff commit contains regenerated tasks/state and no product change.
 No step pushes.
 
-Protocol v1 creates no execution state. Protocol v2 increments the execution
-epoch, preserves Original Baseline, resets Task Handoff to `pending`, binds
+Protocol v3 increments the execution epoch, preserves Original Baseline,
+resets Task Handoff to `pending`, binds
 current Source or `not-applicable`, derives Preserved Reviews, and creates
 canonical empty IA with the exact template None row and no extra fields,
 headings, comments, or prose when
-Source is enabled. Native tasks remains the creator;
+Source is enabled. It never upgrades v1/v2; that requires Plan revision and
+diff re-approval. Native tasks remains the creator;
 the normal refine → check → analyze → fresh REV-TASKS sequence then runs. New
 Prior Review Closure rows retain all basis-matching blockers from current and
 earlier `*-retask` archives.
@@ -552,7 +697,7 @@ latest-touch commit (`git log -1 --format=%H -- <feature-relative-seal-path>`),
 whose blob must equal the current seal. It is constant across all requests; a
 later descendant that merely contains the seal is not the baseline.
 REV-FOUNDATION uses it as Base-Commit; each REV-US<n> uses the preceding stage
-Subject-Commit; v1 REV-FINAL uses the implementation baseline again. V2
+Subject-Commit. V3
 REV-FINAL uses the unchanged Original-Implementation-Baseline and hashes the
 raw NUL-delimited diff-tree stream as Final-Delta-SHA256, while Subject still
 descends from Implementation Baseline. Remediation rounds retain
@@ -603,7 +748,8 @@ local commit.
 | Plan declares an unknown design-evidence schema | Stop; never downgrade or guess a rewrite. |
 | First Source enable | Before code only; archive stale tasks/REV-TASKS and regenerate. |
 | Source revise after code | Preserve patch, compensate to safe Subject, archive, fresh review/approval/revalidation; keep Original Baseline. |
-| `plan --retask` | Only after `retask-eligible`; archive tasks/REV-TASKS (plus v2 state/IA), then regenerate through native tasks and normal closure/review hooks in two local no-push commits. |
+| Active/unaccepted Protocol v1/v2 Plan | Stop and require `gatespec.plan --revise`; accepted legacy remains historical only. |
+| `plan --retask` | Only for Protocol v3 after `retask-eligible`; archive tasks/REV-TASKS plus state/IA, then regenerate through native tasks and normal closure/review hooks in two local no-push commits. Never use it to upgrade protocol. |
 | `--revise` | Archive Source/tasks/reviews/revalidations/execution/IA/acceptance, reopen Draft, preserve baseline, diff re-approve. |
 | `--restart` | Archive phase/downstream Source/execution/review/acceptance artifacts, rebuild template. |
 | `--refresh-constraints` | Recompute spec basis and enter revision flow. |
@@ -652,15 +798,27 @@ Protocol v2 inserts `Execution-Epoch`, `Source-Design-Content-SHA256`,
 `Final-Delta-SHA256` after Changed Paths. Non-final scopes use
 `not-applicable` for Final Delta. SOURCE has a separate minimal schema with
 `Design-Basis-SHA256`, `Source-Design-Reviewed-SHA256`, and
-`Source-Baseline-Commit`; it is not a Plan checkpoint.
+`Source-Baseline-Commit`; it is not a Plan checkpoint. These v1/v2 formats are
+retained only so an accepted historical delivery can still be validated.
+
+Protocol v3 retains the v2 execution and Source fields and inserts the five
+Test Control bindings named above immediately after `Tasks-Definition-SHA256`;
+the separate SOURCE schema inserts them after `Source-Baseline-Commit` and uses
+all five values `not-applicable`. REV-TASKS and
+non-final implementation scopes bind Mode and Closure but use
+`not-applicable` for Subject Manifest and both evidence hashes. REV-FINAL uses
+the mode-specific values defined in the Test Controls section.
 
 The ordered verdict fields are `Protocol-Version`, `Review-ID`, `Round`,
 `Request-SHA256`, `Reviewer-Platform`, `Reviewer-Context-ID`, `Isolation`, and
-`Status`; exact H2 sections `Tests Run`, `Blockers`, `Observations`, and
-`Limitations` follow in that order, then final `Verdict-SHA256`. Status is only
+`Status`; v3 then uses exact H2 sections `Tests Run`, `Test Control Audit`,
+`Blockers`, `Observations`, and `Limitations` in that order, followed by final
+`Verdict-SHA256`. Legacy verdicts omit the Audit. Status is only
 `PASS` or `BLOCKED`; PASS has exactly `- None` under Blockers, while BLOCKED has
 at least one `- BLOCKER: ...` item. Implementation Tests Run covers every
-approved Required Tests string and adds non-empty result text.
+approved Required Tests string and adds non-empty result text. A v3 REV-TASKS
+or implementation verdict also has exact `## Test Control Audit`; omission,
+duplication, or a value inconsistent with the Closure blocks sealing.
 
 Prior Review Closure hashes each complete raw BLOCKER list item separately,
 from its leading `- BLOCKER:` through all continuation lines, with one LF per
@@ -673,8 +831,9 @@ The ordered v1 seal fields are `Protocol-Version`, `Review-ID`, `Round`, `Status
 final `Seal-SHA256`. Each self-hash covers all raw bytes before its own final
 hash-field line. The design-attachments digest hashes the C-sorted
 `relative-path<TAB>file-SHA256<LF>` manifest of research.md, data-model.md,
-quickstart.md, and files under contracts/; v2 excludes the Source bundle. V2
-seals copy all added request bindings. The tasks digest first normalizes
+quickstart.md, and files under contracts/; v2/v3 exclude the Source bundle.
+V2 seals copy their added request bindings; v3 seals additionally copy all five
+Test Control bindings. The tasks digest first normalizes
 CRLF to LF and only valid T### checkbox progress `[xX]` to `[ ]`. Changed paths
 hash the C-sorted output of
 `git diff --no-renames --name-only <base> <subject>`.
@@ -682,13 +841,15 @@ Final Delta hashes the exact output of
 `git diff-tree --raw -z --no-abbrev --no-renames <original> <subject>`.
 
 Acceptance binds current Spec/Plan/attachments/tasks, epoch, Source/IA,
-Original Baseline, Final Subject, REV-FINAL seal, Final Review Commit, and raw
-Final Delta. Its self-hash is final; its direct local commit changes only
-acceptance.md and requires a clean worktree.
+Original Baseline, Final Subject, REV-FINAL seal, Final Review Commit, raw
+Final Delta, and the five Test Control values. Its self-hash is final; its
+direct local commit changes only acceptance.md and requires a clean worktree.
 
 ## Machine-check boundary
 
-Requirements checks cover the marker, mandatory sections, Scope Contract
+Requirements checks cover the marker, mandatory sections, canonical Test
+Control Policy Exceptions schema/provenance (with legacy Approved implicit
+none), Scope Contract
 Schema 1 uniqueness/fields/CAP IDs/admissions/canonical FR-SC coverage/core
 closure and legacy progress split, Delivery Estimate Schema 1 uniqueness/
 ranges/bases/exclusions/confidence and legacy warning,
@@ -704,13 +865,14 @@ rejects a duplicated Plan scope table. It validates syntax, reasoned N/A, and
 code-fence presence; it never claims to prove architectural sufficiency or
 semantic scope necessity.
 
-Tasks-structure checks cover exact contract fields, Closure placement/schema,
+Tasks-structure checks cover exact contract fields, all three Closure sections,
 checkpoint intervals and ref coverage, prior-finding identity/remediation,
-checkpoint/test-set equality, checkpoint row uniqueness/order/non-parallel
-form, legacy grandfather eligibility, and every canonical reviewer-command/
-stop token. Internal retask-eligible mode validates bounded regeneration
-preconditions. Task-review checks validate REV-TASKS request, PASS verdict,
-seal chain, plan basis, and normalized tasks definition.
+Test Control IDs/paths/switch/validator/task refs, checkpoint/test-set equality,
+checkpoint row uniqueness/order/non-parallel form, and every canonical
+reviewer-command/stop token. Internal retask-eligible mode validates bounded v3
+regeneration preconditions. Task-review checks validate REV-TASKS request,
+PASS verdict and Test Control Audit, seal chain, plan basis, and normalized
+tasks definition.
 Implementation-review checks validate the selected REV-ID (REV-FINAL by
 default), bounded rounds, request/verdict/seal chain, subject/upstream hashes,
 PASS-only sealing, and current-scope freshness. Its internal
@@ -718,15 +880,19 @@ PASS-only sealing, and current-scope freshness. Its internal
 and current checkpoint checkmark; final `implementation-review` additionally
 requires the accepted seal/checkmark to be clean and tracked.
 Source modes validate marker, Plan basis, schema/IDs, dual manifests,
-REV-SOURCE and orphan behavior. V2 additionally validates execution/IA blobs,
-Task Handoff, preserved reviews, Original Baseline ancestry, Source/IA path
-reconciliation and raw final delta. Acceptance validates explicit record,
+REV-SOURCE and orphan behavior. V3 additionally validates execution/IA blobs,
+Task Handoff, preserved reviews, Original Baseline ancestry, Source/IA and Test
+Control path reconciliation, raw final delta, exact lane evidence, and the
+sealed Subject manifest. Acceptance validates explicit record,
 parent/metadata-only commit, clean tree, every final binding, and reports final
 Git delivery metrics without turning estimate variance into failure.
 
-Semantic sufficiency, review judgment, reviewer isolation, and test truth remain
-prompt/operator responsibilities. An external runner is needed for signed
-identity or non-bypassable merge/deploy enforcement.
+Semantic sufficiency, review judgment, reviewer isolation, test truth, and the
+arbitrary-language meaning of a purported namespace, RAII type, observer,
+options object, or dependency-injection seam remain prompt/operator
+responsibilities. Regex/path checks provide structural counterexamples; the
+checker never claims they prove those semantics. An external runner is needed
+for signed identity or non-bypassable merge/deploy enforcement.
 
 Native implement has no per-task hook. REV-FOUNDATION and REV-US<n> therefore
 stop execution through the cooperative prompt/task contract; registered

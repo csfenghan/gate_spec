@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.9.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.10.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -17,7 +17,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 | `spec.md` User Scenarios & Testing / Requirements / Success Criteria | native tasks/implement | Requirements checker |
 | GateSpec spec Scope Contract Schema 1 | Design/Source/tasks/review scope boundary | Scope checker + rendered/manual conservation smoke |
 | `plan.md` Technical Context / Constitution Check / Project Structure | native tasks | Design checker |
-| tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows | tasks-structure fixtures |
+| tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows and all three Closure sections | tasks-structure/Test Control fixtures |
 | `.specify/feature.json.feature_directory` | checker/commands | jq → python3 → restricted single-line parser tests |
 | `setup-plan.sh --json` fields | gated plan setup | renderer/install smoke + manual plan smoke |
 | six hook events, ordered multiple entries, and priority | 9 fixed gate/refine/review/acceptance entries | manifest assertions + manual hook smoke |
@@ -81,11 +81,11 @@ In a scratch initialized project:
 11. Re-approve a spec and confirm the old plan fails Requirements basis match.
 12. Generate native tasks with one non-parallel checkpoint row per approved
    REV-ID. Confirm priority-10 `after_tasks` changes only `tasks.md`, closes
-   producer/consumer/test/lifecycle gaps, and writes the two exact Closure
+   producer/consumer/test/lifecycle gaps, and writes the three exact Closure
    tables; priority-20 must reject a missing, duplicate, extra, parallel, or
-   misplaced checkpoint, incomplete task interval/ref coverage, and stale
-   prior-finding row. Confirm a complete current clean tracked legacy PASS is a
-   no-op grandfather, while one missing or malformed Closure section fails.
+   misplaced checkpoint, incomplete task interval/ref coverage, stale
+   prior-finding row, and malformed Test Control row. A v3 task file missing any
+   Closure section fails; pre-v3 work is historical only after acceptance.
 13. Run native analyze. Confirm the same author/analyzer context may coordinate
    REV-TASKS receipts but is forbidden from judging or authoring the verdict;
    obtain judgment from a fresh Claude/Codex context or the manual new-session
@@ -108,13 +108,16 @@ In a scratch initialized project:
     Source), and confirm first enable after any product implementation is
     refused. With Source, change only Status/Gate Approval after REV-SOURCE and
     confirm the seal remains current; change body/shard and confirm it fails.
-16. Confirm Protocol v1 legacy, v2 without Source, and v2 with Source. In v2,
-    verify Task-Handoff, empty IA baseline, exact SD task coverage, IA Subject
-    snapshots, Original Baseline, preserved revalidations, and raw Final Delta.
-    A v2 retask increments only Execution Epoch, preserves Original Baseline,
+16. Confirm new/revised Plans and every active receipt use Protocol v3. Active
+    or unaccepted v1/v2 work must stop at `gatespec.plan --revise`; accepted
+    v1/v2 acceptance records remain historical. `--retask` must never upgrade
+    them. In v3 verify Task-Handoff, empty IA baseline, exact SD task coverage,
+    IA Subject snapshots, Original Baseline, preserved revalidations, raw Final
+    Delta, Test Control Closure, and all five Test Control receipt bindings. A
+    v3 retask increments only Execution Epoch, preserves Original Baseline,
     resets Task Handoff, binds current Source, derives preserved reviews, and
-    resets Source IA to canonical empty. V1 retask creates no state. A material
-    Source departure must block rather than become IA.
+    resets Source IA to canonical empty. A material Source or control-wiring
+    departure must block rather than become IA.
 17. Confirm priority-10 `after_implement` rejects missing/stale REV-FINAL. Its
     PASS automatically reaches priority-20 acceptance; rejection writes
     nothing, acceptance makes one metadata-only local commit, and stale/
@@ -145,6 +148,39 @@ In a scratch initialized project:
     the complete typed API: the card must state that the current `request_id`
     burden remains under the minimum option, recommend Resume only, and defer
     the complete interface refactor without an item-by-item approval prompt.
+21. Exercise the Requirements Test Control Policy Exceptions contract first:
+    canonical Mode `none`, an approved continuous TCE set for every Rule token,
+    exactly one concluded `R<n>` per row (with bundled rows allowed to share),
+    exact Plan copy, and legacy Approved
+    Requirements implicit-none behavior. Missing/malformed rows, unknown or
+    structural-floor Rules, missing decisions, copy drift, concrete hook
+    pre-registration, and non-source-auditable replacements must block. Then
+    exercise both Test Control modes. `none` must use the exact all-`none` row.
+    For `isolated`, verify consecutive TC IDs, `src/testonly` plus terminal
+    namespace/module, typed per-instance RAII, one dedicated default-OFF
+    `*_ENABLE_TEST_HOOKS` switch, a tracked non-symlink test-only-named
+    validator, fixed `default-off|explicit-on` lanes, and concrete consumer and
+    default-proof tasks. The default lane must omit the switch entirely; an
+    explicit OFF argument, default-ON/nonzero definition, fake namespace alias,
+    echo validator, runtime toggle, or product-API test parameter must fail or
+    receive a semantic-review blocker as appropriate. Confirm every v3 verdict
+    has Test Control Audit and REV-FINAL freshly reruns both lanes into the two
+    canonical evidence files. Missing, swapped, stale, wrong-subject evidence,
+    post-seal source drift, and IA control rewiring must fail. Finally present
+    xclaw-style `Open(path, CheckpointCoordinatorOptions)`, generic observer/
+    options, injected `AgentHost` constructor, fake namespace/alias, echo
+    validator, and runtime-toggle proposals to both agents; they must reject
+    hidden product seams without claiming regex proves arbitrary-language
+    semantics. Explicit ON remains an opt-in test build; do not invent a
+    packaging hard-fail or external signing/CI requirement. Make an echo-only
+    validator report literal/precomputed manifest hashes: fresh review must
+    reject it and require re-enumeration from the exact Subject clone's actual
+    build/test and applicable install/export/symbol outputs.
+    Confirm delivery metrics report Production and Test-Control scale
+    separately without forcing disjoint attribution: touchpoint/build-wiring
+    files remain Production, their dedicated hook lines may also count toward
+    Test-Control scale, and only default-OFF-proven surface-only objects,
+    validators, and ordinary tests are excluded from Production.
 
 Run `bash tests/run-all.sh` on Linux and macOS and verify `git status` remains
 clean. If a hook or artifact contract changed, retain the old upper version

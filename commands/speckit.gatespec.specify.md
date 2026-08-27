@@ -68,7 +68,11 @@ If a current GateSpec spec exists:
   production delta proves implementation is already underway. Progressed
   legacy delivery is warning-only and remains byte-for-byte read-only. If it
   is a legacy approval without Delivery Estimate Schema 1, warn without
-  editing it; Design must add the first estimate. Then hand off to
+  editing it; Design must add the first estimate. A legacy Approved
+  Requirements artifact without `### Test Control Policy Exceptions` also
+  remains read-only and deterministically means TCE Mode `none`; a Protocol 3
+  Plan may write the canonical none copy during `plan --revise`. Any desired
+  TCE requires Requirements `--revise` and explicit high-risk approval. Then hand off to
   `__SPECKIT_COMMAND_GATESPEC_PLAN__`.
 - `--revise`: archive Source Design, `tasks.md`, current reviews,
   revalidations, execution state, IA, and acceptance before editing; change
@@ -100,18 +104,22 @@ conclusions must also land in an FR, Acceptance Scenario, Assumption, or scope
 boundary; Constraint Basis alone is not self-containment.
 
 Keep the `## Constraint Basis` heading and its five template field labels
-exactly in English. Unless a higher-priority effective constraint requires a
-different language, write every human-readable field value in Simplified
-Chinese. Preserve `absent`, paths, SHA-256 values, API names, and code
-identifiers verbatim. If a higher-priority language rule wins, record that
-conflict and its resolution explicitly.
+exactly in English. Also keep its mandatory nested
+`### Test Control Policy Exceptions *(gatespec: mandatory)*` section. If no
+higher-priority effective constraint requires a different language,
+write every human-readable field value in Simplified Chinese. Preserve `absent`,
+paths, SHA-256 values, API names, and code identifiers verbatim. If a
+higher-priority language rule wins, record that conflict and its resolution
+explicitly.
 
 - An option conflicting with a constitution `MUST` is not a selectable option.
   Explain why it was excluded; amend the constitution in a separate
   user-directed operation before it can enter a later decision.
 - A constitution `SHOULD` may be deviated from only with a recorded reason.
 - Project/user GateSpec constraints may be exempted only by an explicit user
-  decision recorded in Clarifications now and later in the plan Decision Log.
+  decision recorded in Clarifications. A Test Control policy deviation uses
+  only the dedicated TCE table and rules below; Plan copies its approved result
+  and engineering consequences without asking again.
 - After Requirements approval the snapshot is frozen. A user-constraints hash
   change is warning-only; use `--refresh-constraints` to reopen and replace the
   snapshot. A project constitution change forces requirements re-approval.
@@ -145,6 +153,44 @@ now. Requirements stay at the level of concrete user workflow, external
 behavior, and retained restrictions. Source files, classes, threads, and other
 implementation choices remain Design matters and never create a capability
 row by themselves.
+
+The canonical Test Control policy is a universal engineering boundary, not
+feature scope and not a per-hook human choice. Requirements names the
+observable production invariant and executable success/failure outcome; it
+never requests a concrete testing overload/parameter/getter/state,
+`/src/testonly` surface, hook switch, validator, path::symbol, or TC-###.
+Protocol 3 Design freezes the canonical policy plus any valid Requirements TCE
+overlay, and native tasks later registers an exact control, if any, after
+proving the invariant is otherwise unreachable. No hook receives individual
+approval.
+
+Default the mandatory TCE subsection to exact Mode `none` and its sole
+five-cell all-`none` row. A deviation is legal only when at least two viable
+Requirements options exist, the user explicitly selects it in a high-risk
+`R<n>` card presented alone, and the concluded Clarification states the
+replacement and consequence. Then use Mode `approved` and continuous
+`TCE-001...` rows. `Rule` is exactly one of `source-root`, `language-marker`,
+`formal-api`, `switch-identifier`, `control-model`, `touchpoint-shape`, or
+`validator-path-marker`; the decision cell is the one existing `R<n>` ID.
+Several rows may cite the same single bundled high-risk decision.
+Each row gives a precise replacement source-auditable mechanism and its reason
+and consequence. It may override only that named semantic rule, never infer a
+wildcard exception or pre-register a concrete control, path::symbol,
+touchpoint, switch, wiring, validator, or consumer.
+The canonical table header names this column
+`Replacement source-auditable mechanism`. The Protocol 3
+structural/lifecycle floor remains non-exemptable.
+
+No TCE may weaken native-task-only registration, Closure/Audit/manifest/
+evidence/hash schemas, or isolated-clone lifecycle. It also cannot weaken the
+dedicated explicit opt-in default-OFF switch, runtime/umbrella-trigger ban,
+complete OFF elision, Bash two-lane validation, same normal tests plus ON
+consumers, current-clone output derivation/no-literal-or-echo rule, named-gap
+and real-consumer requirements, orphan ban, or removal boundary. Every
+replacement must remain compatible with that floor. Design, Source, tasks,
+IA, and reviewers cannot create, change, delete, or broaden a TCE; a newly
+needed deviation returns through `gatespec.specify --revise` and fresh
+Requirements approval.
 
 Apply this counterfactual admission test to each capability that is actually in
 view:
@@ -335,8 +381,12 @@ Perform a fresh-eyes adversarial read for contradictions, terminology drift,
 hidden guesses, and misclassification. Map every clarification, default, and
 effective constraint to the body. Confirm technical-only matters did not become
 Requirements choices and no human-relevant consequence was hidden as a default
-or deferral. Resolve findings in the text or return/promote the affected item to
-the inventory and present the next legal batch. Run:
+or deferral. Validate the TCE subsection: Mode `none` has only the exact
+all-`none` row; Mode `approved` has continuous TCE IDs, allowlisted Rule tokens,
+one real concluded `R<n>` per row, precise replacement/consequence cells, no
+concrete hook registration, and no relaxation of the non-exemptable floor.
+Resolve findings in the text or return/promote the affected item to the
+inventory and present the next legal batch. Run:
 
 Estimate the complete approved feature and write exact
 `**Delivery Estimate Schema**: 1` plus one `## Delivery Estimate`. Use
@@ -366,7 +416,8 @@ must be resolved before summary approval.
 Present at most 20 lines: Primary outcome, retained baseline, P1 stories, key
 decisions, approved defaults, explicitly committed delivery items, important
 deferred capabilities, all three Delivery Estimate ranges and confidence,
-material technical matters explicitly deferred to Design, and the mandatory
+material technical matters explicitly deferred to Design, TCE Mode and any
+approved TCE IDs/rules (without soliciting per-hook approval), and the mandatory
 line “what I am least confident about”. Make clear that this one normal
 Requirements summary approval accepts both the Scope Contract and disclosed
 whole-feature size; neither adds another approval mechanism. Remind the user

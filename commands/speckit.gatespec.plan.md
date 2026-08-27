@@ -70,17 +70,31 @@ bash .specify/extensions/gatespec/scripts/bash/check-gate.sh retask-eligible <fe
 A silent zero is the unmarked upstream no-op. On nonzero, print every
 diagnostic verbatim and stop before creating or changing anything; do not
 reinterpret a mechanical failure as prompt-level permission. This dedicated
-mode validates the old checkpoint structure and permits a legacy retask
-candidate only when both Closure sections are absent; if either section exists,
-both must be complete and valid. For this branch, do not call ordinary `tasks-structure` here,
+mode validates the Protocol 3 checkpoint structure and requires all three
+complete Closure sections. Missing, partial, mixed-version, or legacy Closure
+is ineligible; retask never upgrades it. For this branch, do not call ordinary `tasks-structure` here,
 because its normal post-refinement matrix requirement is not the retask entry
 contract. Run only the Design and conditional Source checks as defense in depth
 and apply the non-mechanical Git/archive checks below. Require current Approved
 Requirements and Approved Design; when Source is enabled, require current
-Approved Source Design, REV-SOURCE, and all current revalidations. Select the
-active downstream protocol without coercion: an approved Protocol 1 Plan with
-no Source entry remains v1; a Protocol 2 Plan or any Source entry is v2. Reject
-an unknown version, v1 plus Source, or any inconsistent mixed state.
+Approved Source Design, REV-SOURCE, and all current revalidations. Require the
+active Plan and every current downstream receipt to use Protocol 3. `--retask`
+preserves a protocol and can never upgrade one: an active or unaccepted
+Protocol 1/2 feature fails closed and must return through `--revise`; an
+already Accepted legacy delivery is immutable history and is not retaskable.
+Reject an unknown or mixed version.
+
+`--retask` is not a Test Control revision path. From the current tasks snapshot
+record Mode and, for every TC-###, the Control ID, test-only surface, production
+touchpoint, allowed effect/lifetime, and switch/wiring/validator tuple. A retask
+may later rebind consumer/default-proof T### IDs after task renumbering, but it
+must not add, delete, change, rename, or relocate a control, touchpoint, switch,
+wiring path, or validator. It also preserves the Plan's canonical Policy and
+Requirements-copied TCE section byte-for-byte. If the terminal blocker requires
+any registration change, retask eligibility fails and routes to
+`gatespec.plan --revise` followed by fresh native tasks and fresh REV-TASKS. A
+new or changed TCE first requires `gatespec.specify --revise`, then a revised
+Plan and fresh tasks/REV-TASKS.
 
 Validate the complete current REV-TASKS request/verdict/seal chain and permit
 exactly one terminal state:
@@ -110,7 +124,7 @@ Then prove all of the following before creating the archive directory:
   tracked at HEAD and their current bytes equal the HEAD blobs. Enumerate files
   explicitly; a containing tracked directory is not evidence.
 - Repository status contains changes only at current tasks.md,
-  `.gatespec/reviews/REV-TASKS/**`, and, for v2, execution-state.md plus an
+  `.gatespec/reviews/REV-TASKS/**`, execution-state.md, and an
   absent or canonical-empty implementation-adjustments.md. Any other staged,
   unstaged, untracked, ignored-but-relevant, conflicted, symlink, or special
   path blocks. For every allowed source that has an index entry, require its
@@ -122,10 +136,11 @@ Then prove all of the following before creating the archive directory:
   index flag blocks even when its bytes currently match, because its move/
   deletion cannot be staged reproducibly. Validate every existing
   `YYYYMMDDTHHMMSSZ-retask` archive now, including its complete review chain,
-  exact file tree, tracked raw HEAD bytes, unchecked task snapshot, v1/v2
+  exact file tree, tracked raw HEAD bytes, unchecked task snapshot, Protocol 3
   payload shape, and canonical empty IA; legacy absence of Closure never
-  postpones this proof until refinement.
-- The pre-implementation baseline is reproducible. For v2, validate the
+  postpones this proof until refinement. Older v1/v2 archives may remain as
+  immutable history but never contribute findings or state to a v3 retask.
+- The pre-implementation baseline is reproducible. For v3, validate the
   execution-state self-hash, unchanged resolvable Original Implementation
   Baseline, current Source/preserved-review bindings, Task-Handoff commit, and
   Original-to-handoff ancestry. The first committed execution state anchors E1
@@ -134,26 +149,17 @@ Then prove all of the following before creating the archive directory:
   Require the Task-Handoff commit itself to be one-parent, contain current
   immutable artifacts, the round-00 task definition, canonical pending state,
   and canonical empty IA, and change only that closed handoff set. Inspect every
-  commit in `Original-Implementation-Baseline..HEAD`; allow only the closed v2
+  commit in `Original-Implementation-Baseline..HEAD`; allow only the closed v3
   artifact/Source/review/archive/state set, reject every product/test/build/
   runtime-config or unrelated path, and inspect each tasks/IA blob so a checked
-  task or nonempty IA cannot be committed and later restored. For v1, validate
-  the current round-00 first-add history (or a chain wholly absent from HEAD),
-  but start the product proof at the unique first Plan add: include that root
-  commit, or use its sole parent. Inspect it and every descendant through HEAD
-  against the closed legacy evidence set: spec.md, plan.md, tasks.md, standard
-  Design attachments, contracts/, checklists/, validation/, feature archive/,
-  `.gatespec/archive/`, and current REV-TASKS receipts. Inspect every historical
-  tasks blob for completed checkboxes. An unknown feature file or any outside
-  path blocks. For a v1 PASS, additionally require clean HEAD to be the seal
-  path's exact latest-touch Implementation Baseline. If any baseline proof is
-  non-unique, nonlinear, content-stale, or incomplete, block.
-  Every archived v2 cycle independently revalidates its one-parent historical
+  task or nonempty IA cannot be committed and later restored. If any baseline
+  proof is non-unique, nonlinear, content-stale, or incomplete, block.
+  Every archived v3 cycle independently revalidates its one-parent historical
   handoff and Original→handoff→HEAD ancestry, and recomputes its round-00 Spec,
   Plan, Design Attachments, Source, preserved-review, tasks, pending state, and
-  exact empty-IA snapshots. V2 archive epochs strictly increase in timestamp
-  order and must occur in committed execution-state history; stale v1 archives
-  remain self-validated but do not become v2 Closure findings.
+  exact empty-IA snapshots. V3 archive epochs strictly increase in timestamp
+  order and must occur in committed execution-state history; stale v1/v2
+  archives remain self-validated history but do not become v3 Closure findings.
 
 After every proof above succeeds, invoke the deferred peer `before_plan` hooks
 in order. Snapshot status and immutable blobs before each hook. After all hooks
@@ -176,12 +182,12 @@ Preserve the exact feature-relative layout under the new archive:
 .gatespec/archive/<UTC-YYYYMMDDTHHMMSSZ>-retask/
 ├── tasks.md
 ├── reviews/REV-TASKS/**
-├── execution-state.md                 # v2 only
-└── implementation-adjustments.md      # Source-enabled v2 only
+├── execution-state.md                 # Protocol 3
+└── implementation-adjustments.md      # Source-enabled Protocol 3
 ```
 
 The actual mappings are `tasks.md` to archive `tasks.md`, current
-`.gatespec/reviews/REV-TASKS/` to archive `reviews/REV-TASKS/`, and, for v2,
+`.gatespec/reviews/REV-TASKS/` to archive `reviews/REV-TASKS/`, and
 current `.gatespec/execution-state.md` and an existing canonical-empty
 `.gatespec/implementation-adjustments.md` to `execution-state.md` and
 `implementation-adjustments.md` directly under the archive root. Do not retain
@@ -208,20 +214,20 @@ Git index, resolve only the reported external blocker, repeat the byte/mode and
 closed-staged-path checks, and retry the same archive commit subject. If the
 commit exists but post-commit verification or a peer `after_plan` hook fails,
 keep it, verify its archive directly, rerun only the failed peer hook when safe,
-then continue to native tasks; do not create a second archive or increment v2
-again. A failure report must state whether the archive commit exists, its OID
+then continue to native tasks; do not create a second archive or increment the
+v3 execution epoch again. A failure report must state whether the archive
+commit exists, its OID
 when present, the reserved archive path, exact remaining staged/unstaged paths,
 and this recovery boundary so a new top-level session does not rerun
 `--retask` or discard preserved bytes.
 
-For v1, create no execution state or IA and keep all downstream receipts v1.
-For v2, read the archived valid execution state, increment E<n> exactly once,
+Read the archived valid Protocol 3 execution state, increment E<n> exactly once,
 and recreate current `.gatespec/execution-state.md` in the canonical field
 order used by Source Design:
 
 ```markdown
 # GateSpec Execution State
-- **Protocol-Version**: `2`
+- **Protocol-Version**: `3`
 - **Execution-Epoch**: `E<n+1>`
 - **Original-Implementation-Baseline**: `<unchanged archived value>`
 - **Task-Handoff-Commit**: `pending`
@@ -245,7 +251,7 @@ before staging.
 
 ### Independent local archive commit
 
-Stage only the exact removals, archive additions, and v2 reset files described
+Stage only the exact removals, archive additions, and v3 reset files described
 above. Compare the staged path set to that closed allowlist and inspect the
 cached diff; any approved-artifact edit, product path, unrelated path, or
 additional deletion blocks the commit. Before committing, verify every staged
@@ -270,7 +276,9 @@ required failures block the completion report, and final repository status must
 remain clean. Then stop this command and direct the user to native
 `__SPECKIT_COMMAND_TASKS__` followed by `__SPECKIT_COMMAND_ANALYZE__`. New
 tasks must carry every basis-matching blocker from current `*-retask` archives
-in GateSpec Prior Review Closure; the new cycle starts at REV-TASKS round 00.
+in GateSpec Prior Review Closure and reproduce the archived Test Control Mode
+and stable registration columns exactly (only consumer/proof T### rebinding is
+allowed). The new cycle starts at REV-TASKS round 00.
 
 ## Step 1: load context, constraints, and resume state
 
@@ -295,6 +303,22 @@ cannot begin Design unless the Requirements gate reports warning-only
 compatibility because implementation progress already exists; in that case it
 remains read-only and Design must not invent a replacement scope table.
 
+Read the approved Requirements nested `### Test Control Policy Exceptions`
+section. Mode `none` must have only the exact five-cell all-`none` row. Mode
+`approved` must use continuous TCE-001... IDs, the fixed Rule allowlist, and a
+real concluded high-risk `R<n>` Clarification per row; several rows may cite
+one bundled decision. The allowlist is exactly `source-root`,
+`language-marker`, `formal-api`, `switch-identifier`, `control-model`,
+`touchpoint-shape`, and `validator-path-marker`. A legacy Approved
+Requirements artifact with no TCE section deterministically supplies Mode
+`none`; record that legacy-none basis and write the canonical none copy in a
+revised Protocol 3 Plan without editing spec.md. Any desired exception, or any
+malformed, late, concrete-hook-registering, or floor-weakening row, returns to
+`gatespec.specify --revise`; Design cannot repair or reinterpret it.
+Record the migration note in Constitution Check as
+`Test Control Policy Exceptions: legacy Requirements omission -> canonical none`;
+this is provenance, not a new user decision.
+
 The current structured design-evidence contract is identified by the exact
 field `**Design Evidence Schema**: 1`. If a plan declares another non-empty
 schema version, stop rather than downgrade or guess how to rewrite it.
@@ -310,28 +334,35 @@ Resume behavior:
 - Draft: continue in place without recopying the template. If it predates
   Design Evidence Schema 1, add the field and restructure Design Detailing in
   place from repository facts and existing attachments; preserve every D ID,
-  answer, and unaffected design statement.
+  answer, and unaffected design statement. A Draft created under Protocol 1/2
+  is active, not historical: require `--revise` before changing it to Protocol
+  3 and archive its downstream work under the normal revision boundary.
 - Valid Approved-Design with a valid Implementation Review Contract and no
-  flag, plus Design Evidence Schema 1 and Delivery Estimate Schema 1: keep
+  flag, Protocol Version 3, Test Control Policy Schema 1, an exact approved (or
+  legacy-none) Test Control Policy Exceptions copy, Design Evidence Schema 1,
+  and Delivery Estimate Schema 1: keep
   every design artifact read-only and offer exactly two next steps—
   `__SPECKIT_COMMAND_GATESPEC_SOURCE_DESIGN__` or native
   `__SPECKIT_COMMAND_TASKS__`. Do not select Source Design implicitly.
-- A legacy Approved-Design without Delivery Estimate remains read-only and
-  warning-only only if implementation progress already exists: at least one
-  checked task, an implementation-review receipt, or a product-code change
-  after the reproducible Plan/task baseline. If none exists, archive stale
-  downstream work, apply `--revise`, add the estimate, and require diff-only
-  Design re-approval before tasks. Never fabricate progress to preserve it.
-- Approved-Design created before the Implementation Review Contract or Design
-  Evidence Schema 1 existed must not hand off. There is no legacy bypass:
-  automatically archive tasks and non-archive review contents, apply the
-  existing `--revise` semantics (Draft status, cleared Gate Approval, preserved
-  baseline), add the missing contract/evidence without rewriting unaffected
-  decisions, and require one diff-only Design re-approval before regenerating
-  native tasks.
+- An Approved Protocol 1/2 Plan with a valid Accepted delivery remains
+  byte-for-byte historical. Report that state and perform no workflow write.
+  Without valid acceptance it is active/unaccepted and fails closed: require
+  explicit `--revise`; do not create tasks, Source, state, reviews, or an
+  implicit protocol upgrade. `--retask` is never an upgrade path.
+- An unaccepted Approved-Design missing Delivery Estimate, Design Evidence,
+  Test Control Policy, its approved/legacy-none exception copy, or the Protocol
+  3 Implementation Review Contract must
+  not hand off regardless of apparent progress. Require explicit `--revise`,
+  archive stale downstream work, add the missing v3 contract without rewriting
+  unaffected decisions, and require diff-only Design re-approval. Never
+  fabricate progress or auto-upgrade it to preserve an older execution path.
+  This includes an Approved-Design created before the Implementation Review Contract or Design
+  Evidence schema existed.
 - `--revise`: archive existing Source bundle, `tasks.md`, current reviews,
   revalidations, execution state, IA, and acceptance, change plan Status to
-  Draft, clear Gate Approval, retain a baseline, and use diff-only re-approval.
+  Draft, clear Gate Approval, retain a baseline, set Protocol Version 3, add
+  the exact canonical Test Control Policy plus the approved/legacy-none
+  exception copy, and use diff-only re-approval.
 - `--restart`: archive plan.md, research.md, data-model.md, contracts/,
   quickstart.md, tasks.md, reviews, revalidations, execution state, IA, and
   acceptance
@@ -373,9 +404,11 @@ known design fork into exactly one conversational bucket:
    section.
 
 An option conflicting with approved Requirements or a constitution `MUST` is
-excluded rather than offered as a foil. A `SHOULD` deviation or GateSpec
-constraint exemption may be offered only with its reason/consequence and is
-high risk. If fewer than two viable options remain, use an engineering
+excluded rather than offered as a foil. A new `SHOULD` deviation or GateSpec
+constraint exemption is not a Design choice: return it to Requirements. In
+particular, Design cannot create, change, delete, or broaden a TCE or ask for a
+per-hook exception. It copies the approved TCE overlay and records only its
+engineering impact. If fewer than two viable options remain, use an engineering
 determination; when “do not build/change scope” is a genuine alternative,
 return that higher-level choice to Requirements. When classification is
 uncertain, use a human decision. The user may cheaply request `explain <topic>`
@@ -523,6 +556,14 @@ configuration, and build/packaging logic. Exclude tests, specification/review
 metadata, pure documentation, and only reproducibly generated outputs. Every
 generated exclusion must say
 `generated: <output path> <- <source path> via <generator>`.
+Do not predeclare a concrete Test Control exclusion in Design: controls do not
+exist until native tasks registers them. A later registered test-only surface
+(canonical `/src/testonly`, or the exact `source-root` TCE replacement) counts
+separately from Production only if its task contract and default-OFF proof
+satisfy Protocol 3. Every production touchpoint and build-wiring change remains
+Production even when it is also counted in Test-Control-Scale; an undeclared
+hook or test-only DI remains Production. Final acceptance reports the Test
+Control scale separately and never hides it in a general tests exclusion.
 
 Compare the Design estimate with Requirements and record exactly
 `within`, `expanded`, or `reduced` plus a substantive rationale. If the approved legacy
@@ -595,7 +636,7 @@ bounded Implementation Freedom before approval. Never render an Implementation
 Freedom as if the contract skeleton had already fixed it.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
-version `2` and the fixed Review Root, task-review, isolation, parallel, Git,
+version `3` and the fixed Review Root, task-review, isolation, parallel, Git,
 and remediation values from the template. Select actual Required Checkpoints:
 `REV-FOUNDATION`, one `REV-US<n>` per implemented user-story phase, and exactly
 one final `REV-FINAL`. Give every ID exactly one non-empty Checkpoint Test
@@ -612,6 +653,40 @@ The executor must join same-phase disjoint work before such a row and cannot
 cross it without the matching PASS seal. Checkpoint commits stay local and are
 never pushed. REV-FINAL covers the complete feature, not an aggregation of
 stage verdicts.
+
+Fill the exact mandatory eight-field
+`## Test Control Policy *(gatespec: mandatory)*` from the Protocol 3 template,
+including **Protocol Version**: `3` and the exact
+`**Production Readability Contract**` field, without project-specific choices. Then copy the approved
+Requirements TCE Mode and table body byte-for-byte into the adjacent mandatory
+`## Test Control Policy Exceptions *(gatespec: mandatory)*`; for a legacy Approved Requirements
+artifact without that subsection, write the canonical none body and record the
+legacy-none basis. Never ask again or add a D<n>. The canonical policy applies
+except for the minimum replacement stated by a named TCE Rule. Unmentioned
+clauses and the non-exemptable structural/lifecycle floor remain canonical.
+Record each approved TCE's engineering impact in the relevant Design
+Detailing/research text, but do not name or pre-approve a TC-###, source file,
+path::symbol, touchpoint, switch, wiring, validator, or consumer. Native tasks
+alone registers concrete controls after inspecting each producer-to-test gap;
+there is no per-control or per-hook human approval. The later task contract
+must use `Mode: none` when existing seams close every gap or `Mode: isolated`
+with exact registrations when they do not.
+An active/unaccepted Protocol 1/2 Plan cannot be upgraded by retask. Every
+isolated control retains the dedicated `*_ENABLE_TEST_HOOKS` default-OFF switch
+and exact validator interface
+`bash <validator> --gatespec-lane default-off|explicit-on`, unless the matching
+approved token Rule supplies its bounded replacement.
+The effective policy also fixes source readability unless changed by the exact
+approved Rule: each affected production function may contain at most one
+visually contiguous dedicated hook-macro guard block; inside it there is only
+one `testonly` call and its result rejoins the normal production error/result
+path. Count/wait/fault selection/observer dispatch remains entirely in
+the registered test-only root (canonical `/src/testonly`, or the exact
+`source-root` replacement). Only `touchpoint-shape` may replace the
+guard/call/result/mechanics shape; only `source-root` may replace that root. A
+replacement spanning both needs both approved Rules, and `control-model` never
+authorizes production-side mechanics. Exact affected functions are still task-stage
+registrations, not Plan content.
 
 Immediately before the final summary, internally compare spec.md, plan.md,
 research.md, data-model.md, contracts/, and quickstart.md for terminology,
@@ -631,7 +706,8 @@ coverage, technical approach and current-to-target change boundary, primary
 runtime flow, material concurrency/ownership rules, approved
 human decisions, material engineering determinations, explicit implementation
 freedoms, all three Design estimate ranges with confidence and the Requirements
-comparison, validation approach, and mandatory “what I am least confident
+comparison, the canonical Test Control policy plus TCE Mode/IDs/rules (with
+exact controls deferred only to native tasks), validation approach, and mandatory “what I am least confident
 about”. State that normal Design approval also accepts the disclosed scale; it
 does not create another approval. Remind the user that any
 determination/freedom may still be promoted before approval. Wait for

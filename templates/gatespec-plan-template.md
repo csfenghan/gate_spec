@@ -181,14 +181,73 @@ explicit Decision Log approval.]
 
 - [choice left open] — constraints: [boundaries the implementer must respect]
 
+## Test Control Policy *(gatespec: mandatory)*
+
+<!--
+  GATESPEC Protocol 3 freezes this canonical universal policy plus the exact
+  Requirements TCE overlay in Design. Neither
+  predicts, names, or approves an individual Test Control. Native tasks is the
+  sole registration stage and records every concrete TC-### item in
+  `## GateSpec Test Control Closure`. A project that needs none records the
+  canonical `Mode: none` task state.
+  Copy only the Mode/table body of the approved Requirements
+  `### Test Control Policy Exceptions` section into the later Plan H2. Do not
+  add a Design exception or ask again. A row overrides only its named semantic
+  Rule; the canonical policy remains the default and the Protocol 3 structural/
+  lifecycle floor is never exemptable.
+-->
+
+- **Policy Schema**: `1`
+- **Registration Stage**: `native tasks only`
+- **Allowed Modes**: `none|isolated`
+- **Isolation Contract**: Test Control source roots end in `/src/testonly`; the
+  terminal namespace or module is `testonly`, or a language without namespaces
+  uses a leading `TestOnly`/`test_only` name. Formal product APIs gain no
+  testing parameter, option, overload, getter, or state.
+- **Activation Contract**: each hook project uses a dedicated positive
+  `*_ENABLE_TEST_HOOKS` compile switch whose declared default is `OFF`; only an
+  explicit opt-in enables it. Runtime activation and common Debug,
+  `BUILD_TESTING`, or equivalent umbrella triggers are forbidden. The OFF build
+  fully elides Test Control fields, branches, resources, and symbols.
+- **Control Contract**: controls are typed, declarative, single-purpose,
+  per-instance RAII and limited to named one-shot, count, barrier, time,
+  random, fault, or observation effects. Generic callbacks, options bags,
+  global mutable state, validation bypasses, duplicated business algorithms,
+  placeholders, and controls without a named verification gap are forbidden.
+  A control is removed with its last consumer.
+- **Production Readability Contract**: each affected production function has at
+  most one visually contiguous dedicated `*_ENABLE_TEST_HOOKS` macro-guard
+  block. That block contains only one `testonly` call and feeds its result into
+  the normal production error/result path. Counting, waiting, fault selection,
+  and observer dispatch live entirely under the registered `/src/testonly`
+  surface. Only a `touchpoint-shape` exception may replace the
+  guard/call/result/mechanics shape; only `source-root` may replace that root,
+  and `control-model` never authorizes production-side mechanics.
+- **Validator Contract**: every isolated hook project supplies one tracked
+  regular non-symlink Bash validator with `testonly` in its path/name and the
+  sole invocation `bash <validator> --gatespec-lane default-off|explicit-on`
+  (file mode may be 100644 or 100755). The default
+  lane omits the hook option; the explicit lane sets it ON. Both run the same
+  normal tests, the ON lane additionally runs hook-consuming tests, and output
+  is canonical and subject-bound.
+
+## Test Control Policy Exceptions *(gatespec: mandatory)*
+
+- **Mode**: `none`
+
+| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |
+|---|---|---|---|---|
+| none | none | none | none | none |
+
 ## Implementation Review Contract *(gatespec: mandatory)*
 
 <!--
   GATESPEC: This contract is approved as Design content and is consumed by
   native speckit.tasks / speckit.implement plus GateSpec hook checks.
-  Protocol 2 supports optional Source Design, execution epochs, IA snapshots,
-  raw final delta, and final delivery acceptance. A legacy approved Protocol 1
-  Plan remains valid only while Source Design is not enabled.
+  Protocol 3 supports optional Source Design, execution epochs, IA snapshots,
+  raw final delta, Test Control evidence, and final delivery acceptance.
+  Accepted Protocol 1/2 deliveries remain immutable history; active older
+  plans must use plan --revise and cannot be upgraded by retask.
   - Replace REV-US<n> with one checkpoint per actual user-story phase.
   - Each Required Checkpoint has exactly one mapping row.
   - A mapping cell is one line and cannot contain a raw `|`; put pipelines or
@@ -202,7 +261,7 @@ explicit Decision Log approval.]
     aggregating earlier stage receipts.
 -->
 
-- **Protocol Version**: `2`
+- **Protocol Version**: `3`
 - **Required Checkpoints**: `[REV-FOUNDATION, REV-US<n>..., REV-FINAL — replace with actual IDs]`
 - **Review Root**: `.gatespec/reviews`
 - **Task Review**: `REV-TASKS after speckit.analyze; PASS required before speckit.implement`

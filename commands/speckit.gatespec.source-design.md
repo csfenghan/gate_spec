@@ -23,6 +23,10 @@ Resolve the current feature, require an Approved-Requirements spec and
 Approved-Design plan, and run `check-gate.sh design`. A silent unmarked feature
 is not eligible for gated Source Design. Require an attached local feature
 branch; never push, reset, rebase, stash, clean, or rewrite history.
+Require Plan Protocol Version 3. An active or unaccepted Protocol 1/2 Plan must
+first return through `gatespec.plan --revise`; Source activation cannot upgrade
+it. A valid Accepted legacy delivery is immutable history and cannot enable a
+new Source contract.
 
 On first enable, inspect existing tasks, checkboxes, reviews, Git history and
 the complete worktree delta:
@@ -40,11 +44,11 @@ Before any overwrite, archive tasks.md, current reviews, IA, execution state,
 acceptance, and related non-archive downstream work under a timestamped
 `.gatespec/archive/<timestamp>-source-enable/`. Preserve prior archives.
 Copy `templates/gatespec-source-design-template.md` exactly once. Initialize
-Protocol v2 `.gatespec/execution-state.md` with one self-hashed canonical set:
+Protocol v3 `.gatespec/execution-state.md` with one self-hashed canonical set:
 
 ```markdown
 # GateSpec Execution State
-- **Protocol-Version**: `2`
+- **Protocol-Version**: `3`
 - **Execution-Epoch**: `E1`
 - **Original-Implementation-Baseline**: `<current pre-implementation commit>`
 - **Task-Handoff-Commit**: `pending`
@@ -53,8 +57,8 @@ Protocol v2 `.gatespec/execution-state.md` with one self-hashed canonical set:
 - **Execution-State-SHA256**: `<hash of all prior bytes>`
 ```
 
-An old approved Protocol v1 Plan remains byte-for-byte read-only; Source
-activation makes downstream receipts v2 through this sub-contract.
+Source activation never changes the Plan protocol; every downstream Source,
+task, implementation, and acceptance receipt remains Protocol 3.
 
 ## Step 1: resume, revise, or restart safely
 
@@ -119,6 +123,15 @@ template. A not-applicable area needs a concrete reason. List only real
 repository-relative paths and complete declarations without bodies. State
 bounded IA freedoms and prohibited material boundaries explicitly.
 
+Source Design may identify a verification gap but must not register, name, or
+manifest an exact Test Control, `/src/testonly` surface, production hook
+touchpoint, `*_ENABLE_TEST_HOOKS` switch, hook wiring, or validator. Those are
+task-stage registrations under the Plan's effective canonical-plus-TCE Test
+Control Policy. Source Design must not create/change/delete/broaden the copied
+TCE overlay; a needed deviation returns to Requirements `--revise`. If a Source
+draft contains one, remove it before review; do not seek an SD decision or user
+approval for a hook.
+
 Before review, trace every Source element to a non-deferred CAP and FR. Cover
 all admitted CAPs through their FR/SC obligations, preserve Retained baseline,
 and reject any Source path, symbol, API, flow, or test whose only purpose is a
@@ -144,6 +157,12 @@ hard rejection; the block exists only to prevent silent estimate drift.
 
 Run `check-gate.sh source-candidate <feature-dir>` until it passes. Then invoke
 `__SPECKIT_COMMAND_GATESPEC_REVIEW_SOURCE_DESIGN__`. Same-context review is forbidden.
+The Protocol 3 REV-SOURCE request, verdict seal, and reviewed Source contract
+carry `Test-Control-Mode`, `Test-Control-Closure-SHA256`,
+`Test-Control-Subject-Manifest-SHA256`, `Default-OFF-Evidence-SHA256`, and
+`Explicit-ON-Evidence-SHA256` as exact `not-applicable` values: Source can
+describe only the verification gap and cannot pre-register task-stage Test
+Controls.
 REV-SOURCE binds Source-Design-Reviewed-SHA256, whose entry digest excludes the
 mutable Status and final Gate Approval while every shard remains raw-hashed.
 Both Source manifests use exact

@@ -80,6 +80,20 @@ normalized_tasks_digest() {
     | sha_stream | awk '{print $1}'
 }
 
+test_control_closure_digest() {
+  local file="$1" cr
+  cr=$(printf '\r')
+  {
+    printf '%s\n' '## GateSpec Test Control Closure *(gatespec: mandatory)*'
+    awk '
+      /^## GateSpec Test Control Closure \*\(gatespec: mandatory\)\*$/ {inside=1; next}
+      inside && /^## / {exit}
+      inside && /^## Phase / {exit}
+      inside && NF {print}
+    ' "$file" | sed -e "s/${cr}\$//"
+  } | sha_stream | awk '{print $1}'
+}
+
 attachments_digest() {
   local feature="$1" source rel digest manifest="$TEST_TMP/attachment-manifest"
   : > "$manifest"
@@ -140,6 +154,12 @@ make_tasks() {
 |---|---|---|---|
 | none | none | none | none |
 
+## GateSpec Test Control Closure *(gatespec: mandatory)*
+- **Mode**: `none`
+| Control | Verification gap / production invariant | Test-only surface | Production touchpoint | Allowed effect / lifetime | Build switch / validator | Consumer tasks/tests | Default-build proof task |
+|---|---|---|---|---|---|---|---|
+| none | none | none | none | none | none | none | none |
+
 ## Phase 1: Setup
 
 - [ ] T001 Create the feature scaffolding
@@ -175,6 +195,24 @@ strip_prior_closure() {
   awk '
     /^## GateSpec Prior Review Closure \*\(gatespec: mandatory\)\*$/ {skip=1; next}
     skip && /^## Phase / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+strip_test_control_closure() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^## GateSpec Test Control Closure \*\(gatespec: mandatory\)\*$/ {skip=1; next}
+    skip && /^## Phase / {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+strip_test_control_policy() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^## Test Control Policy \*\(gatespec: mandatory\)\*$/ {skip=1; next}
+    skip && /^## Implementation Review Contract/ {skip=0}
     !skip {print}
   ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
@@ -234,7 +272,8 @@ write_pass_review() {
   local round="${11:-00}" previous="${12:-none}" status="${13:-PASS}"
   local blocker_body="${14:-- BLOCKER: fixture remediation required}"
   local directory request verdict seal_file repo changed
-  local spec_hash plan_hash attachments_hash tasks_hash request_hash verdict_hash label
+  local spec_hash plan_hash attachments_hash tasks_hash closure_hash request_hash verdict_hash label
+  local epoch source_hash ia_hash handoff preserved final_delta
   directory="$feature/.gatespec/reviews/$id"
   request="$directory/round-${round}-request.md"
   verdict="$directory/round-${round}-verdict.md"
@@ -244,14 +283,25 @@ write_pass_review() {
   plan_hash=$(hash_of "$feature/plan.md")
   attachments_hash=$(attachments_digest "$feature")
   tasks_hash=$(normalized_tasks_digest "$feature/tasks.md")
+  closure_hash=$(test_control_closure_digest "$feature/tasks.md")
+  epoch=$(receipt_field "$feature/.gatespec/execution-state.md" 'Execution-Epoch')
+  source_hash=$(receipt_field "$feature/.gatespec/execution-state.md" 'Source-Design-Content-SHA256')
+  handoff=$(receipt_field "$feature/.gatespec/execution-state.md" 'Task-Handoff-Commit')
+  preserved=$(receipt_field "$feature/.gatespec/execution-state.md" 'Preserved-Reviews-SHA256')
+  ia_hash=not-applicable
+  final_delta=not-applicable
   if [[ "$scope" == 'TASKS' ]]; then
     changed='not-applicable'
   else
     repo=$(git -C "$feature" rev-parse --show-toplevel)
     changed=$(changed_paths_digest "$repo" "$base" "$subject")
+    if [[ "$scope" == 'FINAL' ]]; then
+      final_delta=$(final_delta_digest "$repo" \
+        "$(receipt_field "$feature/.gatespec/execution-state.md" 'Original-Implementation-Baseline')" "$subject")
+    fi
   fi
   cat > "$request" <<EOF
-- **Protocol-Version**: \`1\`
+- **Protocol-Version**: \`3\`
 - **Review-ID**: \`$id\`
 - **Round**: \`$round\`
 - **Scope**: \`$scope\`
@@ -259,11 +309,22 @@ write_pass_review() {
 - **Plan-Content-SHA256**: \`$plan_hash\`
 - **Design-Attachments-SHA256**: \`$attachments_hash\`
 - **Tasks-Definition-SHA256**: \`$tasks_hash\`
+- **Test-Control-Mode**: \`none\`
+- **Test-Control-Closure-SHA256**: \`$closure_hash\`
+- **Test-Control-Subject-Manifest-SHA256**: \`not-applicable\`
+- **Default-OFF-Evidence-SHA256**: \`not-applicable\`
+- **Explicit-ON-Evidence-SHA256**: \`not-applicable\`
+- **Execution-Epoch**: \`$epoch\`
+- **Source-Design-Content-SHA256**: \`$source_hash\`
+- **Implementation-Adjustments-SHA256**: \`$ia_hash\`
+- **Task-Handoff-Commit**: \`$handoff\`
+- **Preserved-Reviews-SHA256**: \`$preserved\`
 - **Implementation-Baseline**: \`$baseline\`
 - **Base-Commit**: \`$base\`
 - **Subject-Commit**: \`$subject\`
 - **Task-IDs**: \`$task_ids\`
 - **Changed-Paths-SHA256**: \`$changed\`
+- **Final-Delta-SHA256**: \`$final_delta\`
 - **Previous-Verdict-SHA256**: \`$previous\`
 
 ## Required Tests
@@ -275,7 +336,7 @@ EOF
   seal_self_hash "$request" 'Request-SHA256'
   request_hash=$(receipt_field "$request" 'Request-SHA256')
   cat > "$verdict" <<EOF
-- **Protocol-Version**: \`1\`
+- **Protocol-Version**: \`3\`
 - **Review-ID**: \`$id\`
 - **Round**: \`$round\`
 - **Request-SHA256**: \`$request_hash\`
@@ -287,6 +348,16 @@ EOF
 ## Tests Run
 
 $verdict_tests
+
+## Test Control Audit
+
+- **Mode**: \`none\`
+- **Declared-Controls**: \`none\`
+- **Undeclared-Controls**: \`none\`
+- **Orphan-Controls**: \`none\`
+- **Default-OFF-Proof**: \`not-applicable\`
+- **Explicit-ON-Proof**: \`not-applicable\`
+- **Test-Control-Scale**: \`additions=0; churn=0; files=0; touchpoints=0\`
 
 ## Blockers
 
@@ -311,7 +382,7 @@ EOF
     return
   fi
   cat > "$seal_file" <<EOF
-- **Protocol-Version**: \`1\`
+- **Protocol-Version**: \`3\`
 - **Review-ID**: \`$id\`
 - **Round**: \`$round\`
 - **Status**: \`PASS\`
@@ -319,7 +390,11 @@ EOF
 - **Verdict-SHA256**: \`$verdict_hash\`
 EOF
   for label in Spec-Content-SHA256 Plan-Content-SHA256 Design-Attachments-SHA256 \
-    Tasks-Definition-SHA256 Implementation-Baseline Base-Commit Subject-Commit; do
+    Tasks-Definition-SHA256 Test-Control-Mode Test-Control-Closure-SHA256 \
+    Test-Control-Subject-Manifest-SHA256 Default-OFF-Evidence-SHA256 \
+    Explicit-ON-Evidence-SHA256 Execution-Epoch Source-Design-Content-SHA256 \
+    Implementation-Adjustments-SHA256 Task-Handoff-Commit Preserved-Reviews-SHA256 \
+    Implementation-Baseline Base-Commit Subject-Commit Final-Delta-SHA256; do
     # Literal Markdown backticks are intentional; printf substitutions supply the values.
     # shellcheck disable=SC2016
     printf -- '- **%s**: `%s`\n' "$label" "$(receipt_field "$request" "$label")" >> "$seal_file"
@@ -331,17 +406,266 @@ EOF
   seal_self_hash "$seal_file" 'Seal-SHA256'
 }
 
+write_legacy_review() {
+  local feature="$1" protocol="$2" id="$3" scope="$4" baseline="$5" base="$6"
+  local subject="$7" task_ids="$8" test_command="$9" final_delta="${10}"
+  local directory request verdict seal_file repo changed spec_hash plan_hash attachments_hash tasks_hash
+  local epoch=not-applicable source_hash=not-applicable ia_hash=not-applicable handoff=not-applicable preserved=not-applicable
+  local request_hash verdict_hash label
+  directory="$feature/.gatespec/reviews/$id"
+  request="$directory/round-00-request.md"
+  verdict="$directory/round-00-verdict.md"
+  seal_file="$directory/seal.md"
+  mkdir -p "$directory"
+  spec_hash=$(hash_of "$feature/spec.md")
+  plan_hash=$(hash_of "$feature/plan.md")
+  attachments_hash=$(attachments_digest "$feature")
+  tasks_hash=$(normalized_tasks_digest "$feature/tasks.md")
+  if [[ "$protocol" == 2 ]]; then
+    epoch=$(receipt_field "$feature/.gatespec/execution-state.md" 'Execution-Epoch')
+    handoff=$(receipt_field "$feature/.gatespec/execution-state.md" 'Task-Handoff-Commit')
+    preserved=$(receipt_field "$feature/.gatespec/execution-state.md" 'Preserved-Reviews-SHA256')
+  fi
+  if [[ "$scope" == TASKS ]]; then
+    changed=not-applicable
+  else
+    repo=$(git -C "$feature" rev-parse --show-toplevel)
+    changed=$(changed_paths_digest "$repo" "$base" "$subject")
+  fi
+  {
+    printf -- '- **Protocol-Version**: `%s`\n' "$protocol"
+    printf -- '- **Review-ID**: `%s`\n' "$id"
+    printf '%s\n' '- **Round**: `00`'
+    printf -- '- **Scope**: `%s`\n' "$scope"
+    printf -- '- **Spec-Content-SHA256**: `%s`\n' "$spec_hash"
+    printf -- '- **Plan-Content-SHA256**: `%s`\n' "$plan_hash"
+    printf -- '- **Design-Attachments-SHA256**: `%s`\n' "$attachments_hash"
+    printf -- '- **Tasks-Definition-SHA256**: `%s`\n' "$tasks_hash"
+    if [[ "$protocol" == 2 ]]; then
+      printf -- '- **Execution-Epoch**: `%s`\n' "$epoch"
+      printf -- '- **Source-Design-Content-SHA256**: `%s`\n' "$source_hash"
+      printf -- '- **Implementation-Adjustments-SHA256**: `%s`\n' "$ia_hash"
+      printf -- '- **Task-Handoff-Commit**: `%s`\n' "$handoff"
+      printf -- '- **Preserved-Reviews-SHA256**: `%s`\n' "$preserved"
+    fi
+    printf -- '- **Implementation-Baseline**: `%s`\n' "$baseline"
+    printf -- '- **Base-Commit**: `%s`\n' "$base"
+    printf -- '- **Subject-Commit**: `%s`\n' "$subject"
+    printf -- '- **Task-IDs**: `%s`\n' "$task_ids"
+    printf -- '- **Changed-Paths-SHA256**: `%s`\n' "$changed"
+    [[ "$protocol" == 1 ]] || printf -- '- **Final-Delta-SHA256**: `%s`\n' "$final_delta"
+    printf '%s\n\n' '- **Previous-Verdict-SHA256**: `none`' '## Required Tests' ''
+    if [[ "$scope" == TASKS ]]; then printf '%s\n' '- Not run — task-plan review'; else printf -- '- %s\n' "$test_command"; fi
+    printf '%s\n' '' '- **Request-SHA256**: `pending`'
+  } > "$request"
+  seal_self_hash "$request" 'Request-SHA256'
+  request_hash=$(receipt_field "$request" 'Request-SHA256')
+  {
+    printf -- '- **Protocol-Version**: `%s`\n' "$protocol"
+    printf -- '- **Review-ID**: `%s`\n' "$id"
+    printf '%s\n' '- **Round**: `00`'
+    printf -- '- **Request-SHA256**: `%s`\n' "$request_hash"
+    printf '%s\n' '- **Reviewer-Platform**: `codex`' '- **Reviewer-Context-ID**: `accepted-legacy-fixture`' '- **Isolation**: `fresh`' '- **Status**: `PASS`' '' '## Tests Run' ''
+    if [[ "$scope" == TASKS ]]; then printf '%s\n' '- Not run — task-plan review'; else printf -- '- %s — exit 0 fixture\n' "$test_command"; fi
+    printf '%s\n' '' '## Blockers' '' '- None' '' '## Observations' '' '- Historical delivery fixture.' '' '## Limitations' '' '- Freshness is procedural evidence.' '' '- **Verdict-SHA256**: `pending`'
+  } > "$verdict"
+  seal_self_hash "$verdict" 'Verdict-SHA256'
+  verdict_hash=$(receipt_field "$verdict" 'Verdict-SHA256')
+  {
+    printf -- '- **Protocol-Version**: `%s`\n' "$protocol"
+    printf -- '- **Review-ID**: `%s`\n' "$id"
+    printf '%s\n' '- **Round**: `00`' '- **Status**: `PASS`'
+    printf -- '- **Request-SHA256**: `%s`\n' "$request_hash"
+    printf -- '- **Verdict-SHA256**: `%s`\n' "$verdict_hash"
+  } > "$seal_file"
+  for label in Spec-Content-SHA256 Plan-Content-SHA256 Design-Attachments-SHA256 Tasks-Definition-SHA256; do
+    printf -- '- **%s**: `%s`\n' "$label" "$(receipt_field "$request" "$label")" >> "$seal_file"
+  done
+  if [[ "$protocol" == 2 ]]; then
+    for label in Execution-Epoch Source-Design-Content-SHA256 Implementation-Adjustments-SHA256 \
+      Task-Handoff-Commit Preserved-Reviews-SHA256; do
+      printf -- '- **%s**: `%s`\n' "$label" "$(receipt_field "$request" "$label")" >> "$seal_file"
+    done
+  fi
+  for label in Implementation-Baseline Base-Commit Subject-Commit; do
+    printf -- '- **%s**: `%s`\n' "$label" "$(receipt_field "$request" "$label")" >> "$seal_file"
+  done
+  [[ "$protocol" == 1 ]] || printf -- '- **Final-Delta-SHA256**: `%s`\n' "$final_delta" >> "$seal_file"
+  printf '%s\n' '- **Sealed-At**: `2026-08-24T12:00:00Z`' '- **Seal-SHA256**: `pending`' >> "$seal_file"
+  seal_self_hash "$seal_file" 'Seal-SHA256'
+}
+
 init_feature_repo() {
-  local repo="$1" feature
+  local repo="$1" feature original handoff
   feature="$repo/specs/001-hot-reload"
   mkdir -p "$feature"
   cp "$TEST_TMP/good/spec.md" "$feature/spec.md"
   cp "$TEST_TMP/good/plan.md" "$feature/plan.md"
-  make_tasks "$feature"
   git -C "$repo" init -q
   git -C "$repo" symbolic-ref HEAD refs/heads/feature
   git -C "$repo" config user.name 'GateSpec Fixture'
   git -C "$repo" config user.email 'fixture@example.invalid'
+  git -C "$repo" add -- "$feature/spec.md" "$feature/plan.md"
+  git -C "$repo" commit -qm 'Approved Protocol v3 plan baseline'
+  original=$(git -C "$repo" rev-parse HEAD)
+  make_tasks "$feature"
+  mkdir -p "$feature/.gatespec"
+  cat > "$feature/.gatespec/execution-state.md" <<EOF
+# GateSpec Execution State
+- **Protocol-Version**: \`3\`
+- **Execution-Epoch**: \`E1\`
+- **Original-Implementation-Baseline**: \`$original\`
+- **Task-Handoff-Commit**: \`pending\`
+- **Source-Design-Content-SHA256**: \`not-applicable\`
+- **Preserved-Reviews-SHA256**: \`not-applicable\`
+- **Execution-State-SHA256**: \`pending\`
+EOF
+  seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+  git -C "$repo" add -- "$feature/tasks.md" "$feature/.gatespec/execution-state.md"
+  git -C "$repo" commit -qm 'Protocol v3 task handoff'
+  handoff=$(git -C "$repo" rev-parse HEAD)
+  rewrite "$feature/.gatespec/execution-state.md" "s/Task-Handoff-Commit\*\*: \`pending\`/Task-Handoff-Commit**: \`$handoff\`/"
+  seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+  git -C "$repo" add -- "$feature/.gatespec/execution-state.md"
+  git -C "$repo" commit -qm 'Finalize Protocol v3 task handoff state'
+  printf '%s' "$feature"
+}
+
+init_fixture_execution_state() {
+  local feature="$1" original handoff
+  git -C "$feature" init -q
+  git -C "$feature" symbolic-ref HEAD refs/heads/feature
+  git -C "$feature" config user.name 'GateSpec Closure Fixture'
+  git -C "$feature" config user.email 'closure-fixture@example.invalid'
+  git -C "$feature" add -- spec.md plan.md
+  git -C "$feature" commit -qm 'Approved Protocol v3 Closure fixture'
+  original=$(git -C "$feature" rev-parse HEAD)
+  mkdir -p "$feature/.gatespec"
+  cat > "$feature/.gatespec/execution-state.md" <<EOF
+# GateSpec Execution State
+- **Protocol-Version**: \`3\`
+- **Execution-Epoch**: \`E1\`
+- **Original-Implementation-Baseline**: \`$original\`
+- **Task-Handoff-Commit**: \`pending\`
+- **Source-Design-Content-SHA256**: \`not-applicable\`
+- **Preserved-Reviews-SHA256**: \`not-applicable\`
+- **Execution-State-SHA256**: \`pending\`
+EOF
+  seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+  git -C "$feature" add -- tasks.md .gatespec/execution-state.md
+  git -C "$feature" commit -qm 'Protocol v3 Closure task handoff'
+  handoff=$(git -C "$feature" rev-parse HEAD)
+  rewrite "$feature/.gatespec/execution-state.md" \
+    "s/Task-Handoff-Commit\*\*: \`pending\`/Task-Handoff-Commit**: \`$handoff\`/"
+  seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+  git -C "$feature" add -- .gatespec/execution-state.md
+  git -C "$feature" commit -qm 'Finalize Protocol v3 Closure handoff state'
+}
+
+build_accepted_legacy_delivery() {
+  local repo="$1" protocol="$2" feature original handoff baseline foundation subject_us final_subject
+  local final_base final_delta final_review acceptance epoch
+  feature="$repo/specs/001-hot-reload"
+  mkdir -p "$feature"
+  cp "$TEST_TMP/good/spec.md" "$feature/spec.md"
+  cp "$TEST_TMP/good/plan.md" "$feature/plan.md"
+  strip_test_control_policy "$feature/plan.md"
+  rewrite "$feature/plan.md" "s/Protocol Version\*\*: \`3\`/Protocol Version**: \`$protocol\`/"
+  seal "$feature/plan.md"
+  make_tasks "$feature"
+  strip_test_control_closure "$feature/tasks.md"
+  git -C "$repo" init -q
+  git -C "$repo" symbolic-ref HEAD refs/heads/feature
+  git -C "$repo" config user.name 'GateSpec Historical Fixture'
+  git -C "$repo" config user.email 'historical@example.invalid'
+  if [[ "$protocol" == 2 ]]; then
+    git -C "$repo" add -- "$feature/spec.md" "$feature/plan.md"
+    git -C "$repo" commit -qm 'Approved historical Protocol v2 plan'
+    original=$(git -C "$repo" rev-parse HEAD)
+    mkdir -p "$feature/.gatespec"
+    cat > "$feature/.gatespec/execution-state.md" <<EOF
+# GateSpec Execution State
+- **Protocol-Version**: \`2\`
+- **Execution-Epoch**: \`E1\`
+- **Original-Implementation-Baseline**: \`$original\`
+- **Task-Handoff-Commit**: \`pending\`
+- **Source-Design-Content-SHA256**: \`not-applicable\`
+- **Preserved-Reviews-SHA256**: \`not-applicable\`
+- **Execution-State-SHA256**: \`pending\`
+EOF
+    seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+    git -C "$repo" add -- "$feature/tasks.md" "$feature/.gatespec/execution-state.md"
+    git -C "$repo" commit -qm 'Historical Protocol v2 task handoff'
+    handoff=$(git -C "$repo" rev-parse HEAD)
+    rewrite "$feature/.gatespec/execution-state.md" "s/Task-Handoff-Commit\*\*: \`pending\`/Task-Handoff-Commit**: \`$handoff\`/"
+    seal_self_hash "$feature/.gatespec/execution-state.md" 'Execution-State-SHA256'
+  else
+    original=not-applicable
+  fi
+  write_legacy_review "$feature" "$protocol" REV-TASKS TASKS not-applicable not-applicable \
+    not-applicable none 'Not run — task-plan review' not-applicable
+  git -C "$repo" add -- .
+  git -C "$repo" commit -qm 'Historical REV-TASKS PASS baseline'
+  baseline=$(git -C "$repo" rev-parse HEAD)
+
+  mkdir -p "$repo/src" "$repo/tests"
+  printf '%s\n' 'legacy foundation' > "$repo/src/legacy.txt"
+  rewrite "$feature/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+  rewrite "$feature/tasks.md" 's/^- \[ \] T002/- [x] T002/'
+  git -C "$repo" add -- src specs
+  git -C "$repo" commit -qm 'Historical foundation subject'
+  foundation=$(git -C "$repo" rev-parse HEAD)
+  write_legacy_review "$feature" "$protocol" REV-FOUNDATION FOUNDATION "$baseline" "$baseline" \
+    "$foundation" T001,T002 'bash tests/unit.sh' not-applicable
+  rewrite "$feature/tasks.md" 's/^- \[ \] T003/- [x] T003/'
+  git -C "$repo" add -- specs
+  git -C "$repo" commit -qm 'Historical foundation PASS metadata'
+
+  printf '%s\n' 'legacy story test' > "$repo/tests/legacy.txt"
+  rewrite "$feature/tasks.md" 's/^- \[ \] T004/- [x] T004/'
+  git -C "$repo" add -- tests specs
+  git -C "$repo" commit -qm 'Historical story subject'
+  subject_us=$(git -C "$repo" rev-parse HEAD)
+  write_legacy_review "$feature" "$protocol" REV-US1 US1 "$baseline" "$foundation" \
+    "$subject_us" T004 'bash tests/integration.sh' not-applicable
+  rewrite "$feature/tasks.md" 's/^- \[ \] T005/- [x] T005/'
+  git -C "$repo" add -- specs
+  git -C "$repo" commit -qm 'Historical story PASS metadata'
+
+  rewrite "$feature/tasks.md" 's/^- \[ \] T006/- [x] T006/'
+  git -C "$repo" add -- specs
+  git -C "$repo" commit -qm 'Historical final subject'
+  final_subject=$(git -C "$repo" rev-parse HEAD)
+  if [[ "$protocol" == 2 ]]; then final_base="$original"; else final_base="$baseline"; fi
+  final_delta=$(final_delta_digest "$repo" "$final_base" "$final_subject")
+  write_legacy_review "$feature" "$protocol" REV-FINAL FINAL "$baseline" "$final_base" \
+    "$final_subject" T001,T002,T004,T006 'bash tests/run-all.sh' "$final_delta"
+  rewrite "$feature/tasks.md" 's/^- \[ \] T007/- [x] T007/'
+  git -C "$repo" add -- specs
+  git -C "$repo" commit -qm 'Historical REV-FINAL PASS metadata'
+  final_review=$(git -C "$repo" rev-parse HEAD)
+  acceptance="$feature/.gatespec/acceptance.md"
+  if [[ "$protocol" == 2 ]]; then epoch=E1; else epoch=not-applicable; original="$baseline"; fi
+  {
+    printf '%s\n' '# GateSpec Implementation Acceptance'
+    printf -- '- **Protocol-Version**: `%s`\n' "$protocol"
+    printf '%s\n' '- **Status**: `Accepted`' '- **Accepted-At**: `2026-08-24T12:00:00Z`'
+    printf -- '- **Spec-Content-SHA256**: `%s`\n' "$(hash_of "$feature/spec.md")"
+    printf -- '- **Plan-Content-SHA256**: `%s`\n' "$(hash_of "$feature/plan.md")"
+    printf -- '- **Design-Attachments-SHA256**: `%s`\n' "$(attachments_digest "$feature")"
+    printf -- '- **Tasks-Definition-SHA256**: `%s`\n' "$(normalized_tasks_digest "$feature/tasks.md")"
+    printf -- '- **Execution-Epoch**: `%s`\n' "$epoch"
+    printf '%s\n' '- **Source-Design-Content-SHA256**: `not-applicable`' '- **Implementation-Adjustments-SHA256**: `not-applicable`'
+    printf -- '- **Original-Implementation-Baseline**: `%s`\n' "$original"
+    printf -- '- **Final-Subject-Commit**: `%s`\n' "$final_subject"
+    printf -- '- **REV-FINAL-Seal-SHA256**: `%s`\n' "$(receipt_field "$feature/.gatespec/reviews/REV-FINAL/seal.md" 'Seal-SHA256')"
+    printf -- '- **Final-Review-Commit**: `%s`\n' "$final_review"
+    printf -- '- **Final-Delta-SHA256**: `%s`\n' "$final_delta"
+    printf '%s\n' '- **Acceptance-SHA256**: `pending`'
+  } > "$acceptance"
+  seal_self_hash "$acceptance" 'Acceptance-SHA256'
+  git -C "$repo" add -- "$acceptance"
+  git -C "$repo" commit -qm "Accept historical Protocol v$protocol delivery"
   printf '%s' "$feature"
 }
 
@@ -408,6 +732,11 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 - **User GateSpec constraints**: absent — SHA-256: `absent`
 - **Effective constraints**: portable watcher; connections remain active.
 - **Conflicts and resolutions**: None — sources do not conflict.
+### Test Control Policy Exceptions *(gatespec: mandatory)*
+- **Mode**: `none`
+| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |
+|---|---|---|---|---|
+| none | none | none | none | none |
 ## Scope Contract
 - **Primary outcome**: An operator saving a supported configuration while the daemon is running observes the complete new values within one second without disconnecting active clients.
 - **Core completion refs**: `SC-001`
@@ -510,8 +839,45 @@ All effective constraints are satisfied.
    - **Technical basis**: CAP-001, FR-001, FR-002, quickstart.md, and the existing service lifecycle.
 ## Implementation Freedoms
 - Poll interval representation — constraints: preserve the one-second acceptance bound.
-## Implementation Review Contract
-- **Protocol Version**: \`1\`
+## Test Control Policy *(gatespec: mandatory)*
+- **Policy Schema**: \`1\`
+- **Registration Stage**: \`native tasks only\`
+- **Allowed Modes**: \`none|isolated\`
+- **Isolation Contract**: Test Control source roots end in \`/src/testonly\`; the
+  terminal namespace or module is \`testonly\`, or a language without namespaces
+  uses a leading \`TestOnly\`/\`test_only\` name. Formal product APIs gain no
+  testing parameter, option, overload, getter, or state.
+- **Activation Contract**: each hook project uses a dedicated positive
+  \`*_ENABLE_TEST_HOOKS\` compile switch whose declared default is \`OFF\`; only an
+  explicit opt-in enables it. Runtime activation and common Debug,
+  \`BUILD_TESTING\`, or equivalent umbrella triggers are forbidden. The OFF build
+  fully elides Test Control fields, branches, resources, and symbols.
+- **Control Contract**: controls are typed, declarative, single-purpose,
+  per-instance RAII and limited to named one-shot, count, barrier, time,
+  random, fault, or observation effects. Generic callbacks, options bags,
+  global mutable state, validation bypasses, duplicated business algorithms,
+  placeholders, and controls without a named verification gap are forbidden.
+  A control is removed with its last consumer.
+- **Production Readability Contract**: each affected production function has at
+  most one visually contiguous dedicated \`*_ENABLE_TEST_HOOKS\` macro-guard
+  block. That block contains only one \`testonly\` call and feeds its result into
+  the normal production error/result path. Counting, waiting, fault selection,
+  and observer dispatch live entirely under the registered \`/src/testonly\`
+  surface.
+- **Validator Contract**: every isolated hook project supplies one tracked
+  regular non-symlink Bash validator with \`testonly\` in its path/name and the
+  sole invocation \`bash <validator> --gatespec-lane default-off|explicit-on\`
+  (file mode may be 100644 or 100755). The default
+  lane omits the hook option; the explicit lane sets it ON. Both run the same
+  normal tests, the ON lane additionally runs hook-consuming tests, and output
+  is canonical and subject-bound.
+## Test Control Policy Exceptions *(gatespec: mandatory)*
+- **Mode**: \`none\`
+| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |
+|---|---|---|---|---|
+| none | none | none | none | none |
+## Implementation Review Contract *(gatespec: mandatory)*
+- **Protocol Version**: \`3\`
 - **Required Checkpoints**: \`REV-FOUNDATION, REV-US1, REV-FINAL\`
 - **Review Root**: \`.gatespec/reviews\`
 - **Task Review**: \`REV-TASKS after speckit.analyze; PASS required before speckit.implement\`
@@ -1276,7 +1642,7 @@ awk '
   {print}
 ' "$TEST_TMP/closure-placement/tasks.md" > "$TEST_TMP/closure-placement/tasks.md.tmp"
 mv "$TEST_TMP/closure-placement/tasks.md.tmp" "$TEST_TMP/closure-placement/tasks.md"
-expect fail tasks-structure "$TEST_TMP/closure-placement" "Closure sections must be the final two H2 sections before phases"
+expect fail tasks-structure "$TEST_TMP/closure-placement" "Closure sections must be the final three H2 sections before phases"
 
 clone_good closure-checkpoint-order
 make_tasks "$TEST_TMP/closure-checkpoint-order"
@@ -1322,6 +1688,7 @@ expect fail tasks-structure "$TEST_TMP/closure-cap-ref" \
 
 clone_good prior-multiline
 make_tasks "$TEST_TMP/prior-multiline"
+init_fixture_execution_state "$TEST_TMP/prior-multiline"
 write_pass_review "$TEST_TMP/prior-multiline" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
 awk '
@@ -1344,8 +1711,40 @@ set_prior_finding "$TEST_TMP/prior-multiline/tasks.md" "$multiline_finding" \
 expect pass tasks-structure "$TEST_TMP/prior-multiline" \
   "Prior Review Closure binds the full LF-delimited multiline BLOCKER item"
 
+clone_good blocked-none-found-zero-scale
+make_tasks "$TEST_TMP/blocked-none-found-zero-scale"
+init_fixture_execution_state "$TEST_TMP/blocked-none-found-zero-scale"
+write_pass_review "$TEST_TMP/blocked-none-found-zero-scale" REV-TASKS TASKS \
+  not-applicable not-applicable not-applicable none \
+  '- Not run — task-plan review' '- Not run — task-plan review' \
+  '- Fixture limitation.' 00 none BLOCKED
+rewrite "$TEST_TMP/blocked-none-found-zero-scale/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  's/- \*\*Undeclared-Controls\*\*: `none`/- **Undeclared-Controls**: `found`/'
+seal_self_hash \
+  "$TEST_TMP/blocked-none-found-zero-scale/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  'Verdict-SHA256'
+blocked_none_finding=$(blocker_digest '- BLOCKER: fixture remediation required')
+set_prior_finding "$TEST_TMP/blocked-none-found-zero-scale/tasks.md" \
+  "$blocked_none_finding" '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' \
+  REV-FOUNDATION T002
+expect pass tasks-structure "$TEST_TMP/blocked-none-found-zero-scale" \
+  "BLOCKED Mode none may report an undeclared control with an exact zero hidden-control scale"
+
+cp -R "$TEST_TMP/blocked-none-found-zero-scale" "$TEST_TMP/blocked-none-nonzero-scale"
+rewrite "$TEST_TMP/blocked-none-nonzero-scale/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  's/- \*\*Undeclared-Controls\*\*: `found`/- **Undeclared-Controls**: `none`/'
+rewrite "$TEST_TMP/blocked-none-nonzero-scale/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  's/additions=0; churn=0; files=0; touchpoints=0/additions=1; churn=1; files=1; touchpoints=0/'
+seal_self_hash \
+  "$TEST_TMP/blocked-none-nonzero-scale/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  'Verdict-SHA256'
+expect fail tasks-structure "$TEST_TMP/blocked-none-nonzero-scale" \
+  "BLOCKED Mode none with no undeclared control cannot report nonzero Test Control scale" \
+  "Mode none without an undeclared control must use exact all-zero Test-Control-Scale counts"
+
 clone_good prior-blank-continuation
 make_tasks "$TEST_TMP/prior-blank-continuation"
+init_fixture_execution_state "$TEST_TMP/prior-blank-continuation"
 write_pass_review "$TEST_TMP/prior-blank-continuation" REV-TASKS TASKS \
   not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review' \
@@ -1374,6 +1773,7 @@ expect fail tasks-structure "$TEST_TMP/prior-blank-continuation" \
 
 clone_good prior-duplicate-text
 make_tasks "$TEST_TMP/prior-duplicate-text"
+init_fixture_execution_state "$TEST_TMP/prior-duplicate-text"
 write_pass_review "$TEST_TMP/prior-duplicate-text" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
 duplicate_round00_hash=$(receipt_field \
@@ -1404,18 +1804,39 @@ rewrite "$TEST_TMP/prior-remediation-late/tasks.md" 's/| REV-FOUNDATION | T002 |
 expect fail tasks-structure "$TEST_TMP/prior-remediation-late" \
   "finding remediation must exist, be executable, and precede Required-before"
 
-cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-archive"
-mkdir -p "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/reviews"
-cp "$TEST_TMP/prior-archive/tasks.md" \
-  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/tasks.md"
+prior_archive_repo="$TEST_TMP/prior-archive-repo"
+prior_archive_feature=$(init_feature_repo "$prior_archive_repo")
+write_pass_review "$prior_archive_feature" REV-TASKS TASKS not-applicable \
+  not-applicable not-applicable none '- Not run — task-plan review' \
+  '- Not run — task-plan review' '- Fixture limitation.' 00 none BLOCKED
+awk '
+  $0 == "- BLOCKER: fixture remediation required" {
+    print "- BLOCKER: Add rollback verification before implementation."
+    print "  The verification must retain an active connection across reload."
+    next
+  }
+  {print}
+' "$prior_archive_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  > "$TEST_TMP/prior-archive-verdict.md"
+mv "$TEST_TMP/prior-archive-verdict.md" \
+  "$prior_archive_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md"
+seal_self_hash "$prior_archive_feature/.gatespec/reviews/REV-TASKS/round-00-verdict.md" \
+  'Verdict-SHA256'
+set_prior_finding "$prior_archive_feature/tasks.md" "$multiline_finding" \
+  '.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01' REV-FOUNDATION T002
+mkdir -p "$prior_archive_feature/.gatespec/archive/20260824T031415Z-retask/reviews"
+cp "$prior_archive_feature/tasks.md" \
+  "$prior_archive_feature/.gatespec/archive/20260824T031415Z-retask/tasks.md"
+cp "$prior_archive_feature/.gatespec/execution-state.md" \
+  "$prior_archive_feature/.gatespec/archive/20260824T031415Z-retask/execution-state.md"
 clear_prior_finding \
-  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/tasks.md" \
+  "$prior_archive_feature/.gatespec/archive/20260824T031415Z-retask/tasks.md" \
   "$multiline_finding"
-mv "$TEST_TMP/prior-archive/.gatespec/reviews/REV-TASKS" \
-  "$TEST_TMP/prior-archive/.gatespec/archive/20260824T031415Z-retask/reviews/REV-TASKS"
-rewrite "$TEST_TMP/prior-archive/tasks.md" \
+mv "$prior_archive_feature/.gatespec/reviews/REV-TASKS" \
+  "$prior_archive_feature/.gatespec/archive/20260824T031415Z-retask/reviews/REV-TASKS"
+rewrite "$prior_archive_feature/tasks.md" \
   's|.gatespec/reviews/REV-TASKS/round-00-verdict.md#B01|.gatespec/archive/20260824T031415Z-retask/reviews/REV-TASKS/round-00-verdict.md#B01|'
-expect pass tasks-structure "$TEST_TMP/prior-archive" "retask archives remain finding sources"
+expect pass tasks-structure "$prior_archive_feature" "retask archives remain finding sources"
 
 cp -R "$TEST_TMP/prior-multiline" "$TEST_TMP/prior-restart-archive"
 mkdir -p "$TEST_TMP/prior-restart-archive/.gatespec/archive/20260824T031415Z-restart/reviews"
@@ -1518,10 +1939,10 @@ write_pass_review "$grandfather_feature" REV-TASKS TASKS not-applicable not-appl
   '- Not run — task-plan review' '- Not run — task-plan review'
 git -C "$grandfather_repo" add -- .
 git -C "$grandfather_repo" commit -qm 'Legacy task review before Closure schema'
-expect pass tasks-structure "$grandfather_feature" \
-  "legacy tasks without Closure are grandfathered only by a current tracked clean PASS seal"
-expect pass retask-eligible "$grandfather_feature" \
-  "a valid legacy PASS handoff remains retask-eligible before implementation"
+expect fail tasks-structure "$grandfather_feature" \
+  "active Protocol v3 cannot grandfather tasks that omit Test Control Closure"
+expect fail retask-eligible "$grandfather_feature" \
+  "active Protocol v3 without Test Control Closure is not retask-eligible"
 
 grandfather_archive_repo="$TEST_TMP/grandfather-canonical-retask-archive-repo"
 git clone -q --local --no-hardlinks "$grandfather_repo" "$grandfather_archive_repo"
@@ -1544,10 +1965,10 @@ git -C "$grandfather_archive_repo" add -- \
   specs/001-hot-reload/.gatespec/reviews/REV-TASKS/seal.md
 git -C "$grandfather_archive_repo" commit -qm \
   'Refresh the current PASS seal after canonical archival'
-expect pass tasks-structure "$grandfather_archive_feature" \
-  "a canonical legacy retask archive preserves Closure grandfathering"
-expect pass retask-eligible "$grandfather_archive_feature" \
-  "a canonical legacy retask archive remains eligible for replacement"
+expect fail tasks-structure "$grandfather_archive_feature" \
+  "an archive cannot make active Protocol v3 Closure omission historical"
+expect fail retask-eligible "$grandfather_archive_feature" \
+  "an archive cannot make active Protocol v3 Closure omission retask-eligible"
 
 for archive_hidden_bit in assume-unchanged skip-worktree; do
   archive_hidden_repo="$TEST_TMP/grandfather-retask-archive-hidden-$archive_hidden_bit"
@@ -1638,7 +2059,6 @@ expect fail retask-eligible "$grandfather_bad_archive_feature" \
 
 pass_unknown_repo="$TEST_TMP/pass-unknown-receipt-repo"
 pass_unknown_feature=$(init_feature_repo "$pass_unknown_repo")
-strip_task_closure "$pass_unknown_feature/tasks.md"
 write_pass_review "$pass_unknown_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review'
 printf '%s\n' 'unknown receipt content' \
@@ -1646,11 +2066,11 @@ printf '%s\n' 'unknown receipt content' \
 git -C "$pass_unknown_repo" add -- .
 git -C "$pass_unknown_repo" commit -qm 'Seal task review with unknown receipt content'
 expect fail retask-eligible "$pass_unknown_feature" \
-  "sealed PASS review directories reject unknown or nested receipt content"
+  "sealed PASS review directories reject unknown or nested receipt content" \
+  "historical chain contains non-canonical receipt files"
 
 pass_product_repo="$TEST_TMP/pass-product-cocommit-repo"
 pass_product_feature=$(init_feature_repo "$pass_product_repo")
-strip_task_closure "$pass_product_feature/tasks.md"
 write_pass_review "$pass_product_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review'
 mkdir -p "$pass_product_repo/src"
@@ -1658,11 +2078,11 @@ printf '%s\n' 'product hidden in PASS baseline' > "$pass_product_repo/src/pass-p
 git -C "$pass_product_repo" add -- .
 git -C "$pass_product_repo" commit -qm 'Seal task review together with product work'
 expect fail retask-eligible "$pass_product_feature" \
-  "v1 PASS baseline commit cannot co-commit product work with the task seal"
+  "Protocol v3 PASS baseline commit cannot co-commit product work with the task seal" \
+  "Protocol v2/v3 product or unknown evidence path"
 
 pass_prior_product_repo="$TEST_TMP/pass-prior-product-repo"
 pass_prior_product_feature=$(init_feature_repo "$pass_prior_product_repo")
-strip_task_closure "$pass_prior_product_feature/tasks.md"
 git -C "$pass_prior_product_repo" add -- .
 git -C "$pass_prior_product_repo" commit -qm 'Record native tasks before review'
 mkdir -p "$pass_prior_product_repo/src"
@@ -1677,15 +2097,21 @@ git -C "$pass_prior_product_repo" add -- \
   specs/001-hot-reload/.gatespec/reviews/REV-TASKS
 git -C "$pass_prior_product_repo" commit -qm 'Seal task review after product work'
 expect fail retask-eligible "$pass_prior_product_feature" \
-  "v1 PASS eligibility rejects product work committed before the final seal commit"
+  "Protocol v3 PASS eligibility rejects product work committed before the final seal commit" \
+  "Protocol v2/v3 product or unknown evidence path"
 
 hidden_product_base_repo="$TEST_TMP/pass-hidden-product-base-repo"
-hidden_product_base_feature=$(init_feature_repo "$hidden_product_base_repo")
+mkdir -p "$hidden_product_base_repo"
+git -C "$hidden_product_base_repo" init -q
+git -C "$hidden_product_base_repo" symbolic-ref HEAD refs/heads/feature
+git -C "$hidden_product_base_repo" config user.name 'GateSpec Fixture'
+git -C "$hidden_product_base_repo" config user.email 'fixture@example.invalid'
 mkdir -p "$hidden_product_base_repo/src"
 printf '%s\n' 'pre-existing product baseline' \
   > "$hidden_product_base_repo/src/existing-product.cc"
 git -C "$hidden_product_base_repo" add -- src/existing-product.cc
-git -C "$hidden_product_base_repo" commit -qm 'Record pre-existing product baseline'
+git -C "$hidden_product_base_repo" commit -qm 'Record product before the first Plan boundary'
+hidden_product_base_feature=$(init_feature_repo "$hidden_product_base_repo")
 write_pass_review "$hidden_product_base_feature" REV-TASKS TASKS \
   not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review'
@@ -1693,7 +2119,7 @@ git -C "$hidden_product_base_repo" add -- specs/001-hot-reload
 git -C "$hidden_product_base_repo" commit -qm \
   'Seal a valid task review after the product baseline'
 expect pass retask-eligible "$hidden_product_base_feature" \
-  "v1 PASS permits an unchanged product path that predates the first Plan boundary"
+  "Protocol v3 PASS permits an unchanged product path that predates the first Plan boundary"
 for hidden_product_bit in assume-unchanged skip-worktree; do
   hidden_product_repo="$TEST_TMP/pass-hidden-product-$hidden_product_bit"
   git clone -q --local --no-hardlinks "$hidden_product_base_repo" "$hidden_product_repo"
@@ -1705,7 +2131,7 @@ for hidden_product_bit in assume-unchanged skip-worktree; do
   printf '%s\n' 'product implementation changed after task review' \
     > "$hidden_product_repo/src/existing-product.cc"
   expect fail retask-eligible "$hidden_product_feature" \
-    "v1 PASS rejects tracked product drift hidden by $hidden_product_bit"
+    "Protocol v3 PASS rejects tracked product drift hidden by $hidden_product_bit"
 done
 
 printf '%s\n' 'dirty grandfather state' > "$grandfather_repo/untracked.txt"
@@ -1854,36 +2280,9 @@ git -C "$retask_untracked_repo" add -- \
   specs/001-hot-reload/spec.md specs/001-hot-reload/plan.md
 git -C "$retask_untracked_repo" commit -qm 'Approve current plan'
 make_untracked_retask_chain "$retask_untracked_feature"
-expect pass retask-eligible "$retask_untracked_feature" \
-  "v1 wholly untracked task-review chain uses the parent of its exact Plan commit"
-
-retask_ignored_repo="$TEST_TMP/retask-ignored-untracked-chain-repo"
-cp -R "$retask_untracked_repo" "$retask_ignored_repo"
-retask_ignored_feature="$retask_ignored_repo/specs/001-hot-reload"
-printf '%s\n' 'specs/001-hot-reload/tasks.md' >> "$retask_ignored_repo/.git/info/exclude"
-expect fail retask-eligible "$retask_ignored_feature" \
-  "wholly untracked retask archive sources must not be hidden by ignore rules"
-
-retask_symlink_repo="$TEST_TMP/retask-symlink-source-repo"
-cp -R "$retask_untracked_repo" "$retask_symlink_repo"
-retask_symlink_feature="$retask_symlink_repo/specs/001-hot-reload"
-mv "$retask_symlink_feature/tasks.md" "$TEST_TMP/retask-symlink-target-tasks.md"
-ln -s "$TEST_TMP/retask-symlink-target-tasks.md" "$retask_symlink_feature/tasks.md"
-expect fail retask-eligible "$retask_symlink_feature" \
-  "retask rejects a symlinked tasks archive source"
-
-retask_untracked_product_repo="$TEST_TMP/retask-untracked-plan-product-repo"
-retask_untracked_product_feature=$(init_feature_repo "$retask_untracked_product_repo")
-git -C "$retask_untracked_product_repo" commit --allow-empty -qm 'Repository baseline'
-mkdir -p "$retask_untracked_product_repo/src"
-printf '%s\n' 'product work hidden in plan commit' \
-  > "$retask_untracked_product_repo/src/plan-product.txt"
-git -C "$retask_untracked_product_repo" add -- \
-  specs/001-hot-reload/spec.md specs/001-hot-reload/plan.md src/plan-product.txt
-git -C "$retask_untracked_product_repo" commit -qm 'Approve plan with forbidden product delta'
-make_untracked_retask_chain "$retask_untracked_product_feature"
-expect fail retask-eligible "$retask_untracked_product_feature" \
-  "v1 wholly untracked fallback inspects the Plan commit itself for product paths"
+expect fail retask-eligible "$retask_untracked_feature" \
+  "unstaged active-v3 task-review bytes are not a valid legacy fallback" \
+  "index and working-tree bytes differ for archive source"
 
 retask_parent_product_repo="$TEST_TMP/retask-round00-parent-product-repo"
 retask_parent_product_feature=$(init_feature_repo "$retask_parent_product_repo")
@@ -2158,6 +2557,9 @@ expect_review fail task-review "$ignored_handoff_feature" REV-TASKS "ignored tas
 # Implementation phase seals and cumulative final review -------------------
 implementation_repo="$TEST_TMP/implementation-repo"
 implementation_feature=$(init_feature_repo "$implementation_repo")
+implementation_original=$(receipt_field \
+  "$implementation_feature/.gatespec/execution-state.md" \
+  'Original-Implementation-Baseline')
 write_pass_review "$implementation_feature" REV-TASKS TASKS not-applicable not-applicable not-applicable none \
   '- Not run — task-plan review' '- Not run — task-plan review'
 git -C "$implementation_repo" add -- .
@@ -2231,15 +2633,17 @@ git -C "$implementation_repo" commit -qm 'Complete final implementation'
 final_subject=$(git -C "$implementation_repo" rev-parse HEAD)
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$final_subject" T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+  "$implementation_original" "$final_subject" T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
 expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final Task-IDs cannot omit feature implementation tasks" "Task-IDs must exactly match"
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
   "$us1_subject" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
-expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final review cannot use only the last phase diff" "Base-Commit must equal Implementation-Baseline"
+expect_review fail implementation-candidate "$implementation_feature" REV-FINAL \
+  "final review cannot use only the last phase diff" \
+  "Protocol v2/v3 Base-Commit must equal Original-Implementation-Baseline"
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+  "$implementation_original" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
 expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final seal requires every task checkbox complete" "requires every valid task checkbox"
 
 rewrite "$implementation_feature/tasks.md" 's/^- \[ \] T007/- [x] T007/'
@@ -2247,22 +2651,22 @@ expect_review pass implementation-candidate "$implementation_feature" REV-FINAL 
 expect_review fail implementation-review "$implementation_feature" REV-FINAL "after-hook mode rejects an uncommitted candidate" "requires a clean worktree"
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- echo substitute-test' '- echo substitute-test — PASS'
+  "$implementation_original" "$final_subject" T001,T002,T004,T006 '- echo substitute-test' '- echo substitute-test — PASS'
 expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "request cannot replace the approved checkpoint test" "must exactly match the approved checkpoint mapping"
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh'
+  "$implementation_original" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh'
 expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "verdict must record an outcome for every approved test" "plus its result"
 
 final_tree=$(git -C "$implementation_repo" rev-parse "$final_subject^{tree}")
 alternate_subject=$(printf '%s\n' 'alternate final without stage ancestry' | \
   git -C "$implementation_repo" commit-tree "$final_tree" -p "$implementation_baseline")
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$alternate_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+  "$implementation_original" "$alternate_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
 expect_review fail implementation-candidate "$implementation_feature" REV-FINAL "final subject must contain every previously sealed stage" "must descend from the preceding checkpoint Subject-Commit"
 
 write_pass_review "$implementation_feature" REV-FINAL FINAL "$implementation_baseline" \
-  "$implementation_baseline" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
+  "$implementation_original" "$final_subject" T001,T002,T004,T006 '- bash tests/run-all.sh' '- bash tests/run-all.sh — PASS'
 expect_review pass implementation-candidate "$implementation_feature" REV-FINAL "restored cumulative final candidate passes"
 git -C "$implementation_repo" add -- specs/001-hot-reload/tasks.md \
   specs/001-hot-reload/.gatespec/reviews/REV-FINAL
@@ -2275,22 +2679,28 @@ git -C "$legacy_acceptance_repo" config user.name 'GateSpec Fixture'
 git -C "$legacy_acceptance_repo" config user.email 'fixture@example.invalid'
 legacy_acceptance_feature="$legacy_acceptance_repo/specs/001-hot-reload"
 legacy_final_review_commit=$(git -C "$legacy_acceptance_repo" rev-parse HEAD)
-legacy_final_delta=$(final_delta_digest "$legacy_acceptance_repo" "$implementation_baseline" "$final_subject")
+legacy_original=$(receipt_field "$legacy_acceptance_feature/.gatespec/execution-state.md" 'Original-Implementation-Baseline')
+legacy_final_delta=$(final_delta_digest "$legacy_acceptance_repo" "$legacy_original" "$final_subject")
 legacy_acceptance="$legacy_acceptance_feature/.gatespec/acceptance.md"
 cat > "$legacy_acceptance" <<EOF
 # GateSpec Implementation Acceptance
 
-- **Protocol-Version**: \`1\`
+- **Protocol-Version**: \`3\`
 - **Status**: \`Accepted\`
 - **Accepted-At**: \`2026-08-24T12:00:00Z\`
 - **Spec-Content-SHA256**: \`$(hash_of "$legacy_acceptance_feature/spec.md")\`
 - **Plan-Content-SHA256**: \`$(hash_of "$legacy_acceptance_feature/plan.md")\`
 - **Design-Attachments-SHA256**: \`$(attachments_digest "$legacy_acceptance_feature")\`
 - **Tasks-Definition-SHA256**: \`$(normalized_tasks_digest "$legacy_acceptance_feature/tasks.md")\`
-- **Execution-Epoch**: \`not-applicable\`
+- **Test-Control-Mode**: \`none\`
+- **Test-Control-Closure-SHA256**: \`$(receipt_field "$legacy_acceptance_feature/.gatespec/reviews/REV-FINAL/seal.md" 'Test-Control-Closure-SHA256')\`
+- **Test-Control-Subject-Manifest-SHA256**: \`not-applicable\`
+- **Default-OFF-Evidence-SHA256**: \`not-applicable\`
+- **Explicit-ON-Evidence-SHA256**: \`not-applicable\`
+- **Execution-Epoch**: \`E1\`
 - **Source-Design-Content-SHA256**: \`not-applicable\`
 - **Implementation-Adjustments-SHA256**: \`not-applicable\`
-- **Original-Implementation-Baseline**: \`$implementation_baseline\`
+- **Original-Implementation-Baseline**: \`$legacy_original\`
 - **Final-Subject-Commit**: \`$final_subject\`
 - **REV-FINAL-Seal-SHA256**: \`$(receipt_field "$legacy_acceptance_feature/.gatespec/reviews/REV-FINAL/seal.md" 'Seal-SHA256')\`
 - **Final-Review-Commit**: \`$legacy_final_review_commit\`
@@ -2300,7 +2710,69 @@ EOF
 seal_self_hash "$legacy_acceptance" 'Acceptance-SHA256'
 git -C "$legacy_acceptance_repo" add -- specs/001-hot-reload/.gatespec/acceptance.md
 git -C "$legacy_acceptance_repo" commit -qm 'Accept final GateSpec implementation'
-expect pass acceptance "$legacy_acceptance_feature" "legacy Protocol v1 also requires and validates final acceptance"
+expect pass acceptance "$legacy_acceptance_feature" "Protocol v3 none mode requires and validates final acceptance"
+
+for historical_protocol in 1 2; do
+  historical_repo="$TEST_TMP/accepted-protocol-v$historical_protocol"
+  historical_feature=$(build_accepted_legacy_delivery "$historical_repo" "$historical_protocol")
+  expect pass acceptance-candidate "$historical_feature" \
+    "tracked accepted Protocol v$historical_protocol delivery passes the acceptance-candidate hook"
+  expect pass acceptance "$historical_feature" \
+    "accepted Protocol v$historical_protocol delivery remains valid historical evidence"
+  if [[ "$historical_protocol" -eq 2 ]]; then
+    contaminated_repo="$TEST_TMP/accepted-protocol-v2-v3-field"
+    git clone -q --local --no-hardlinks "$historical_repo" "$contaminated_repo"
+    git -C "$contaminated_repo" config user.name 'GateSpec Historical Fixture'
+    git -C "$contaminated_repo" config user.email 'historical@example.invalid'
+    contaminated_feature="$contaminated_repo/specs/001-hot-reload"
+    contaminated_acceptance="$contaminated_feature/.gatespec/acceptance.md"
+    contaminated_original_review=$(receipt_field "$contaminated_acceptance" 'Final-Review-Commit')
+    cp "$contaminated_acceptance" "$TEST_TMP/accepted-v2-contaminated-acceptance.md"
+    git -C "$contaminated_repo" checkout -q -b contaminated-v3-field \
+      "$contaminated_original_review"
+
+    contaminated_request="$contaminated_feature/.gatespec/reviews/REV-FINAL/round-00-request.md"
+    contaminated_verdict="$contaminated_feature/.gatespec/reviews/REV-FINAL/round-00-verdict.md"
+    contaminated_seal="$contaminated_feature/.gatespec/reviews/REV-FINAL/seal.md"
+    contaminated_old_request=$(receipt_field "$contaminated_request" 'Request-SHA256')
+    contaminated_old_verdict=$(receipt_field "$contaminated_verdict" 'Verdict-SHA256')
+    contaminated_old_seal=$(receipt_field "$contaminated_seal" 'Seal-SHA256')
+    awk '
+      /^- \*\*Execution-Epoch\*\*:/ {
+        print "- **Test-Control-Mode**: `none`"
+      }
+      {print}
+    ' "$contaminated_request" > "$TEST_TMP/accepted-v2-contaminated-request.md"
+    mv "$TEST_TMP/accepted-v2-contaminated-request.md" "$contaminated_request"
+    seal_self_hash "$contaminated_request" 'Request-SHA256'
+    contaminated_new_request=$(receipt_field "$contaminated_request" 'Request-SHA256')
+    rewrite "$contaminated_verdict" \
+      "s/$contaminated_old_request/$contaminated_new_request/"
+    seal_self_hash "$contaminated_verdict" 'Verdict-SHA256'
+    contaminated_new_verdict=$(receipt_field "$contaminated_verdict" 'Verdict-SHA256')
+    rewrite "$contaminated_seal" \
+      "s/$contaminated_old_request/$contaminated_new_request/"
+    rewrite "$contaminated_seal" \
+      "s/$contaminated_old_verdict/$contaminated_new_verdict/"
+    seal_self_hash "$contaminated_seal" 'Seal-SHA256'
+    contaminated_new_seal=$(receipt_field "$contaminated_seal" 'Seal-SHA256')
+    git -C "$contaminated_repo" add -- specs/001-hot-reload/.gatespec/reviews/REV-FINAL
+    git -C "$contaminated_repo" commit -qm 'Contaminate historical v2 final request with v3 field'
+    contaminated_new_review=$(git -C "$contaminated_repo" rev-parse HEAD)
+
+    cp "$TEST_TMP/accepted-v2-contaminated-acceptance.md" "$contaminated_acceptance"
+    rewrite "$contaminated_acceptance" \
+      "s/$contaminated_old_seal/$contaminated_new_seal/"
+    rewrite "$contaminated_acceptance" \
+      "s/$contaminated_original_review/$contaminated_new_review/"
+    seal_self_hash "$contaminated_acceptance" 'Acceptance-SHA256'
+    git -C "$contaminated_repo" add -- specs/001-hot-reload/.gatespec/acceptance.md
+    git -C "$contaminated_repo" commit -qm 'Accept contaminated historical v2 delivery'
+    expect fail acceptance-candidate "$contaminated_feature" \
+      "accepted Protocol v2 cannot smuggle a Protocol v3 field into its final request" \
+      "Protocol v1/v2 must not contain Protocol v3 field Test-Control-Mode"
+  fi
+done
 
 printf '%s\n' 'specs/001-hot-reload/.gatespec/reviews/REV-FOUNDATION/seal.md' \
   >> "$implementation_repo/.git/info/exclude"

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.10.0 (2026-08-27)
+
+- Added Review Protocol v3. New and revised Plans now bind an explicit Test
+  Control Closure through every task and implementation review; active
+  unaccepted Protocol v1/v2 work must return to `gatespec.plan --revise`, while
+  already accepted deliveries remain immutable historical evidence.
+- Added the `none` and `isolated` Test Control modes plus a Requirements-owned,
+  allowlisted `TCE-###` overlay for explicitly approved source-auditable
+  replacements. Without a matching TCE, isolated controls use `src/testonly`,
+  a terminal test-only namespace/module, typed per-instance RAII, and the
+  canonical switch/validator/touchpoint shapes. The dedicated switch remains
+  default OFF, and runtime activation plus the evidence/lifecycle floor are
+  never exemptable.
+- Added tracked test-only validators with fixed `default-off` and `explicit-on`
+  lanes. REV-FINAL now binds fresh evidence for both lanes, the exact closure,
+  and the reviewed subject manifest through request, seal, and final
+  acceptance. Production and Test-Control scale are reported separately but
+  may explicitly overlap for production touchpoint/build-wiring files and
+  their dedicated hook-attributable lines; default-OFF-proven surface-only
+  objects, validators, and tests remain excluded from Production.
+- Added deterministic Test Control Closure, receipt/audit, validator, evidence,
+  legacy-migration, IA-drift, and post-seal-source fixtures, plus prompt
+  regressions for production-API seams, fake namespace aliases, ineffective
+  validators, and runtime activation.
+
 ## 0.9.0 (2026-08-26)
 
 - Added Scope Contract Schema 1 to new/revised Requirements, binding one

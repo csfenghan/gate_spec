@@ -79,6 +79,23 @@
 - **Effective constraints**: [按优先级排列的中文有效约束，包含已批准的豁免]
 - **Conflicts and resolutions**: [用中文逐项记录冲突、胜出规则与原因，或 无 — 原因]
 
+<!--
+  GATESPEC: This is the sole Test Control policy-deviation channel. `approved`
+  rows cite an already concluded high-risk Requirements clarification; this
+  table does not create another approval. TCE rows alter only the named
+  semantic rule and cannot pre-register a concrete control, path::symbol,
+  touchpoint, switch, wiring, or validator. The replacement remains
+  source-auditable and cannot weaken Protocol 3's structural/lifecycle floor.
+-->
+
+### Test Control Policy Exceptions *(gatespec: mandatory)*
+
+- **Mode**: `none`
+
+| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |
+|---|---|---|---|---|
+| none | none | none | none | none |
+
 ## Scope Contract *(gatespec: mandatory)*
 
 <!--
@@ -91,7 +108,7 @@
   refs cell is exactly `none`. Pure implementation mechanisms create no CAP.
   Every non-deferred row contains at least one canonical FR-### and SC-### ref;
   collectively those rows cover every current FR and SC. Every Core completion
-  ref belongs to a `core` row. CAP IDs do not enter tasks Closure matrices.
+  ref belongs to a `core` row. CAP IDs do not enter tasks Closure tables.
 -->
 
 - **Primary outcome**: [participant, current state, trigger, and one observable result delivered now]

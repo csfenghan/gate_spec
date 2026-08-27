@@ -169,6 +169,12 @@ ambiguity.]
 - External behavior, compatibility, security or performance commitments.
 - Module responsibility, dependency direction, or cross-module API.
 - State ownership, concurrency, error semantics, schema, or algorithm invariant.
+- Any exact Test Control, `/src/testonly` surface, production hook touchpoint,
+  `*_ENABLE_TEST_HOOKS` switch, hook wiring, or project validator. Source
+  Design may explain a verification gap but concrete controls are registered
+  only by native tasks under the approved Protocol 3 canonical policy plus its
+  Requirements-copied TCE overlay. Source cannot add/change/delete/broaden a
+  TCE; that requires Requirements revision.
 
 Any uncertain or material departure blocks implementation and requires Source
 Design revision; it is not an implementation adjustment.

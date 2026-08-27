@@ -132,6 +132,8 @@ claude_accept="$RENDER_HOME/.claude/skills/speckit-gatespec-accept-implementatio
 codex_accept="$RENDER_HOME/.agents/skills/speckit-gatespec-accept-implementation/SKILL.md"
 claude_refine="$RENDER_HOME/.claude/skills/speckit-gatespec-refine-tasks/SKILL.md"
 codex_refine="$RENDER_HOME/.agents/skills/speckit-gatespec-refine-tasks/SKILL.md"
+claude_check_tasks="$RENDER_HOME/.claude/skills/speckit-gatespec-check-tasks/SKILL.md"
+codex_check_tasks="$RENDER_HOME/.agents/skills/speckit-gatespec-check-tasks/SKILL.md"
 claude_reviewer="$RENDER_HOME/.claude/agents/gatespec-reviewer.md"
 codex_reviewer="$RENDER_HOME/.codex/agents/gatespec-reviewer.toml"
 dollar='$'
@@ -335,6 +337,18 @@ for skill in "$claude_accept" "$codex_accept"; do
   grep -F 'actual Production additions' "$skill" >/dev/null || delivery_estimate_ok=0
   grep -F 'size alone' "$skill" >/dev/null || delivery_estimate_ok=0
 done
+test_control_protocol_ok=1
+for skill in "$claude_source" "$codex_source" "$claude_review_source" "$codex_review_source"; do
+  for rule in \
+    'Test-Control-Mode' \
+    'Test-Control-Closure-SHA256' \
+    'Test-Control-Subject-Manifest-SHA256' \
+    'Default-OFF-Evidence-SHA256' \
+    'Explicit-ON-Evidence-SHA256' \
+    'not-applicable'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
 for rule in \
   '**Delivery Estimate Schema**: 1' \
   '**Production additions**' \
@@ -376,22 +390,138 @@ for skill in "$claude_accept" "$codex_accept"; do
     grep -F "$rule" "$skill" >/dev/null || source_protocol_ok=0
   done
 done
+for skill in "$claude_source" "$codex_source"; do
+  grep -F 'must not register, name, or' "$skill" >/dev/null || test_control_protocol_ok=0
+  grep -F 'production hook' "$skill" >/dev/null || test_control_protocol_ok=0
+  grep -F 'task-stage registrations' "$skill" >/dev/null || test_control_protocol_ok=0
+done
+for skill in "$claude_review_source" "$codex_review_source"; do
+  grep -F 'without registering any exact control' "$skill" >/dev/null || test_control_protocol_ok=0
+  grep -F 'defer exact registration to native tasks' "$skill" >/dev/null || test_control_protocol_ok=0
+done
 for reviewer in "$claude_reviewer" "$codex_reviewer"; do
   for rule in 'REV-SOURCE' 'Source-Design-Reviewed-SHA256' 'Implementation-Adjustments-SHA256' 'Final-Delta-SHA256'; do
     grep -F "$rule" "$reviewer" >/dev/null || source_protocol_ok=0
   done
 done
 if [[ "$source_protocol_ok" -eq 1 ]]; then
-  ok "rendered Source Design, Protocol v2, IA, and final acceptance contracts are complete"
+  ok "rendered Source Design, Protocol v3, IA, and final acceptance contracts are complete"
 else
-  not_ok "Source Design / Protocol v2 / acceptance rendered contract"
+  not_ok "Source Design / Protocol v3 / acceptance rendered contract"
+fi
+
+for skill in "$claude_spec" "$codex_spec"; do
+  for rule in \
+    '### Test Control Policy Exceptions *(gatespec: mandatory)*' \
+    'Replacement source-auditable mechanism' \
+    'source-root' \
+    'validator-path-marker' \
+    'structural/lifecycle floor'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    '## Test Control Policy *(gatespec: mandatory)*' \
+    '## Test Control Policy Exceptions *(gatespec: mandatory)*' \
+    '**Protocol Version**: `3`' \
+    'active/unaccepted' \
+    'cannot be upgraded by retask' \
+    '*_ENABLE_TEST_HOOKS' \
+    'bash <validator> --gatespec-lane default-off|explicit-on' \
+    '**Production Readability Contract**'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
+for skill in "$claude_refine" "$codex_refine"; do
+  for rule in \
+    '## GateSpec Test Control Closure *(gatespec: mandatory)*' \
+    '| Control | Verification gap / production invariant | Test-only surface | Production touchpoint | Allowed effect / lifetime | Build switch / validator | Consumer tasks/tests | Default-build proof task |' \
+    '**Mode**: `none|isolated`' \
+    'TC-001' \
+    '/src/testonly' \
+    'per-instance' \
+    'default-off omits the option'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
+for skill in "$claude_review_tasks" "$codex_review_tasks" \
+             "$claude_review_implementation" "$codex_review_implementation"; do
+  for rule in \
+    '## Test Control Audit' \
+    '**Test-Control-Scale**' \
+    'Test-Control-Mode' \
+    'Test-Control-Closure-SHA256' \
+    'Test-Control-Subject-Manifest-SHA256' \
+    'Default-OFF-Evidence-SHA256' \
+    'Explicit-ON-Evidence-SHA256' \
+    'Crossing both requires both Rules' \
+    '`control-model` never authorizes production-side mechanics'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
+for skill in "$claude_accept" "$codex_accept"; do
+  for rule in \
+    'Test-Control-Mode' \
+    'Test-Control-Closure-SHA256' \
+    'Test-Control-Subject-Manifest-SHA256' \
+    'Default-OFF-Evidence-SHA256' \
+    'Explicit-ON-Evidence-SHA256'; do
+    grep -F -- "$rule" "$skill" >/dev/null || test_control_protocol_ok=0
+  done
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  for rule in \
+    '# GateSpec Test Control Evidence' \
+    '## Validator Results' \
+    'omitted-default-off' \
+    'production-install-package-when-present' \
+    'test-only-surface' \
+    'Open(path, CheckpointCoordinatorOptions)' \
+    'generic observer/options' \
+    'AgentHost' \
+    'echo-only validator' \
+    'fake terminal `testonly`' \
+    'runtime activation' \
+    'without registering a concrete' \
+    'actual configure' \
+    'Literal/precomputed hashes' \
+    'Crossing both requires both Rules' \
+    '`control-model` never authorizes production-side mechanics'; do
+    grep -F -- "$rule" "$reviewer" >/dev/null || test_control_protocol_ok=0
+  done
+done
+grep -F 'Source cannot name' "$claude_reviewer" >/dev/null || test_control_protocol_ok=0
+grep -F 'exact hook registration remains task-stage' "$codex_reviewer" >/dev/null || \
+  test_control_protocol_ok=0
+for skill in "$claude_check_tasks" "$codex_check_tasks"; do
+  grep -F 'This hook checks the declared structure' "$skill" >/dev/null || test_control_protocol_ok=0
+  grep -F 'fresh review still rejects fake namespace isolation' "$skill" >/dev/null || test_control_protocol_ok=0
+done
+for rule in \
+  '## Test Control Policy *(gatespec: mandatory)*' \
+  '**Policy Schema**: `1`' \
+  '**Protocol Version**: `3`'; do
+  grep -F -- "$rule" "$REPO/templates/gatespec-plan-template.md" >/dev/null || test_control_protocol_ok=0
+done
+for rule in \
+  '### Test Control Policy Exceptions *(gatespec: mandatory)*' \
+  '| Exception | Rule | Approved requirements decision | Replacement source-auditable mechanism | Reason / consequence |'; do
+  grep -F -- "$rule" "$REPO/templates/gatespec-spec-template.md" >/dev/null || test_control_protocol_ok=0
+done
+grep -F -- '## Test Control Policy Exceptions *(gatespec: mandatory)*' \
+  "$REPO/templates/gatespec-plan-template.md" >/dev/null || test_control_protocol_ok=0
+if [[ "$test_control_protocol_ok" -eq 1 ]]; then
+  ok "rendered skills, templates, and reviewers preserve Protocol v3 Test Controls"
+else
+  not_ok "Protocol v3 Test Control renderer contract"
 fi
 
 closure_protocol_ok=1
 for skill in "$claude_refine" "$codex_refine"; do
   for rule in \
     'The only persistent path this command may create or modify is that exact' \
-    'all nine audit categories' \
+    'all ten audit categories' \
     '## GateSpec Checkpoint Closure *(gatespec: mandatory)*' \
     '## GateSpec Prior Review Closure *(gatespec: mandatory)*' \
     '.gatespec/archive/*-retask/reviews/REV-TASKS/' \
@@ -578,7 +708,7 @@ hook_entry_count=$(awk '
   END {print count+0}
 ' extension.yml)
 
-if ! grep -F 'version: "0.9.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.10.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -596,9 +726,9 @@ if ! grep -F 'version: "0.9.0"' extension.yml >/dev/null ||
    [[ "$hook_entry_count" -ne 9 ]] ||
    [[ $(grep -c 'priority: 10' extension.yml || true) -ne 3 ]] ||
    [[ $(grep -c 'priority: 20' extension.yml || true) -ne 3 ]]; then
-  not_ok "0.9.0 manifest requirements and nine ordered hook entries"
+  not_ok "0.10.0 manifest requirements and nine ordered hook entries"
 else
-  ok "0.9.0 manifest preserves six events and registers nine ordered entries"
+  ok "0.10.0 manifest preserves six events and registers nine ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

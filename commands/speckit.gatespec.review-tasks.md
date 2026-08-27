@@ -64,9 +64,10 @@ commit in manual reviewer mode.
 2. Use review ID `REV-TASKS`, scope `TASKS`, and directory
    `<feature>/.gatespec/reviews/REV-TASKS/`. If `check-gate.sh task-review`
    already accepts a current seal, keep all receipt bytes read-only and return.
-   Select the active protocol deterministically: an approved Plan declaring 1
-   with no Source entry is legacy v1; a Plan declaring 2, or any feature with
-   `contracts/source-design.md`, is v2. Never downgrade a v2 feature.
+   Require the approved Plan, execution state, and all current receipts to use
+   Protocol 3. An active or unaccepted Protocol 1/2 feature fails closed and
+   returns through `gatespec.plan --revise`; only a valid Accepted legacy
+   delivery is historical, and it cannot start another review.
 3. Select the next round without guessing:
    - no prior files → `00`, Previous-Verdict-SHA256 `none`;
    - a complete prior BLOCKED round → `01` or `02`, chained to that verdict;
@@ -82,7 +83,12 @@ commit in manual reviewer mode.
    the C-sorted relative-path/TAB/file-hash design-attachment manifest, and
    tasks.md with CRLF normalized and only valid T### `[xX]` progress normalized
    to `[ ]`.
-   For v2, exclude the Source bundle from Design-Attachments-SHA256. Initialize
+   For v3, exclude the Source bundle from Design-Attachments-SHA256. Reproduce
+   Mode and Test-Control-Closure-SHA256 from the exact mandatory task section:
+   emit its exact heading plus LF, then each nonblank body line before the next
+   H2 in original order after stripping only a terminal CR, with one LF per
+   emitted line; hash those bytes.
+   Initialize
    execution state before the request. With Source enabled, initialize the IA
    template to its canonical empty state; without Source, IA is
    `not-applicable`. Before round 00 only, create and verify a clean local
@@ -96,37 +102,15 @@ commit in manual reviewer mode.
    handoff OID while changing the bound tasks definition; they do not create a
    second handoff. No implementation path or task progress may enter either
    commit.
-5. Write `round-<NN>-request.md` atomically with exactly this field/section
-   order. Replace values, omit angle brackets, and hash every raw byte before
-   the final Request-SHA256 field. Use the following only for legacy v1:
+5. Write `round-<NN>-request.md` atomically with exactly this Protocol 3
+   field/section order. Replace values, omit angle brackets, and hash every raw
+   byte before the final Request-SHA256 field. Test-Control-Mode and Closure
+   hash are always actual. REV-TASKS has no implementation Subject or lane
+   evidence, so the other three Test Control bindings are exactly
+   `not-applicable` even in isolated mode.
 
 ```markdown
-- **Protocol-Version**: `1`
-- **Review-ID**: `REV-TASKS`
-- **Round**: `<00|01|02>`
-- **Scope**: `TASKS`
-- **Spec-Content-SHA256**: `<lowercase 64-hex>`
-- **Plan-Content-SHA256**: `<lowercase 64-hex>`
-- **Design-Attachments-SHA256**: `<lowercase 64-hex>`
-- **Tasks-Definition-SHA256**: `<lowercase 64-hex>`
-- **Implementation-Baseline**: `not-applicable`
-- **Base-Commit**: `not-applicable`
-- **Subject-Commit**: `not-applicable`
-- **Task-IDs**: `none`
-- **Changed-Paths-SHA256**: `not-applicable`
-- **Previous-Verdict-SHA256**: `<none|prior Verdict-SHA256>`
-
-## Required Tests
-
-- Not run — task-plan review
-
-- **Request-SHA256**: `<lowercase 64-hex>`
-```
-
-For active Protocol v2, use this exact request instead:
-
-```markdown
-- **Protocol-Version**: `2`
+- **Protocol-Version**: `3`
 - **Review-ID**: `REV-TASKS`
 - **Round**: `<00|01|02>`
 - **Scope**: `TASKS`
@@ -134,6 +118,11 @@ For active Protocol v2, use this exact request instead:
 - **Plan-Content-SHA256**: `<lowercase 64-hex>`
 - **Design-Attachments-SHA256**: `<lowercase 64-hex; Source excluded>`
 - **Tasks-Definition-SHA256**: `<lowercase 64-hex>`
+- **Test-Control-Mode**: `<none|isolated>`
+- **Test-Control-Closure-SHA256**: `<lowercase 64-hex>`
+- **Test-Control-Subject-Manifest-SHA256**: `not-applicable`
+- **Default-OFF-Evidence-SHA256**: `not-applicable`
+- **Explicit-ON-Evidence-SHA256**: `not-applicable`
 - **Execution-Epoch**: `<E1|E2|...>`
 - **Source-Design-Content-SHA256**: `<lowercase 64-hex|not-applicable>`
 - **Implementation-Adjustments-SHA256**: `<empty IA raw hash|not-applicable>`
@@ -161,7 +150,7 @@ For active Protocol v2, use this exact request instead:
 ## Fresh reviewer judgment
 
 Review the approved Requirements/Design and native tasks from the request
-without editing them. A successful structural hook and the two closure matrices
+without editing them. A successful structural hook and the three closure sections
 are navigation, not proof. Open and inspect the underlying artifacts, every
 task, every referenced prior verdict item, and all named paths/symbols. Never
 infer semantic closure from a matrix row, trace token, changed tasks hash, test
@@ -173,11 +162,21 @@ all Contract refs, every Production task, every Verification task, phase-final
 checkpoint, mapped required test, dependency boundary, and earliest point at
 which each obligation is both implemented and testable. Then navigate every
 Prior Review Closure row to the exact `<verdict>#B<NN>` item, reproduce its raw
-complete-item SHA-256, validate its current Spec/Plan/Attachments plus v2 Source
+complete-item SHA-256, validate its current Spec/Plan/Attachments plus v3 Source
 basis, and prove that the named remediation tasks close the whole finding no
 later than Required-before. The all-`none` row is valid only when exhaustive
 search of the current chain and every basis-matching `*-retask` archive finds no
 BLOCKER item.
+
+When the current cycle follows `--retask`, compare every basis-matching retask
+archive's Test Control Closure. Require identical Mode and TC ID/surface/
+touchpoint/effect/switch/wiring/validator fields; only consumer/default-proof
+T### rebinding with unchanged meaning is allowed. A control-contract change
+cannot close a retask blocker and routes to `gatespec.plan --revise` plus fresh
+tasks/REV-TASKS.
+Also require the canonical Policy and copied TCE body to remain byte-identical.
+A new/changed TCE routes first to `gatespec.specify --revise`, then revised
+Plan and fresh tasks/REV-TASKS.
 
 Complete all of these fixed categories even after finding a blocker:
 
@@ -205,17 +204,71 @@ Complete all of these fixed categories even after finding a blocker:
    and
 9. every basis-matching prior BLOCKER, including repeated or reintroduced
    findings, with concrete closure rather than hash churn or restatement.
+10. the complete Test Control Closure: independently prove Mode, each TC-###
+   verification gap and production invariant, exact test-only surface and
+   production touchpoint, allowed effect/lifetime, switch/wiring/validator,
+   consumer, and default-build proof task. First validate the Plan's canonical
+   eight-field policy plus its byte-identical approved/legacy-none Requirements
+   TCE body. Apply a TCE only to its one allowlisted Rule and minimum stated
+   source-auditable replacement; tasks/review cannot create/change/delete/
+   broaden one or register a concrete hook through it. In `none` mode, search the whole
+   task plan and named code surface for a hidden or anticipated seam. In
+   `isolated` mode, prove every producer-to-test gap truly needs the control and
+   every control has a concrete consumer/removal boundary. Apply the canonical
+   source-root/language-marker/formal-api/control-model/touchpoint-shape/
+   switch-identifier/validator-path-marker checks unless that exact Rule has an
+   approved replacement. Always reject a validator that only echoes canonical
+   text, runtime activation, and a hidden synonym/common Debug/`BUILD_TESTING`
+   trigger. Without the corresponding TCE, also reject a fake `testonly`
+   namespace token with normal-namespace declarations, alias/wrapper exposure,
+   test-only dependency injection retained in production, and generic callback
+   or options-bag state. Formal product APIs cannot acquire testing
+   parameters/options/overloads/getters/state without a `formal-api` TCE: for example,
+   `Open(path, CheckpointCoordinatorOptions)`, a generic observer/options
+   surface, or an injected `AgentHost` constructor whose only consumer is a
+   test is a blocker even if the default path preserves behavior and no
+   `formal-api` TCE exactly authorizes its replacement. Require
+   canonical typed declarative single-purpose per-instance RAII controls
+   limited to named one-shot/count/barrier/time/random/fault/observation effects
+   unless a `control-model` TCE gives the exact replacement. An orphan is never
+   admissible.
+   Without a `touchpoint-shape` TCE, each named production function may have at most one visually contiguous
+   dedicated hook-macro guard block; the block contains only one `testonly`
+   call and feeds its result into the normal production error/result path.
+   Counting, waiting, fault selection, and observer dispatch must remain in
+   the registered test-only root (canonical `/src/testonly`, or the exact
+   `source-root` replacement), not be distributed through production code.
+   Only `touchpoint-shape` may replace guard/call/result/mechanics shape; only
+   `source-root` may replace that root. Crossing both requires both Rules;
+   `control-model` never authorizes production-side mechanics.
+   Independently estimate Test Control additions, churn, unique affected files,
+   and unique registered production touchpoints from concrete tasks. Record
+   those nonnegative ranges only in the verdict Audit, separate from Production;
+   PASS Mode none is four zeros, while BLOCKED Mode none with an undeclared
+   control reports its hidden-control range.
+   Require validator implementation/test tasks that derive every reported
+   manifest, coverage, and hit from current-lane configure/build/test and
+   present install/export/symbol outputs. Literal/precomputed hashes, a stable
+   canonical-row echo, and incomplete output discovery are blockers; the fresh
+   implementation reviewer must be able to enumerate/hash outputs independently.
+   Native-task registration; Closure/Audit/manifest/evidence/hash and clone
+   lifecycle; dedicated explicit opt-in/default OFF; no runtime/umbrella
+   activation; full OFF elision; Bash lanes with the same normal tests plus ON
+   consumers; actual-output derivation without literal/echo; named gaps, real
+   consumers, no orphans, and removal boundary are never exemptable. A row that
+   tries to weaken this floor or a newly needed deviation blocks to
+   `gatespec.specify --revise`, then a revised Plan and fresh tasks/REV-TASKS.
 
 Independently enforce Scope Contract conservation across that pass. All
 non-deferred CAPs must be covered through their FR/SC refs and executable tasks;
-CAP IDs do not enter Closure matrices. No task may implement a deferred CAP,
+CAP IDs do not enter Closure tables. No task may implement a deferred CAP,
 add unapproved external behavior, change Primary outcome, or silently remove a
 Retained baseline behavior or burden. Gold-plating and “helpful” adjacent
 optimization are blockers even when the implementation would be technically
 clean. Route a scope change only to `gatespec.specify --revise`; never infer
 admission from task detail.
 
-For source-enabled v2, the same exhaustive pass includes every approved SD<n>,
+For source-enabled v3, the same exhaustive pass includes every approved SD<n>,
 every SD-F path, SD-U declaration/symbol, SD-FLOW, SD-ALG invariant/bound,
 SD-FAIL behavior, SD-TEST trace, Source Change Manifest path, current Source
 content hash, empty IA baseline, execution epoch, Task-Handoff commit, and
@@ -230,8 +283,8 @@ If the chosen response to drift is a scope-changing split, require
 `gatespec.specify --revise`; never create sibling specs or impose LOC/file/
 checkpoint limits.
 
-Accumulate all independently actionable blockers across every matrix row and
-all nine categories before returning one verdict. Do not stop at the first
+Accumulate all independently actionable blockers across every closure row and
+all ten categories before returning one verdict. Do not stop at the first
 failure, cap findings, collapse unrelated defects into one vague item, or defer
 an already observable blocker to a later review round. Each `- BLOCKER:` item
 must name the affected artifact ref or prior Finding-SHA256, concrete task/path/
@@ -239,11 +292,24 @@ symbol evidence, and the missing or contradictory closure so the author can
 remediate the whole set in one pass.
 
 The adapter, or a manual fresh session whose returned text is supplied back to
-this no-input coordinator, returns exactly the active request Protocol-Version
-(`1` below for legacy; substitute `2` only for a v2 request):
+this no-input coordinator, returns exactly this Protocol 3 schema. Test Control
+Audit is mechanically parsed. For PASS, `Declared-Controls` is `none` in none
+mode or the complete canonical `TC-001, TC-002` list in isolated mode;
+Undeclared and Orphan are `none`; both proof fields are `not-applicable` in none
+mode and `pending-REV-FINAL` in isolated task review. BLOCKED may use `found`
+for Undeclared and/or a canonical TC list for Orphan, with corresponding
+concrete BLOCKER items. Test-Control-Scale is a task-backed nonnegative range
+estimate separate from Production. Its additions range never exceeds churn,
+and its touchpoints range contains the exact number of unique registered
+production `path::symbol` touchpoints. PASS none mode is exact all-zero;
+BLOCKED none mode with `found` reports the detected hidden-control range.
+REV-TASKS has no bound lane sidecars or rerun, so isolated proof fields remain
+`pending-REV-FINAL` even for BLOCKED; mode none always uses both
+`not-applicable`. Only a BLOCKED isolated REV-FINAL implementation review may
+use `failed`.
 
 ```markdown
-- **Protocol-Version**: `1`
+- **Protocol-Version**: `3`
 - **Review-ID**: `REV-TASKS`
 - **Round**: `<00|01|02>`
 - **Request-SHA256**: `<request value>`
@@ -255,6 +321,16 @@ this no-input coordinator, returns exactly the active request Protocol-Version
 ## Tests Run
 
 - Not run — task-plan review
+
+## Test Control Audit
+
+- **Mode**: `<none|isolated>`
+- **Declared-Controls**: `<none|TC-001, TC-002>`
+- **Undeclared-Controls**: `<none|found>`
+- **Orphan-Controls**: `<none|TC-001, TC-002>`
+- **Default-OFF-Proof**: `<not-applicable|pending-REV-FINAL>`
+- **Explicit-ON-Proof**: `<not-applicable|pending-REV-FINAL>`
+- **Test-Control-Scale**: `additions=<N|N..N>; churn=<N|N..N>; files=<N|N..N>; touchpoints=<N|N..N>`
 
 ## Blockers
 
@@ -274,7 +350,8 @@ this no-input coordinator, returns exactly the active request Protocol-Version
 PASS Blockers is exactly `- None`; BLOCKED contains at least one
 `- BLOCKER: ...`. Before persistence, validate field/section order, self-hash, matching
 Review-ID/Round/Request-SHA256, allowed platform, nonempty context ID,
-`Isolation: fresh`, and PASS/BLOCKED blocker semantics. Persist its exact bytes
+`Isolation: fresh`, exact Test Control Audit values, and PASS/BLOCKED blocker
+semantics. Persist its exact bytes
 as `round-<NN>-verdict.md`; never rewrite reviewer prose.
 
 ## Verdict handling
@@ -291,7 +368,7 @@ as `round-<NN>-verdict.md`; never rewrite reviewer prose.
   `YYYY-MM-DDTHH:MM:SSZ`; hash all raw bytes before Seal-SHA256.
 
 ```markdown
-- **Protocol-Version**: `1`
+- **Protocol-Version**: `3`
 - **Review-ID**: `REV-TASKS`
 - **Round**: `<00|01|02>`
 - **Status**: `PASS`
@@ -301,25 +378,22 @@ as `round-<NN>-verdict.md`; never rewrite reviewer prose.
 - **Plan-Content-SHA256**: `<request value>`
 - **Design-Attachments-SHA256**: `<request value>`
 - **Tasks-Definition-SHA256**: `<request value>`
-- **Implementation-Baseline**: `not-applicable`
-- **Base-Commit**: `not-applicable`
-- **Subject-Commit**: `not-applicable`
-- **Sealed-At**: `<UTC RFC3339>`
-- **Seal-SHA256**: `<lowercase 64-hex>`
-```
-
-For Protocol v2, insert the following request-bound fields after
-Tasks-Definition-SHA256 and before Implementation-Baseline, and insert
-Final-Delta-SHA256 after Subject-Commit. The seal Protocol-Version is `2`:
-
-```markdown
+- **Test-Control-Mode**: `<request value>`
+- **Test-Control-Closure-SHA256**: `<request value>`
+- **Test-Control-Subject-Manifest-SHA256**: `not-applicable`
+- **Default-OFF-Evidence-SHA256**: `not-applicable`
+- **Explicit-ON-Evidence-SHA256**: `not-applicable`
 - **Execution-Epoch**: `<request value>`
 - **Source-Design-Content-SHA256**: `<request value>`
 - **Implementation-Adjustments-SHA256**: `<request value>`
 - **Task-Handoff-Commit**: `<request value>`
 - **Preserved-Reviews-SHA256**: `<request value>`
-...
+- **Implementation-Baseline**: `not-applicable`
+- **Base-Commit**: `not-applicable`
+- **Subject-Commit**: `not-applicable`
 - **Final-Delta-SHA256**: `not-applicable`
+- **Sealed-At**: `<UTC RFC3339>`
+- **Seal-SHA256**: `<lowercase 64-hex>`
 ```
 
 After writing the seal, first validate its exact local schema/hash chain. Then

@@ -14,6 +14,10 @@ When the entry exists, reproduce the result verbatim and stop native tasks on
 every failure. Do not create, approve, repair, or omit Source content from this
 hook. A Draft, stale Plan/source baseline, stale reviewed/content hash, missing
 fresh REV-SOURCE PASS, shard drift, or orphan artifact blocks task generation.
+An enabled Source contract and its REV-SOURCE/execution state must remain
+Protocol 3; its Plan retains the canonical Policy plus exact approved/
+legacy-none Requirements TCE copy, and Source cannot add/change an exception or
+upgrade an older active Plan.
 
 Read the complete validated `contracts/source-design.md` plus every direct
 regular `.md` file below `contracts/source-design/` before returning success so the current
