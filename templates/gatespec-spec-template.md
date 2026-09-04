@@ -7,7 +7,9 @@
 
 **Status**: Draft
 
-**Input**: User description: "$ARGUMENTS"
+**Input**: Requirements intent: [normalized capability and observable semantics; never copy the raw request or prospective code design]
+
+**Requirements Abstraction Schema**: 1
 
 **Scope Contract Schema**: 1
 
@@ -20,6 +22,10 @@
   - **Status** transitions: Draft → Approved-Requirements (YYYY-MM-DD).
     Set ONLY by explicit user approval. Any post-approval edit MUST revert
     Status to Draft and go through diff re-approval (see ## Gate Approval).
+  - Requirements Abstraction Schema 1 keeps every Requirements-semantic area
+    independent of prospective code names and declaration shapes. Design is the
+    first stage that may create API/function/type/field/thread-component/source-
+    path names, signatures, return types, or concrete internal structures.
 -->
 
 ## Clarifications *(gatespec: mandatory)*
@@ -31,6 +37,8 @@
   Only approval-eligible human decisions belong here: each had ≥2 viable
   options with materially different human consequences. Purely technical
   matters are deferred to Design, not recorded as Clarifications or Defaults.
+  Compare semantic consequences only. A choice that differs solely by a new
+  name, signature, parameter/return type, or code shape belongs in Design.
   Stable R<n> IDs map adaptive decision cards to their explicit answers.
   Legacy concluded entries without an ID remain valid and are not rewritten.
   Format per session (compatible with core speckit.clarify):
@@ -106,6 +114,8 @@
   `constraint` only for an effective MUST; otherwise use `deferred`.
   Deferred means neither this delivery nor a future commitment and its Spec
   refs cell is exactly `none`. Pure implementation mechanisms create no CAP.
+  A user-supplied API or architecture sketch contributes only the capabilities
+  and observable constraints extracted from it; the sketch itself is discarded.
   Every non-deferred row contains at least one canonical FR-### and SC-### ref;
   collectively those rows cover every current FR and SC. Every Core completion
   ref belongs to a `core` row. CAP IDs do not enter tasks Closure tables.
@@ -152,6 +162,12 @@
   GATESPEC: Acceptance Scenarios MUST reference the FR IDs they exercise
   (e.g. "(covers FR-001, FR-003)"), so the gate can verify every FR has at
   least one scenario.
+
+  Requirements abstraction audit for Input, Clarifications, Defaults, Scope,
+  stories, FRs, SCs, and Assumptions:
+  1. Arbitrarily renaming prospective code symbols leaves the text true.
+  2. At least two implementation shapes can satisfy the text.
+  3. Acceptance can be described without inspecting a prospective declaration.
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)
@@ -191,6 +207,13 @@
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
+
+<!-- State capability, observable semantics, lifecycle, compatibility, and
+verifiable quantity/timing/resource/thread-affinity/ownership constraints only.
+Do not instantiate prospective API/function/class/enum/field/package/path names,
+signatures, parameter or return types, named internal threads/queues/tasks,
+algorithms, or data structures. Existing-system and indispensable external
+standard/wire anchors remain allowed when clearly identified as such. -->
 
 - **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
 - **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]

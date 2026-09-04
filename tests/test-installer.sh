@@ -226,6 +226,58 @@ else
   not_ok "rendered engineering-scenario decision triage contract"
 fi
 
+abstraction_contract_ok=1
+for skill in "$claude_spec" "$codex_spec"; do
+  for rule in \
+    '**Requirements Abstraction Schema**: 1' \
+    '**Input**: Requirements intent:' \
+    'Submit(...) -> Result<RequestHandle>' \
+    '`WorkerThread` becomes' \
+    '`Cancel()` becomes' \
+    'arbitrary renaming of every prospective' \
+    'at least two implementation shapes' \
+    'without inspecting a prospective' \
+    'explicit user request for one such shape does not make that shape `committed`'; do
+    grep -F "$rule" "$skill" >/dev/null || abstraction_contract_ok=0
+  done
+done
+for skill in "$claude_plan" "$codex_plan"; do
+  for rule in \
+    'Design is the first instantiation stage' \
+    'full names, signatures, parameter and' \
+    'gatespec.plan --revise' \
+    'gatespec.specify --revise' \
+    'fixed in Source Design or IA'; do
+    grep -F "$rule" "$skill" >/dev/null || abstraction_contract_ok=0
+  done
+done
+for skill in "$claude_source" "$codex_source" "$claude_refine" "$codex_refine" \
+             "$claude_review_source" "$codex_review_source" \
+             "$claude_review_tasks" "$codex_review_tasks" \
+             "$claude_review_implementation" "$codex_review_implementation"; do
+  grep -F 'gatespec.plan --revise' "$skill" >/dev/null || abstraction_contract_ok=0
+  grep -F 'gatespec.specify --revise' "$skill" >/dev/null || abstraction_contract_ok=0
+done
+for reviewer in "$claude_reviewer" "$codex_reviewer"; do
+  grep -F 'Requirements Abstraction Schema 1' "$reviewer" >/dev/null || abstraction_contract_ok=0
+  grep -F 'prospective-code instantiation stage' "$reviewer" >/dev/null || abstraction_contract_ok=0
+  grep -F 'bounded by Plan as Implementation Freedom' "$reviewer" >/dev/null || abstraction_contract_ok=0
+done
+for rule in \
+  '**Input**: Requirements intent:' \
+  '**Requirements Abstraction Schema**: 1' \
+  'Arbitrarily renaming prospective code symbols' \
+  'At least two implementation shapes'; do
+  grep -F "$rule" "$REPO/templates/gatespec-spec-template.md" >/dev/null || abstraction_contract_ok=0
+done
+grep -F 'Design is the first prospective-code instantiation stage' \
+  "$REPO/templates/gatespec-plan-template.md" >/dev/null || abstraction_contract_ok=0
+if [[ "$abstraction_contract_ok" -eq 1 ]]; then
+  ok "rendered Claude/Codex skills, reviewers, and templates preserve Requirements abstraction and revision routing"
+else
+  not_ok "rendered Requirements abstraction and revision-routing contract"
+fi
+
 scope_contract_ok=1
 for skill in "$claude_spec" "$codex_spec"; do
   for rule in \
@@ -282,7 +334,7 @@ for skill in "$claude_plan" "$codex_plan"; do
   for rule in \
     '**Design Evidence Schema**: 1' \
     'review-source completeness walkthrough' \
-    'language-native skeleton of key' \
+    'language-native skeleton with the full names' \
     'Mermaid and other diagrams are' \
     'Approved-Design created before the Implementation Review Contract or Design'; do
     grep -F "$rule" "$skill" >/dev/null || design_evidence_ok=0
@@ -708,7 +760,7 @@ hook_entry_count=$(awk '
   END {print count+0}
 ' extension.yml)
 
-if ! grep -F 'version: "0.10.0"' extension.yml >/dev/null ||
+if ! grep -F 'version: "0.11.0"' extension.yml >/dev/null ||
    ! grep -F 'speckit_version: ">=0.16.0,<0.17.0"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.tasks"' extension.yml >/dev/null ||
    ! grep -F -- '- "speckit.analyze"' extension.yml >/dev/null ||
@@ -726,9 +778,9 @@ if ! grep -F 'version: "0.10.0"' extension.yml >/dev/null ||
    [[ "$hook_entry_count" -ne 9 ]] ||
    [[ $(grep -c 'priority: 10' extension.yml || true) -ne 3 ]] ||
    [[ $(grep -c 'priority: 20' extension.yml || true) -ne 3 ]]; then
-  not_ok "0.10.0 manifest requirements and nine ordered hook entries"
+  not_ok "0.11.0 manifest requirements and nine ordered hook entries"
 else
-  ok "0.10.0 manifest preserves six events and registers nine ordered entries"
+  ok "0.11.0 manifest preserves six events and registers nine ordered entries"
 fi
 
 # Use the real spec-kit CLI when available. This validates manifest schema,

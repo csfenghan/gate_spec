@@ -285,6 +285,16 @@ clean. The reviewer cannot admit it. For warning-only legacy Requirements
 without the contract, do not invent a Scope Contract; enforce their approved
 observable Requirements and boundaries as written.
 
+When Requirements Abstraction Schema 1 is present, treat Design as the first
+prospective-code instantiation stage. Route a capability, observable error or
+terminal-state, async/cancellation, compatibility, resource, timing, affinity,
+or ownership change to `gatespec.specify --revise`. Route a semantically
+equivalent contract-bearing API/function/type/field/class/path rename,
+signature, parameter/return type, overload, declaration, or source-layout
+change to `gatespec.plan --revise`. Only an internal name or equivalent local
+shape explicitly bounded by Plan as Implementation Freedom may be chosen in
+Source or recorded by IA; it cannot change approved semantics.
+
 For REV-SOURCE, inspect the baseline repository and require a self-contained
 maintainer scenario, before/after, success/failure flow, complete SD-F path
 manifest, complete critical SD-U declarations, SD-FLOW lifecycle/state/data

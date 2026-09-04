@@ -1,4 +1,4 @@
-# GateSpec 0.10.0 Gate Protocol
+# GateSpec 0.11.0 Gate Protocol
 
 This document defines Requirements/Design gates, optional Source Design,
 native-task and implementation reviews, final delivery acceptance, hooks,
@@ -134,6 +134,67 @@ final human feature-content approval mechanism is the explicit approval of a
 ≤20-line Requirements summary containing “what I am least confident about”.
 Revision rounds show only the diff.
 
+## Requirements Abstraction protocol
+
+Every new or actively revised spec declares exact
+`**Requirements Abstraction Schema**: 1` and exactly one nonempty
+`**Input**: Requirements intent: ...`. Input is a normalized semantic summary,
+not a verbatim `$ARGUMENTS`/`User description` copy. GateSpec creates no sidecar
+or other artifact to preserve a discarded API or architecture sketch.
+
+Specify treats concrete user proposals as transient extraction sources. For
+example:
+
+- `Submit(...) -> Result<RequestHandle>` becomes non-waiting submission,
+  synchronous accepted/rejected distinction, and per-request cancellation for
+  accepted work;
+- `WorkerThread` becomes exactly one internal execution thread per instance
+  serializing the agreed task set;
+- `Cancel()` becomes a cancellation request for accepted work with one
+  deterministic terminal outcome.
+
+Input, Clarifications, Approved Defaults, Scope Contract, User Scenarios,
+Functional Requirements, Success Criteria, Assumptions, and the Requirements
+summary contain only capability, observable semantics, lifecycle,
+compatibility, and verifiable quantity/timing/resource/thread-affinity/ownership
+constraints. They do not instantiate prospective API/function/class/type/enum/
+field/namespace/package/source-path names, signatures, parameter/return types,
+overloads, complete declarations, or named internal threads, queues, task types,
+algorithms, and data structures. An explicit user sketch admits only an
+extracted capability to the Scope Contract. Existing-system compatibility
+anchors and indispensable external standard/wire identifiers remain legal when
+they do not instantiate the new interface.
+
+The abstraction audit asks whether arbitrary prospective-symbol renaming leaves
+each requirement true, at least two implementation shapes remain possible, and
+acceptance can be described without inspecting an uncreated declaration.
+Requirements decisions compare semantic consequences; a pure name/signature/
+type/shape fork is deferred directly to Design.
+
+Design is the first prospective-code instantiation stage. It fixes complete
+contract-bearing names, paths, signatures, parameter/return types, overloads,
+declarations, and class/type structure. A later semantically equivalent shape
+change returns to `gatespec.plan --revise`; an internal name or local shape that
+Plan explicitly bounded as Implementation Freedom may be chosen in Source or
+IA. Changes to capability, observable errors or terminal states, async/
+cancellation, compatibility, resource, timing, affinity, or ownership return to
+`gatespec.specify --revise`.
+
+The portable checker scans only the semantic regions above, excluding
+Constraint Basis/TCE, Delivery Estimate, and Gate metadata. It rejects a raw
+User-description Input and high-confidence source fences, declarations,
+signatures, concrete parameter/return types, and generic/qualified declaration
+shapes. Ambiguous backticked identifiers, call forms, error constants, named
+components, and paths produce located warnings for Specify to classify as an
+existing/external anchor or prospective identifier. These regular expressions
+detect text shapes only and never prove semantic abstraction.
+
+An Approved legacy spec without the schema blocks before Design when no real
+implementation progress exists. A checked implementation task, implementation-
+review receipt, real production delta, or valid Accepted delivery keeps the
+historical artifact byte-for-byte read-only with a warning. Draft absence,
+duplicate fields, and unknown versions fail closed.
+
 ## Scope Contract protocol
 
 New or actively revised spec.md declares exact
@@ -237,6 +298,13 @@ content hash computed before its Gate Approval H2. Spec re-approval therefore
 invalidates an old plan. Current plans also contain exactly one
 `**Design Evidence Schema**: 1`; another declared version fails closed rather
 than being downgraded.
+
+For Schema 1 Requirements, Plan reconstructs concrete code shape from approved
+semantics and repository facts rather than recovering a discarded user sketch.
+The modules/classes dimension fixes contract-bearing class/type and source-path
+structure; internal APIs/interactions fixes full names, signatures, parameter/
+return types, overloads, and declarations. Only explicitly bounded non-contract
+internals may remain Implementation Freedom.
 
 Plan never copies Scope Contract schema or table; its Requirements hash already
 binds them. Every design element and Technical basis traces to a non-deferred
@@ -740,6 +808,7 @@ local commit.
 |---|---|
 | Draft, no flag | Continue in place; enrich missing Schema 1 fields without recopying or renumbering decisions. |
 | Valid Approved artifact, Schema 1, and current review contract | Read-only; hand off. |
+| Legacy Approved Requirements missing Abstraction Schema | Revise before Design; checked implementation/review/product progress or Accepted delivery remains read-only with warning. |
 | Approved plan missing review contract or Schema 1 | Archive downstream work once, reopen via revise, enrich, diff re-approve. |
 | Legacy Approved Requirements missing Scope Contract | Revise before Design; if implementation progress already exists, retain read-only with warning. |
 | Legacy Approved Requirements missing Delivery Estimate | Warn, keep immutable, and require the next Design to supply the first estimate. |
@@ -847,7 +916,9 @@ direct local commit changes only acceptance.md and requires a clean worktree.
 
 ## Machine-check boundary
 
-Requirements checks cover the marker, mandatory sections, canonical Test
+Requirements checks cover the marker, mandatory sections, Requirements
+Abstraction Schema/Input, high-confidence declaration/type rejection and
+located ambiguous-identifier warnings within semantic regions, canonical Test
 Control Policy Exceptions schema/provenance (with legacy Approved implicit
 none), Scope Contract
 Schema 1 uniqueness/fields/CAP IDs/admissions/canonical FR-SC coverage/core

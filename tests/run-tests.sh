@@ -60,6 +60,14 @@ strip_scope_contract() {
   ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+strip_requirements_abstraction() {
+  local file="$1" tmp="$1.tmp"
+  awk '
+    /^\*\*Requirements Abstraction Schema\*\*:/ {next}
+    {print}
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 sha_stream() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum
@@ -564,11 +572,19 @@ EOF
 
 build_accepted_legacy_delivery() {
   local repo="$1" protocol="$2" feature original handoff baseline foundation subject_us final_subject
+  local spec_hash
   local final_base final_delta final_review acceptance epoch
   feature="$repo/specs/001-hot-reload"
   mkdir -p "$feature"
   cp "$TEST_TMP/good/spec.md" "$feature/spec.md"
   cp "$TEST_TMP/good/plan.md" "$feature/plan.md"
+  strip_requirements_abstraction "$feature/spec.md"
+  rewrite "$feature/spec.md" \
+    's/^\*\*Input\*\*:.*/**Input**: User description: "Historical accepted feature request"/'
+  seal "$feature/spec.md"
+  spec_hash=$(hash_of "$feature/spec.md")
+  rewrite "$feature/plan.md" \
+    "s/^\*\*Requirements Content-SHA256\*\*:.*/**Requirements Content-SHA256**: \`$spec_hash\`/"
   strip_test_control_policy "$feature/plan.md"
   rewrite "$feature/plan.md" "s/Protocol Version\*\*: \`3\`/Protocol Version**: \`$protocol\`/"
   seal "$feature/plan.md"
@@ -717,6 +733,8 @@ cat > "$TEST_TMP/good/spec.md" <<'EOF'
 <!-- path: gatespec -->
 # Feature Specification: Config hot reload
 **Status**: Approved-Requirements (2026-08-07)
+**Input**: Requirements intent: Apply supported configuration changes while retaining active client connections.
+**Requirements Abstraction Schema**: 1
 **Scope Contract Schema**: 1
 **Delivery Estimate Schema**: 1
 ## Clarifications
@@ -906,6 +924,152 @@ seal "$TEST_TMP/good/plan.md"
 
 expect pass spec "$TEST_TMP/good" "approved requirements pass"
 expect pass design "$TEST_TMP/good" "approved requirements and design pass"
+
+# Requirements Abstraction Schema -------------------------------------------
+clone_good abstraction-semantic-positive
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/abstraction-semantic-positive/spec.md" '/^## Success Criteria/i\
+- Submission does not wait for remote completion; callers synchronously distinguish acceptance from rejection; accepted work supports per-request cancellation; each instance uses exactly one internal execution thread to serialize the agreed task set.'
+seal "$TEST_TMP/abstraction-semantic-positive/spec.md"
+expect pass spec "$TEST_TMP/abstraction-semantic-positive" \
+  "capability, cancellation, and one-thread semantics remain valid Requirements"
+
+clone_good abstraction-existing-external-anchors
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/abstraction-existing-external-anchors/spec.md" '/^## Success Criteria/i\
+- Compatibility retains the existing `ConfigService` module and the externally standardized OpenAI HTTP wire behavior.'
+seal "$TEST_TMP/abstraction-existing-external-anchors/spec.md"
+expect pass spec "$TEST_TMP/abstraction-existing-external-anchors" \
+  "existing-system and external-standard anchors remain allowed with review warning" \
+  "review located identifier/call/component/path shapes"
+
+clone_good abstraction-schema-missing
+strip_requirements_abstraction "$TEST_TMP/abstraction-schema-missing/spec.md"
+seal "$TEST_TMP/abstraction-schema-missing/spec.md"
+expect fail spec "$TEST_TMP/abstraction-schema-missing" \
+  "unimplemented legacy Requirements without abstraction schema must be revised" \
+  "run gatespec.specify --revise before Design"
+
+clone_good abstraction-schema-duplicate
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/abstraction-schema-duplicate/spec.md" '/Requirements Abstraction Schema\*\*: 1/a\
+**Requirements Abstraction Schema**: 1'
+seal "$TEST_TMP/abstraction-schema-duplicate/spec.md"
+expect fail spec "$TEST_TMP/abstraction-schema-duplicate" \
+  "duplicate Requirements Abstraction schema fails" \
+  "expected exactly one '**Requirements Abstraction Schema**: 1'"
+
+clone_good abstraction-schema-unknown
+rewrite "$TEST_TMP/abstraction-schema-unknown/spec.md" \
+  's/Requirements Abstraction Schema\*\*: 1/Requirements Abstraction Schema**: 2/'
+seal "$TEST_TMP/abstraction-schema-unknown/spec.md"
+expect fail spec "$TEST_TMP/abstraction-schema-unknown" \
+  "unknown Requirements Abstraction schema fails closed" "unknown schemas are invalid"
+
+clone_good abstraction-schema-draft-missing
+strip_requirements_abstraction "$TEST_TMP/abstraction-schema-draft-missing/spec.md"
+rewrite "$TEST_TMP/abstraction-schema-draft-missing/spec.md" \
+  's/Approved-Requirements (2026-08-07)/Draft/'
+seal "$TEST_TMP/abstraction-schema-draft-missing/spec.md"
+expect fail spec "$TEST_TMP/abstraction-schema-draft-missing" \
+  "new or revised Draft requires Requirements Abstraction Schema 1" \
+  "Requirements Abstraction Schema 1 is required"
+
+clone_good abstraction-raw-input
+rewrite "$TEST_TMP/abstraction-raw-input/spec.md" \
+  's/^\*\*Input\*\*:.*/**Input**: User description: "Add a concrete submission API"/'
+seal "$TEST_TMP/abstraction-raw-input/spec.md"
+expect fail spec "$TEST_TMP/abstraction-raw-input" \
+  "raw User description Input fails abstraction" "raw 'User description' Input is forbidden"
+
+clone_good abstraction-source-fence
+# shellcheck disable=SC1004
+rewrite "$TEST_TMP/abstraction-source-fence/spec.md" '/^## Success Criteria/i\
+```cpp\
+class Dispatcher {};\
+```'
+seal "$TEST_TMP/abstraction-source-fence/spec.md"
+expect fail spec "$TEST_TMP/abstraction-source-fence" \
+  "source declaration code block fails abstraction" \
+  "prospective source declaration, signature, or concrete type shape"
+
+clone_good abstraction-function-signature
+rewrite "$TEST_TMP/abstraction-function-signature/spec.md" \
+  's/^- Deployment is single-node\./- Provide `Result<RequestHandle> Submit(...)` for accepted work./'
+seal "$TEST_TMP/abstraction-function-signature/spec.md"
+expect fail spec "$TEST_TMP/abstraction-function-signature" \
+  "explicit function and return signature fails abstraction" \
+  "prospective source declaration, signature, or concrete type shape"
+
+clone_good abstraction-concrete-generic
+rewrite "$TEST_TMP/abstraction-concrete-generic/spec.md" \
+  's/^- Deployment is single-node\./- Return std::shared_ptr<RequestHandle> to the caller./'
+seal "$TEST_TMP/abstraction-concrete-generic/spec.md"
+expect fail spec "$TEST_TMP/abstraction-concrete-generic" \
+  "qualified generic concrete type fails abstraction" \
+  "prospective source declaration, signature, or concrete type shape"
+
+clone_good abstraction-concrete-parameter
+rewrite "$TEST_TMP/abstraction-concrete-parameter/spec.md" \
+  's/^- Deployment is single-node\./- Expose void Submit(const WorkItem\& item); to callers./'
+seal "$TEST_TMP/abstraction-concrete-parameter/spec.md"
+expect fail spec "$TEST_TMP/abstraction-concrete-parameter" \
+  "concrete parameter and return declaration fails abstraction" \
+  "prospective source declaration, signature, or concrete type shape"
+
+for abstraction_decl in class interface; do
+  clone_good "abstraction-$abstraction_decl-declaration"
+  rewrite "$TEST_TMP/abstraction-$abstraction_decl-declaration/spec.md" \
+    "s/^- Deployment is single-node\\./- $abstraction_decl RequestHandle { cancel; }/"
+  seal "$TEST_TMP/abstraction-$abstraction_decl-declaration/spec.md"
+  expect fail spec "$TEST_TMP/abstraction-$abstraction_decl-declaration" \
+    "$abstraction_decl declaration fails abstraction" \
+    "prospective source declaration, signature, or concrete type shape"
+done
+
+clone_good abstraction-suspicious-warning
+rewrite "$TEST_TMP/abstraction-suspicious-warning/spec.md" \
+  's|^- Deployment is single-node\.|- The proposal mentions `Submit`, `submit`, Cancel(), REQUEST_REJECTED, WorkerThread, and src/new/dispatcher.cc; Specify must classify or remove them.|'
+seal "$TEST_TMP/abstraction-suspicious-warning/spec.md"
+expect pass spec "$TEST_TMP/abstraction-suspicious-warning" \
+  "simple identifiers, calls, errors, and component names produce a located warning" \
+  "review located identifier/call/component/path shapes"
+
+clone_good abstraction-excluded-metadata
+rewrite "$TEST_TMP/abstraction-excluded-metadata/spec.md" \
+  's/portable watcher; connections remain active\./Existing policy text names std::shared_ptr<LegacyAnchor>; connections remain active./'
+seal "$TEST_TMP/abstraction-excluded-metadata/spec.md"
+expect pass spec "$TEST_TMP/abstraction-excluded-metadata" \
+  "Constraint Basis and TCE metadata are excluded from abstraction scanning"
+
+clone_good abstraction-legacy-checked-progress
+strip_requirements_abstraction "$TEST_TMP/abstraction-legacy-checked-progress/spec.md"
+seal "$TEST_TMP/abstraction-legacy-checked-progress/spec.md"
+make_tasks "$TEST_TMP/abstraction-legacy-checked-progress"
+rewrite "$TEST_TMP/abstraction-legacy-checked-progress/tasks.md" 's/^- \[ \] T001/- [x] T001/'
+expect pass spec "$TEST_TMP/abstraction-legacy-checked-progress" \
+  "checked implementation progress preserves legacy abstraction wording read-only" \
+  "implementation progress or acceptance keeps it read-only"
+
+clone_good abstraction-legacy-review-progress
+strip_requirements_abstraction "$TEST_TMP/abstraction-legacy-review-progress/spec.md"
+seal "$TEST_TMP/abstraction-legacy-review-progress/spec.md"
+mkdir -p "$TEST_TMP/abstraction-legacy-review-progress/.gatespec/reviews/REV-FOUNDATION"
+printf '%s\n' '# implementation review began' \
+  > "$TEST_TMP/abstraction-legacy-review-progress/.gatespec/reviews/REV-FOUNDATION/round-00-request.md"
+expect pass spec "$TEST_TMP/abstraction-legacy-review-progress" \
+  "implementation review progress preserves legacy abstraction wording read-only" \
+  "implementation progress or acceptance keeps it read-only"
+
+abstraction_product_repo="$TEST_TMP/abstraction-legacy-product-progress-repo"
+abstraction_product_feature=$(init_feature_repo "$abstraction_product_repo")
+strip_requirements_abstraction "$abstraction_product_feature/spec.md"
+seal "$abstraction_product_feature/spec.md"
+mkdir -p "$abstraction_product_repo/src"
+printf '%s\n' 'int abstraction_delivery_started = 1;' > "$abstraction_product_repo/src/runtime.cc"
+expect pass spec "$abstraction_product_feature" \
+  "real production delta preserves legacy abstraction wording read-only" \
+  "implementation progress or acceptance keeps it read-only"
 
 # Scope Contract Schema ------------------------------------------------------
 clone_good scope-core-committed-deferred

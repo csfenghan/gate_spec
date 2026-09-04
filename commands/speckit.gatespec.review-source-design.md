@@ -103,6 +103,15 @@ missing path/symbol/flow/test, incompatibility with Spec/Plan, material
 uncertainty, or unbounded implementation choice is a BLOCKER. Reviewer PASS is
 engineering evidence, not user approval.
 
+Route abstraction-boundary findings precisely. A capability, observable error
+or terminal-state, async/cancellation, compatibility, resource, timing,
+affinity, or ownership change blocks to `gatespec.specify --revise`. A
+semantically equivalent API/function/type/field/class/path rename, signature,
+overload, or return-type change not covered by explicit Plan Implementation
+Freedom blocks to `gatespec.plan --revise`. A bounded internal name or local
+shape left free by Plan may be determined in Source and is not a revision by
+itself.
+
 Require Source to preserve the Plan's canonical Test Control Policy and exact
 Requirements-copied TCE overlay without registering any exact control or
 creating/changing/deleting/broadening an exception. A concrete `/src/testonly` path, production

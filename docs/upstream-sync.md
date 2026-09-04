@@ -6,7 +6,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 
 ## Verified compatibility window
 
-0.10.0 is verified against spec-kit `0.16.1.dev0` and declares
+0.11.0 is verified against spec-kit `0.16.1.dev0` and declares
 `>=0.16.0,<0.17.0`. Widen the upper bound only after completing this ritual.
 
 ## Contracts to compare
@@ -15,6 +15,7 @@ review contracts and rerun smoke tests; never patch `spec-kit/` or upstream
 |---|---|---|
 | Extension primary name `speckit.{ext}.{command}` | manifest commands | scratch install/schema validation |
 | `spec.md` User Scenarios & Testing / Requirements / Success Criteria | native tasks/implement | Requirements checker |
+| GateSpec Requirements Abstraction Schema 1 and normalized Input | gated specify/plan/review routing | abstraction checker + dual-platform behavioral smoke |
 | GateSpec spec Scope Contract Schema 1 | Design/Source/tasks/review scope boundary | Scope checker + rendered/manual conservation smoke |
 | `plan.md` Technical Context / Constitution Check / Project Structure | native tasks | Design checker |
 | tasks checklist `T###`, `[P]`, story labels, phase order | checkpoint rows and all three Closure sections | tasks-structure/Test Control fixtures |
@@ -181,6 +182,22 @@ In a scratch initialized project:
     files remain Production, their dedicated hook lines may also count toward
     Test-Control scale, and only default-OFF-proven surface-only objects,
     validators, and ordinary tests are excluded from Production.
+22. Give Claude and Codex the same request containing
+    `Result<RequestHandle> Submit(...)`, `WorkerThread`, and `Cancel()`. Confirm
+    each generated Schema 1 spec contains none of those prospective tokens but
+    preserves non-waiting submission, synchronous accepted/rejected distinction,
+    per-request cancellation with one terminal state, and exactly one internal
+    execution thread per instance serializing the agreed task set. Confirm Plan
+    independently chooses a complete concrete API/type/class/path shape. A pure
+    rename or semantically equivalent signature/return-type change must route to
+    `gatespec.plan --revise`; a Plan-bounded internal name may be chosen in
+    Source/IA; removing cancellation, changing submission synchrony/error
+    semantics, or changing the thread/resource constraint must route to
+    `gatespec.specify --revise`. Exercise checker positive anchors and negative
+    raw Input/source-fence/signature/generic/class/interface cases, then verify
+    Draft and unimplemented legacy specs block while progressed and Accepted
+    legacy deliveries remain warning-only/read-only. Finally render both agents'
+    installed skills and confirm the abstraction and routing rules are identical.
 
 Run `bash tests/run-all.sh` on Linux and macOS and verify `git status` remains
 clean. If a hook or artifact contract changed, retain the old upper version

@@ -268,6 +268,15 @@ optimization are blockers even when the implementation would be technically
 clean. Route a scope change only to `gatespec.specify --revise`; never infer
 admission from task detail.
 
+For any shape mismatch, preserve the abstraction boundary: route changed
+capability, error/terminal-state, async/cancellation, compatibility, resource,
+timing, affinity, or ownership semantics to `gatespec.specify --revise`; route
+a semantically equivalent contract-bearing rename, signature, parameter/return
+type, overload, declaration, class structure, or source layout to
+`gatespec.plan --revise`. Only internal names/local shapes explicitly left as
+bounded Implementation Freedom may be instantiated by Source/tasks without a
+Plan revision.
+
 For source-enabled v3, the same exhaustive pass includes every approved SD<n>,
 every SD-F path, SD-U declaration/symbol, SD-FLOW, SD-ALG invariant/bound,
 SD-FAIL behavior, SD-TEST trace, Source Change Manifest path, current Source

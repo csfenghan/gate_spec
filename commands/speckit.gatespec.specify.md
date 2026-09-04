@@ -38,6 +38,15 @@ Consider non-empty user input before proceeding.
 6. Establish one concrete Primary outcome before admitting scope. Complete that
    outcome with the smallest sufficient delivery; adjacent improvements are
    deferred by default and never receive item-by-item approval invitations.
+7. Requirements records capabilities, observable semantics, lifecycle,
+   compatibility, and verifiable quantity/timing/resource/thread-affinity/
+   ownership constraints. Design is the first stage allowed to create names for
+   new or changed APIs, functions, types, fields, namespaces/packages, internal
+   thread components, queues/tasks/algorithms/data structures, or source paths,
+   and to fix signatures, parameter types, overloads, and return types.
+8. Treat every concrete solution in the user's request as transient input.
+   Extract its Requirements-level intent, then discard the prospective names and
+   declarations; never preserve the sketch in Input or a sidecar artifact.
 
 ## Step 0: run peer extension hooks
 
@@ -67,7 +76,13 @@ If a current GateSpec spec exists:
   `--revise` unless a checked task, implementation-review receipt, or real
   production delta proves implementation is already underway. Progressed
   legacy delivery is warning-only and remains byte-for-byte read-only. If it
-  is a legacy approval without Delivery Estimate Schema 1, warn without
+  is a legacy approval without Requirements Abstraction Schema 1, block Design
+  and require `--revise` unless a checked implementation task, implementation-
+  review receipt, real production delta, or valid Accepted delivery shows that
+  implementation is already underway or complete. A progressed/Accepted legacy
+  spec remains byte-for-byte read-only with a warning; do not retrofit or scan
+  its historical wording as Schema 1. If it is a legacy approval without
+  Delivery Estimate Schema 1, warn without
   editing it; Design must add the first estimate. A legacy Approved
   Requirements artifact without `### Test Control Policy Exceptions` also
   remains read-only and deterministically means TCE Mode `none`; a Protocol 3
@@ -152,7 +167,31 @@ the participant, current state, trigger, and one observable result delivered
 now. Requirements stay at the level of concrete user workflow, external
 behavior, and retained restrictions. Source files, classes, threads, and other
 implementation choices remain Design matters and never create a capability
-row by themselves.
+row by themselves. A verifiable constraint such as one internal execution
+thread per instance serializing a stated task set is Requirements-level even
+though the thread's name and implementation are not. Existing-system
+compatibility anchors and indispensable external standard or wire identifiers
+may remain, but they never instantiate a prospective code interface.
+
+Before classifying scope or decisions, isolate any user-supplied implementation
+proposal. Do not quote it into `spec.md`, retain it in `$ARGUMENTS` form, or save
+it in research, notes, or another cross-stage file. Translate it into capability
+and observable semantics. These mappings are normative examples:
+
+- `Submit(...) -> Result<RequestHandle>` becomes “submission does not wait for
+  remote completion; the caller can synchronously distinguish acceptance from
+  rejection; accepted work provides per-request cancellation.”
+- `WorkerThread` becomes “each instance has exactly one internal execution
+  thread, which serially performs the agreed task set.”
+- `Cancel()` becomes “the caller can request cancellation of accepted work and
+  receives one deterministic terminal outcome.”
+
+Apply the same transformation to every prospective API/function/class/enum/
+field/namespace/package/source-path name, parameter or return type, overload or
+complete declaration, and named internal thread/queue/task/algorithm/data
+structure. Preserve only the capability, observable success/error and terminal-
+state semantics, lifecycle/compatibility effect, and verifiable resource,
+timing, affinity, or ownership constraint that motivated it.
 
 The canonical Test Control policy is a universal engineering boundary, not
 feature scope and not a per-hook human choice. Requirements names the
@@ -227,6 +266,14 @@ alternative, ask that higher-level decision instead. When classification is
 uncertain, use a blocking human decision. The user can cheaply veto any bucket
 with natural language such as `discuss <topic>`; promote it to a decision or
 pull a default into full discussion without creating stored workflow state.
+
+Requirements decision cards compare semantic consequences only. If every
+option preserves capability, observable behavior, compatibility, lifecycle,
+and measurable constraints and differs only in a prospective name, signature,
+parameter/return type, overload, declaration, class structure, algorithm, or
+source layout, ask nothing at Requirements: defer the fork to Design. An
+explicit user request for one such shape does not make that shape `committed`;
+only the extracted capability may enter the Scope Contract.
 
 Build an ephemeral dependency graph for blocking human decisions; never persist
 it, the classification inventory, or batch state as a new workflow artifact.
@@ -366,6 +413,13 @@ and Assumptions. Acceptance Scenario lines each carry `(covers FR-xxx)`;
 every unique FR is defined exactly once in Functional Requirements and has at
 least one scenario. Remove all template examples and residual markers.
 
+Replace the raw request with exactly one normalized
+`**Input**: Requirements intent: ...` line and write exact
+`**Requirements Abstraction Schema**: 1` once. Never preserve a `User
+description` Input or create a sidecar containing the discarded solution
+sketch. The normalized intent is semantic prose subject to the same abstraction
+rules as the Requirements body.
+
 Write exact `**Scope Contract Schema**: 1` and one `## Scope Contract`. Record
 Primary outcome, canonical Core completion SC refs, and Retained baseline
 (including `None — <reason>` when nothing material is retained). The table has
@@ -386,7 +440,27 @@ all-`none` row; Mode `approved` has continuous TCE IDs, allowlisted Rule tokens,
 one real concluded `R<n>` per row, precise replacement/consequence cells, no
 concrete hook registration, and no relaxation of the non-exemptable floor.
 Resolve findings in the text or return/promote the affected item to the
-inventory and present the next legal batch. Run:
+inventory and present the next legal batch.
+
+Perform a separate abstraction audit over Input, Clarifications, Approved
+Defaults, Scope Contract, User Scenarios & Testing, Requirements, Success
+Criteria, and Assumptions. Remove prospective API/function/class/enum/field/
+namespace/package/source-path names; signatures, parameter/return types,
+overloads, declarations; and named internal threads, queues, task types,
+algorithms, and data structures. For every statement prove all three:
+
+1. the requirement remains true after arbitrary renaming of every prospective
+   code symbol;
+2. at least two implementation shapes can satisfy it; and
+3. its acceptance result can be described without inspecting a prospective
+   source declaration.
+
+An existing-system anchor or indispensable external standard/wire identifier is
+allowed only when its role is explicit and it does not instantiate the new
+interface. The checker catches only high-confidence textual shapes; investigate
+every located warning and either establish such an allowed anchor or remove the
+prospective identifier. A clean checker result does not prove this semantic
+audit.
 
 Estimate the complete approved feature and write exact
 `**Delivery Estimate Schema**: 1` plus one `## Delivery Estimate`. Use
@@ -422,6 +496,8 @@ line “what I am least confident about”. Make clear that this one normal
 Requirements summary approval accepts both the Scope Contract and disclosed
 whole-feature size; neither adds another approval mechanism. Remind the user
 that any admission or classification can still be challenged before approval.
+The summary is also Requirements-semantic content: do not reintroduce any
+discarded prospective identifier, signature, type, or source shape.
 Wait for unambiguous approval. On requested
 changes, update the Draft and show only the diff since the previously shown
 version.

@@ -290,6 +290,16 @@ material; a material or uncertain departure is BLOCKED and exits normal
 implement for Source revision. Tests Run contains evidence for every Required
 Tests bullet: include that exact approved string plus non-empty result text.
 
+Classify the destination before routing a departure. A capability, observable
+error/terminal-state, async/cancellation, compatibility, resource, timing,
+affinity, or ownership change requires `gatespec.specify --revise`. A
+semantically equivalent contract-bearing name, signature, parameter/return
+type, overload, declaration, class structure, or source-layout change requires
+`gatespec.plan --revise` (and then Source revision when enabled). An internal
+name or equivalent local shape that Plan explicitly left as bounded
+Implementation Freedom may be recorded in Source or IA; IA still cannot alter a
+Source/Plan contract or any Test Control boundary.
+
 Also reconstruct Scope Contract coverage from CAP → FR/SC → bound Task-IDs and
 the diff. Require every implemented behavior to belong to a non-deferred CAP;
 block implementation of deferred CAPs, new unapproved external behavior,

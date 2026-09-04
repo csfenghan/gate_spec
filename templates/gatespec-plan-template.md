@@ -133,6 +133,10 @@ explicit Decision Log approval.]
   they do not receive D<n> IDs or individual approval fields.
   Constraints may add dimensions, but cannot delete, rename, or replace the
   six core dimensions below.
+  Design is the first prospective-code instantiation stage. Fix complete names,
+  signatures, parameter/return types, class/type structure, and source paths for
+  contract-bearing changes; only bounded non-contract internals may remain an
+  Implementation Freedom.
 -->
 
 1. **Thread / concurrency model**:
@@ -147,14 +151,14 @@ explicit Decision Log approval.]
    - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 3. **Key modules & classes**:
    - **Repository anchors**: [inspected existing modules, entry points, and types forming the integration surface]
-   - **Change map**: [each key existing/modified/new element, responsibility, boundary, and deliberately unchanged neighbor]
+   - **Change map**: [each key existing/modified/new module, class/type, and source path with responsibility, boundary, and deliberately unchanged neighbor]
    - **Dependency contract**: [directed callers/callees and allowed or prohibited dependency directions]
    - **Technical basis**: [non-deferred CAP/FR/D/constraint, inspected repository anchors, and attachment references]
 4. **Key internal APIs & interactions**:
    - **Existing entry points**: [actual symbols or protocols consumed by the design]
    - **Core contract skeleton**:
      ```[language]
-     [key type/interface/function declarations only; no implementation bodies]
+     [full names, signatures, parameter/return types, and key type/interface/field/function declarations only; no implementation bodies]
      ```
    - **Primary interaction**: [ordered main success and principal failure flows with execution context on material hops]
    - **Semantic contract**: [inputs, outputs, errors, pre/postconditions, thread affinity, and ownership]

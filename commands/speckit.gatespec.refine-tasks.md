@@ -224,6 +224,14 @@ Classify each audit gap before writing:
   human answer, widen an Implementation Freedom, or disguise a material Source
   departure as a task.
 
+Apply the Requirements abstraction boundary when choosing that destination.
+Changed capability, observable error/terminal-state, async/cancellation,
+compatibility, resource, timing, affinity, or ownership semantics are a
+Requirements gap. A semantically equivalent contract-bearing rename, signature,
+parameter/return type, overload, declaration, class structure, or source layout
+is a Design gap. Only an internal name/local shape explicitly left as bounded
+Implementation Freedom can be instantiated in Source/tasks or later IA.
+
 An estimate-drift Design gap routes specifically to
 `__SPECKIT_COMMAND_GATESPEC_PLAN__ --revise` so the aggregate estimate is
 updated and diff-only re-confirmed. If the user instead chooses a split that

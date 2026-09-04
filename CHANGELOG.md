@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.0 (2026-09-03)
+
+- Added Requirements Abstraction Schema 1 and normalized Requirements-intent
+  Input. Specify now extracts capability, observable/lifecycle/compatibility
+  semantics, and verifiable resource/timing/affinity/ownership constraints from
+  concrete user sketches, then discards prospective code names and declarations.
+- Made Design the first instantiation stage for contract-bearing API/function/
+  type/field/class/source names, signatures, parameter/return types, overloads,
+  and structure. Equivalent shape revisions route to Plan; bounded internal
+  freedoms may land in Source/IA; semantic changes return to Specify.
+- Added a semantic-region-only checker: raw User-description Input and high-
+  confidence source/declaration/type shapes fail, while ambiguous identifiers,
+  calls, constants, components, and paths produce located warnings. Constraint
+  Basis/TCE, estimates, and gate metadata remain outside this heuristic scan.
+- Added abstraction, routing, legacy Draft/progress/Accepted migration, and
+  dual-platform rendering/behavior fixtures while preserving spec-kit
+  `>=0.16.0,<0.17.0`, six hook events, nine entries, and Protocol v3.
+
 ## 0.10.0 (2026-08-27)
 
 - Added Review Protocol v3. New and revised Plans now bind an explicit Test

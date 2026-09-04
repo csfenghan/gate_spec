@@ -361,6 +361,7 @@ check_template_remnants() {
     '[primitives or serialization' '[FR/D/constraint' \
     '[key objects/buffers/handles' '[creation, share/borrow/copy/move' \
     '[material allocation' '[inspected existing modules' \
+    '[each key existing/modified/new module' '[full names, signatures' \
     '[each key existing/modified/new' '[directed callers/callees' \
     '[actual symbols or protocols' '[language]' \
     '[key type/interface/function' '[ordered main success' \
@@ -374,6 +375,7 @@ check_template_remnants() {
     '[inspected modules, callers' '[within|expanded|reduced]' \
     '[why Design stayed within' \
     '[participant, current state' '[existing behavior or burden' \
+    '[normalized capability and observable semantics' \
     '[observable capability]' '[adjacent capability]' \
     '[which part of the Primary outcome' '[why it is outside this delivery' \
     '[non-deferred CAP/FR/D/constraint' \
@@ -389,6 +391,138 @@ check_template_remnants() {
     found=1
   fi
   [[ "$found" -eq 0 ]] && pass "$(basename "$file"): no known template remnants"
+}
+
+extract_requirements_semantic_lines() {
+  # Emit <source-line><TAB><text> for Requirements-semantic content only.
+  # Constraint Basis/TCE, Delivery Estimate, and Gate metadata are intentionally
+  # excluded because they carry source-auditable technical identifiers.
+  awk '
+    function selected_h2(line) {
+      return line ~ /^## (Clarifications|Approved Defaults|Scope Contract|User Scenarios & Testing|Requirements|Success Criteria|Assumptions)([[:space:]]|$)/
+    }
+    {
+      if (in_comment) {
+        if (index($0, "-->")) in_comment=0
+        next
+      }
+      if (index($0, "<!--")) {
+        if (!index($0, "-->")) in_comment=1
+        next
+      }
+      if ($0 ~ /^\*\*Input\*\*:/) {
+        print NR "\t" $0
+        next
+      }
+      if ($0 ~ /^## /) semantic=selected_h2($0)
+      if (semantic) print NR "\t" $0
+    }
+  ' "$SPEC"
+}
+
+check_requirements_abstraction() {
+  local exact_schema all_schema status input_count normalized_count normalized_value
+  local semantic="$TMP_DIR/requirements-semantic-lines" high_confidence suspicious
+  exact_schema=$(grep -cFx '**Requirements Abstraction Schema**: 1' "$SPEC" || true)
+  all_schema=$(grep -cF '**Requirements Abstraction Schema**:' "$SPEC" || true)
+  status=$(grep -E '^\*\*Status\*\*:' "$SPEC" | head -1)
+
+  if [[ "$all_schema" -eq 0 ]]; then
+    if printf '%s\n' "$status" | grep -Eq '^\*\*Status\*\*: Approved-Requirements \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$'; then
+      if legacy_design_has_implementation_progress; then
+        warn "spec.md: legacy Approved Requirements has no Requirements Abstraction Schema; implementation progress or acceptance keeps it read-only"
+      else
+        fail "spec.md: legacy Approved Requirements has no Requirements Abstraction Schema and no implementation progress; run gatespec.specify --revise before Design"
+      fi
+    else
+      fail "spec.md Requirements abstraction: Requirements Abstraction Schema 1 is required for every new or revised spec"
+    fi
+    return
+  fi
+
+  if [[ "$exact_schema" -ne 1 || "$all_schema" -ne 1 ]]; then
+    fail "spec.md Requirements abstraction: expected exactly one '**Requirements Abstraction Schema**: 1' field; missing, duplicate, and unknown schemas are invalid"
+    return
+  fi
+  pass "spec.md Requirements abstraction: Schema 1 is declared exactly once"
+
+  input_count=$(grep -cE '^\*\*Input\*\*:' "$SPEC" || true)
+  normalized_count=$(grep -cE '^\*\*Input\*\*: Requirements intent:[[:space:]]*[^[:space:]].*$' "$SPEC" || true)
+  normalized_value=$(sed -n 's/^\*\*Input\*\*: Requirements intent:[[:space:]]*//p' "$SPEC")
+  if grep -nE '^\*\*Input\*\*:[[:space:]]*User description:' "$SPEC" >/dev/null 2>&1; then
+    fail "spec.md Requirements abstraction: raw 'User description' Input is forbidden; store one normalized 'Requirements intent' line"
+  elif [[ "$input_count" -ne 1 || "$normalized_count" -ne 1 ||
+          "$normalized_value" == \[* || "$normalized_value" == *'$ARGUMENTS'* ]]; then
+    fail "spec.md Requirements abstraction: expected exactly one non-placeholder '**Input**: Requirements intent: ...' line"
+  else
+    pass "spec.md Requirements abstraction: Input stores normalized intent rather than the raw request"
+  fi
+
+  extract_requirements_semantic_lines > "$semantic"
+
+  # These regular expressions deliberately reject only high-confidence source
+  # declaration/type shapes. They cannot establish semantic abstraction.
+  high_confidence=$(awk '
+    {
+      split_at=index($0, "\t")
+      source_line=substr($0, 1, split_at-1)
+      line=substr($0, split_at+1)
+      lower=tolower(line)
+      source_fence=(lower ~ /^[[:space:]]*(```|~~~)(c|c[+][+]|cc|cpp|cxx|h|hh|hpp|hxx|objc|swift|java|kotlin|go|rust|rs|python|py|typescript|ts|javascript|js|csharp|cs|scala)([[:space:]]|$)/)
+      class_decl=(line ~ /(^|[^[:alnum:]_])(class|struct|interface)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*([:{;]|extends[[:space:]]|implements[[:space:]])/ ||
+                  line ~ /(^|[^[:alnum:]_])enum[[:space:]]+(class[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[{;:]/)
+      generic_type=(line ~ /(^|[^[:alnum:]_])([A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Za-z0-9_]*<[^<>]+>/ ||
+                    line ~ /(^|[^[:alnum:]_])[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*<[^<>]+>/)
+      typed_function=(line ~ /(^|[^[:alnum:]_])(void|bool|char|short|int|long|float|double|size_t|string|auto|[A-Z][a-z][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_:]*)([[:space:]]*[*&]+)?[[:space:]]+[A-Za-z_][A-Za-z0-9_:]*\([^)]*\)/)
+      typed_parameter=(line ~ /[A-Za-z_][A-Za-z0-9_:]*\([[:space:]]*(const[[:space:]]+)?(void|bool|char|short|int|long|float|double|size_t|string|[A-Z][a-z][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_:<>]*)([[:space:]*&]+[A-Za-z_][A-Za-z0-9_]*)?[[:space:]]*[,)]/ ||
+                       line ~ /\([^)]*[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*([A-Z][a-z][A-Za-z0-9_<>:]*|string|number|boolean)([[:space:],)]|$)/)
+      language_decl=(line ~ /(^|[^[:alnum:]_])(def|fn|func|function)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/)
+      arrow_return=(line ~ /[A-Za-z_][A-Za-z0-9_:]*[[:space:]]*\([^)]*\)[[:space:]]*(->|→)[[:space:]]*[A-Za-z_]/ ||
+                    line ~ /\)[[:space:]]*:[[:space:]]*[A-Z][A-Za-z0-9_<>:]*/)
+      qualified_decl=(line ~ /(^|[^[:alnum:]_])[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_:<>]*([[:space:]]*[*&]+|[[:space:]]+)[A-Za-z_][A-Za-z0-9_]*[[:space:]]*([;=,)]|$)/)
+      field_decl=(line ~ /(^|[^[:alnum:]_])(bool|char|short|int|long|float|double|size_t|string|[A-Z][a-z][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_:<>]*)([[:space:]]*[*&]+|[[:space:]]+)[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(;|=)/)
+      type_alias=(line ~ /(^|[^[:alnum:]_])(typedef[[:space:]]+.+[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*;|using[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=|type[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=)/)
+      if (source_fence || class_decl || generic_type || typed_function || typed_parameter || language_decl || arrow_return || qualified_decl || field_decl || type_alias)
+        print source_line ":" line
+    }
+  ' "$semantic")
+  if [[ -n "$high_confidence" ]]; then
+    fail "spec.md Requirements abstraction: prospective source declaration, signature, or concrete type shape found in a semantic area"
+    printf '%s\n' "$high_confidence" | head -10 | sed 's/^/      /'
+  else
+    pass "spec.md Requirements abstraction: no high-confidence declaration/type shape was found"
+  fi
+
+  suspicious=$(awk '
+    {
+      split_at=index($0, "\t")
+      source_line=substr($0, 1, split_at-1)
+      line=substr($0, split_at+1)
+      simple_backtick=0
+      rest=line
+      while (match(rest, /`[A-Za-z_][A-Za-z0-9_]*`/)) {
+        token=substr(rest, RSTART+1, RLENGTH-2)
+        if (token != "core" && token != "committed" && token != "constraint" &&
+            token != "deferred" && token != "none") simple_backtick=1
+        rest=substr(rest, RSTART+RLENGTH)
+      }
+      backtick_identifier=(simple_backtick ||
+                           line ~ /`[A-Za-z_][A-Za-z0-9_]*::[A-Za-z0-9_:]+`/ ||
+                           line ~ /`[a-z][A-Za-z0-9_]*\/[A-Za-z0-9_.\/-]+`/)
+      call_shape=(line ~ /(^|[^[:alnum:]_])[A-Za-z_][A-Za-z0-9_:]*\([^)]*\)/)
+      error_constant=(line ~ /(^|[^[:alnum:]_])(ERR_[A-Z0-9_]+|E_[A-Z0-9_]+|[A-Z][A-Z0-9_]*(ERROR|FAILED|FAILURE|REJECTED))([^[:alnum:]_]|$)/)
+      named_component=(line ~ /(^|[^[:alnum:]_])[A-Z][A-Za-z0-9_]*(Thread|Worker|Queue|Task|Manager|Controller|Handle)([^[:alnum:]_]|$)/)
+      source_path=(line ~ /(^|[[:space:]`])[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+\.(c|cc|cpp|cxx|h|hh|hpp|hxx|go|rs|py|java|kt|swift|ts|js)([[:space:]`,.;:]|$)/)
+      if (backtick_identifier || call_shape || error_constant || named_component || source_path)
+        print source_line ":" line
+    }
+  ' "$semantic")
+  if [[ -n "$suspicious" ]]; then
+    warn "spec.md Requirements abstraction: review located identifier/call/component/path shapes; keep only explicit existing-system or indispensable external anchors"
+    printf '%s\n' "$suspicious" | head -10 | sed 's/^/      /'
+  else
+    pass "spec.md Requirements abstraction: no suspicious prospective identifier shape was located"
+  fi
 }
 
 delivery_field_values() {
@@ -1379,6 +1513,7 @@ check_spec_gate() {
   for section in 'Clarifications' 'Approved Defaults' 'Constraint Basis' 'User Scenarios & Testing' 'Requirements' 'Success Criteria'; do
     check_h2_once "$SPEC" "$section"
   done
+  check_requirements_abstraction
   check_clarifications
   check_defaults
   check_constraint_basis "$SPEC"

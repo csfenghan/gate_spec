@@ -383,6 +383,12 @@ call and dependency directions, execution contexts, object/resource ownership,
 and setup/runtime/teardown conventions. Distinguish inspected current facts
 from proposed names and mechanisms; never present an invented current symbol as
 repository evidence.
+Requirements Abstraction Schema 1 deliberately supplies no prospective code
+shape. Design is the first instantiation stage: derive concrete new/changed API,
+function, type, field, namespace/package, internal component, and source-path
+names plus signatures, parameter/return types, overloads, class structure, and
+material algorithm/data-structure choices from the approved semantics and
+repository evidence. Never treat a discarded user sketch as approved Design.
 Run independent read-only searches in parallel when supported. Classify every
 known design fork into exactly one conversational bucket:
 
@@ -403,6 +409,13 @@ known design fork into exactly one conversational bucket:
    choice is safe to defer. Record the choice and exact bounds in the existing
    section.
 
+A fork only among semantically equivalent names, signatures, parameter/return
+types, overloads, declarations, or class/source shapes is never a Requirements
+decision. Resolve a cross-module or contract-bearing shape here as a reasoned
+engineering determination (or a Design human decision only if the alternatives
+have materially different human consequences). Leave only bounded, non-contract
+internal shapes as Implementation Freedom.
+
 An option conflicting with approved Requirements or a constitution `MUST` is
 excluded rather than offered as a foil. A new `SHOULD` deviation or GateSpec
 constraint exemption is not a Design choice: return it to Requirements. In
@@ -422,6 +435,15 @@ engineering determination or Implementation Freedom. Any newly required
 external behavior, change to Primary outcome, removal of a retained burden, or
 activation of deferred scope stops planning and returns to
 `__SPECKIT_COMMAND_GATESPEC_SPECIFY__ --revise`.
+
+Use this revision boundary after Design as well: a name, signature, parameter or
+return type, overload, declaration, or class structure change with unchanged
+capability/behavior/compatibility/resource semantics returns to
+`gatespec.plan --revise`; an internal name or local shape that Plan explicitly
+left inside bounded Implementation Freedom may be fixed in Source Design or IA;
+a capability, success/error/terminal-state, async/cancellation, compatibility,
+resource, timing, affinity, or ownership change returns to
+`gatespec.specify --revise`.
 
 Build an ephemeral dependency graph only for human decisions; never persist the
 graph, classification inventory, or batch state as a workflow artifact.
@@ -586,11 +608,14 @@ Each core dimension is either one inline `N/A — <specific reason>` /
 3. Modules/classes records inspected repository anchors and entry points, then
    labels every key target element `existing`, `modified`, or `new`, with its
    responsibility, unchanged boundary, and allowed/prohibited dependency
-   directions.
+   directions. It fixes the complete class/type and source-path structure needed
+   for every contract-bearing addition or change.
 4. Internal APIs/interactions records actual existing entry points, a
-   language-native skeleton of key types/interfaces/functions without
-   implementation bodies, the primary success flow and principal failure flow
-   in call order, and input/output/error/thread-affinity/ownership semantics.
+   language-native skeleton with the full names, signatures, parameter and
+   return types, overloads, and declarations of key new/changed types,
+   interfaces, fields, and functions without implementation bodies, the primary
+   success flow and principal failure flow in call order, and input/output/error/
+   thread-affinity/ownership semantics.
    Use the smallest labeled pseudocode needed only when declarations and flow
    cannot express a core state, concurrency, or algorithm invariant. If no
    executable contract changes, use `N/A — <reason>` for the skeleton field.
@@ -634,6 +659,9 @@ and trace for each. If doing so would require a new design choice or material
 inference, close that gap as a human decision, engineering determination, or
 bounded Implementation Freedom before approval. Never render an Implementation
 Freedom as if the contract skeleton had already fixed it.
+Conversely, do not leave a contract-bearing API/type/class/source shape unnamed
+and force Source or tasks to invent it. Only explicitly bounded non-contract
+internal names and equivalent local shapes may remain free.
 
 Fill the exact mandatory `## Implementation Review Contract`. Keep protocol
 version `3` and the fixed Review Root, task-review, isolation, parallel, Git,

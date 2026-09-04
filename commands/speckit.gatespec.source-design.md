@@ -112,6 +112,15 @@ For every source-level fork, classify it as:
 3. bounded Implementation Freedom: externally equivalent local choices with
    exact limits.
 
+Source consumes, rather than reopens, every contract-bearing API/type/class/
+source shape fixed by Plan. A semantically equivalent rename, signature or
+return-type adjustment outside an explicit Implementation Freedom returns to
+`gatespec.plan --revise`. Source may choose and record an internal name or local
+shape only when Plan explicitly bounded it as Implementation Freedom; that does
+not admit new behavior. Any capability, error/terminal-state, async/
+cancellation, compatibility, resource, timing, affinity, or ownership change
+returns to `gatespec.specify --revise`.
+
 Use the existing scenario-first decision answer mechanism and adaptive maximum
 of four simple independent cards; complex/high-risk decisions are alone. No new
 approval mechanism is introduced. The user may cheaply promote or challenge a

@@ -12,7 +12,10 @@
   allowed only for a private helper split/merge, internal naming, an equivalent
   local algorithm, test organization, or an adjacent internal path required to
   implement an existing Source item. Material or uncertain departures block
-  implementation and require Source Design revision. IA can never add, change,
+  implementation and require Source Design revision. A contract-bearing but
+  semantically equivalent name/signature/type/class/path change requires Plan
+  revision; changed capability, behavior, compatibility, or resource semantics
+  requires Requirements revision. IA can never add, change,
   remove, rename, or relocate a Test Control, production touchpoint, hook build
   switch, hook wiring, or project validator, and cannot create/change/delete/
   broaden a Test Control policy exception. A late Test Control must be

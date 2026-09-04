@@ -15,6 +15,12 @@
   Markdown files below contracts/source-design/; every shard is part of both
   Source Design hashes and must be referenced from this entry.
 
+  Consume every contract-bearing name/signature/type/class/path fixed by Plan.
+  Source may instantiate only an internal name or local shape that Plan
+  explicitly left as bounded Implementation Freedom. An equivalent change to a
+  fixed code contract returns to Plan revision; a capability/behavior/
+  compatibility/resource-constraint change returns to Requirements revision.
+
   Before REV-SOURCE, re-estimate aggregate Production additions/churn/files
   from this complete bundle. Return to Plan revision when any upper bound is
   positive from zero, reaches 125% of approved Design, or a production path
@@ -52,7 +58,8 @@ ambiguity.]
   Use SD<n> only for a source-level choice with at least two viable options and
   materially different human consequences. Engineering determinations belong
   in the technical sections; equivalent local choices belong in Implementation
-  Freedoms. Source decisions reuse normal decision answers and final approval.
+  Freedoms only when Plan explicitly bounded them. Source decisions reuse normal
+  decision answers and final approval.
 -->
 
 ### SD1: [plain-language source decision]

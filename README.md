@@ -1,12 +1,13 @@
 # GateSpec
 
-GateSpec 0.10.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
+GateSpec 0.11.0 is a lightweight [spec-kit](https://github.com/github/spec-kit)
 extension with explicit Requirements/Design gates, optional reviewed Source
 Design, bounded native-task closure, fresh task/implementation receipts, and
 one final whole-delivery user acceptance around the unchanged native execution
 path. Requirements bind delivery to one observable Primary outcome through a
-versioned Scope Contract; Requirements and Design also disclose whole-feature
-delivery-size estimates. Protocol v3 additionally makes any production test
+versioned Scope Contract and remove prospective code shape before approval;
+Design is the first instantiation stage. Requirements and Design disclose
+whole-feature delivery-size estimates. Protocol v3 additionally makes any production test
 control explicit, isolated, default-OFF, and review-bound. Later reviews prevent
 silent scope, estimate, or test-control expansion. It does not fork or modify
 upstream commands.
@@ -59,6 +60,47 @@ fresh REV-SOURCE PASS is engineering evidence. Implementation checkpoints do
 not ask the user. After REV-FINAL, the user explicitly accepts the complete
 delivered implementation once; rejection records nothing and does not infer a
 remediation choice.
+
+## Requirements abstraction
+
+New or actively revised Requirements declare exact
+`**Requirements Abstraction Schema**: 1`. Their Input is one normalized
+`**Input**: Requirements intent: ...` line, never the raw user description.
+Specify treats a user-supplied API or architecture sketch as transient: it
+extracts capability, observable success/error and terminal-state behavior,
+lifecycle, compatibility, and verifiable resource/timing/thread-affinity/
+ownership constraints, then discards the prospective code shape. It creates no
+sidecar for the discarded sketch.
+
+Across Input, Clarifications, Defaults, Scope Contract, stories, FRs, SCs, and
+Assumptions, Requirements does not create names for new or changed APIs,
+functions, classes/types/enums, fields, namespaces/packages, internal thread or
+queue/task/algorithm/data-structure components, or source paths; nor does it fix
+signatures, parameter/return types, or overloads. Existing-system compatibility
+anchors and indispensable external standard/wire identifiers remain allowed
+when they do not instantiate the new interface. Verifiable semantics such as
+asynchronous acceptance, synchronous accepted/rejected distinction, per-request
+cancellation, deterministic terminal state, or exactly one internal execution
+thread per instance remain valid Requirements.
+
+Every Requirements statement must survive arbitrary prospective-symbol
+renaming, permit at least two implementation shapes, and be testable without
+inspecting a prospective declaration. Requirements cards compare semantic
+consequences only; an explicit user sketch admits only its extracted capability,
+not its names or types. Design is the first instantiation stage and fixes
+contract-bearing API/type/class/source names, signatures, return types, and
+structure. Later semantically equivalent shape changes route to
+`gatespec.plan --revise`; a name/local shape explicitly left as bounded
+Implementation Freedom may be fixed in Source or IA; capability, behavior,
+compatibility, or measurable constraint changes route to
+`gatespec.specify --revise`.
+
+The checker rejects raw `User description` Input and high-confidence source
+fences/declarations/signatures/concrete type shapes only within those semantic
+areas. It emits located warnings for ambiguous identifiers, calls, constants,
+component names, and paths so Specify can distinguish an allowed existing or
+external anchor from a prospective identifier. Regex cannot prove semantic
+abstraction; the prompt audit remains authoritative.
 
 ## Outcome-based scope admission
 
@@ -135,6 +177,12 @@ require `gatespec.specify --revise` when no implementation progress exists. A
 checked task, implementation-review receipt, or real production delta preserves
 the legacy artifact as warning-only and byte-for-byte read-only.
 
+Legacy Approved Requirements without Requirements Abstraction Schema 1 follow
+the same progress boundary: before implementation they must return through
+`gatespec.specify --revise`; checked work, an implementation review, real
+production delta, or an already Accepted delivery keeps them immutable with a
+warning. Draft, duplicate, and unknown abstraction schemas fail closed.
+
 ## Scenario-first decision triage
 
 Specify first classifies Requirements unknowns as a blocking human decision, a
@@ -201,6 +249,11 @@ current repository anchors and current-to-target component changes, dependency
 directions, core type/API skeletons and success/failure interactions, thread
 and resource-ownership contracts, external behavior, lifecycle, and exact
 technical basis.
+
+This is also the prospective-code instantiation boundary. The modules/classes
+and internal-API dimensions fix complete contract-bearing names, source paths,
+signatures, parameter/return types, overloads, and class/type structure. Only
+explicitly bounded non-contract internal shapes remain Implementation Freedom.
 
 This is evidence capture, not architecture-document generation. Plan does not
 create `architecture.md`, require Mermaid, or prescribe per-file edits and
@@ -438,6 +491,8 @@ constraints into the constitution.
 - default: continue a Draft in place; keep a valid approved artifact read-only;
 - an old Approved Requirements artifact without Scope Contract must be revised
   before Design unless implementation progress makes it warning-only/read-only;
+- an old Approved Requirements artifact without Requirements Abstraction Schema
+  1 follows the same revision/progress split; Accepted history remains read-only;
 - an old Approved-Design plan without Implementation Review Contract or Design
   Evidence Schema 1 is archived downstream, reopened as Draft, enriched, and
   diff re-approved before tasks;
@@ -515,7 +570,9 @@ Hooks never infer mode:
   (fixed to REV-FINAL);
 - `after_implement` priority 20 → `speckit.gatespec.accept-implementation`.
 
-The portable checker validates Scope Contract schema/fields/CAP IDs/admissions,
+The portable checker validates Requirements Abstraction Schema/Input plus
+high-confidence semantic-area shapes and located ambiguity warnings, Scope
+Contract schema/fields/CAP IDs/admissions,
 canonical FR/SC coverage and core closure, estimate schemas/ranges, structure,
 Closure/finding identity, hash chains, freshness, retask eligibility, PASS
 seals, legacy compatibility, and final Git metrics. Semantic estimate rechecks,

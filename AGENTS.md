@@ -1,6 +1,6 @@
 # GateSpec — Agent Handoff Guide
 
-GateSpec 0.10.0 is a personal spec-kit extension with human approval gates for
+GateSpec 0.11.0 is a personal spec-kit extension with human approval gates for
 Requirements and Design, optional reviewed Source Design, independent-context
 task/implementation reviews, bounded checked task closure, and one final
 whole-delivery acceptance. Requirements/Design disclose aggregate delivery
@@ -45,7 +45,16 @@ before changing the repository.
    improvements default to deferred without item-by-item approval. Plan copies
    no scope table; Design/Source/tasks/implementation preserve admitted CAPs,
    deferred exclusions, and Retained baseline through CAP → FR/SC → task.
-8. **Explicit isolated Test Controls**: Protocol 3 Design freezes only the
+8. **Requirements abstraction**: new/revised specs use Requirements Abstraction
+   Schema 1. Specify normalizes Input and discards user-supplied prospective API/
+   type/path sketches after extracting capability, observable semantics,
+   lifecycle, compatibility, and verifiable resource/timing/affinity/ownership
+   constraints. No Requirements-semantic area instantiates a new or changed code
+   name, declaration, signature, parameter/return type, or named internal
+   mechanism. Design is the first instantiation stage. Semantically equivalent
+   contract-shape changes return to Plan; bounded internal freedoms may land in
+   Source/IA; behavior or constraint changes return to Specify.
+9. **Explicit isolated Test Controls**: Protocol 3 Design freezes only the
    canonical policy plus a byte-identical copy of any Requirements-approved
    TCE overlay; native tasks alone registers exact TC-### controls in the third
    Closure section, with no per-hook approval. Formal product APIs normally gain
@@ -101,6 +110,12 @@ perform one bounded tasks.md-only closure refinement; the second validates it.
   tests, spec/review metadata, pure docs, and only source-declared reproducible
   generated outputs. Legacy Requirements warn; legacy Design blocks before
   tasks unless implementation progress already exists.
+- New or revised spec uses Requirements Abstraction Schema 1 and normalized
+  Requirements-intent Input. The checker scans only Requirements-semantic areas:
+  raw input and high-confidence declarations/types fail, ambiguous identifier
+  shapes warn, and regex never claims semantic proof. Legacy Approved specs
+  without it block before Design unless implementation progress or acceptance
+  makes them immutable warning-only history.
 - New or revised spec uses Scope Contract Schema 1 with one Primary outcome,
   Core completion refs, Retained baseline, and canonical CAP table. Every FR/SC
   maps to a non-deferred CAP; every non-deferred CAP maps an FR and SC; core
@@ -207,13 +222,15 @@ reasoned engineering determinations where applicable. Constraints may add
 fields, never replace them. Every design element traces to a non-deferred CAP
 and FR while preserving Retained baseline. Plan performs its own attachment
 consistency, decision-classification, and scope-conservation walkthrough before
-summary; upstream analyze runs only after tasks.
+summary; it is the first stage that fixes contract-bearing API/type/class/path
+names, signatures, return types, and structure. Upstream analyze runs only after
+tasks.
 
 ## Repository map
 
 | Path | Responsibility |
 |---|---|
-| `extension.yml` | 0.10.0 manifest, 6 hook events / 9 ordered entries |
+| `extension.yml` | 0.11.0 manifest, 6 hook events / 9 ordered entries |
 | `commands/speckit.gatespec.*.md` | public protocols and fixed hook entries |
 | `templates/` | spec/plan, Source Design, IA, and task Closure templates |
 | `reviewers/` | Codex/Claude custom reviewer source definitions |
